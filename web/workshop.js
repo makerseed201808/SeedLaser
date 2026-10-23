@@ -26,7 +26,8 @@ const W = {
   pose: { on: false, report: null, undo: [], redo: [], snap: 1 },
 };
 
-function freshProject() { return { disabled: [], edits: {}, poses: {}, sketches: {} }; }
+function freshProject() { return { disabled: [], edits: {}, poses: {}, sketches: {}, free: null }; }
+const isFree = () => W.name === 'FreeDesign';
 
 // 板件当前摆放矩阵：手动摆放过的优先
 function poseOf(p) { return (W.project.poses && W.project.poses[p.id]) || p.matrix; }
@@ -393,6 +394,8 @@ function renderPartsPanel() {
     if (view) view.resize();
   });
   panel.appendChild(head);
+  if (isFree()) panel.appendChild(freePartForm());
+  panel.classList.toggle('free', isFree());
   m.parts.forEach((p, i) => {
     const row = document.createElement('div');
     row.className = 'pp-row' + (p.id === W.selected ? ' sel' : '') + (dis.has(p.id) ? ' off' : '');
@@ -408,13 +411,19 @@ function renderPartsPanel() {
       <span class="pp-chip" style="background:#${WOOD[i % WOOD.length].toString(16)}">${String.fromCharCode(65 + (i % 26))}</span>
       <span class="pp-name" title="${esc(p.name)}">${moved}${esc(p.name)}${n ? `<em>${n}</em>` : ''}${badge}</span>
       <label class="pp-use" title="是否输出这块板"><input type="checkbox" ${dis.has(p.id) ? '' : 'checked'}>使用</label>
-      <button class="pp-edit" title="开孔 / 刻字">编辑</button>`;
+      <button class="pp-edit" title="二维草图编辑">编辑</button>` +
+      (isFree() ? `<button class="pp-mini" data-free="dup" title="复制这块板">⧉</button><button class="pp-mini" data-free="del" title="删除这块板">✕</button>` : '');
     row.addEventListener('click', (ev) => {
-      if (ev.target.closest('.pp-use') || ev.target.closest('.pp-edit')) return;
+      if (ev.target.closest('.pp-use') || ev.target.closest('.pp-edit') || ev.target.closest('.pp-mini') || ev.target.closest('input')) return;
       select(p.id === W.selected ? null : p.id);
     });
     row.querySelector('input').addEventListener('change', (ev) => setEnabled(p.id, ev.target.checked));
     row.querySelector('.pp-edit').addEventListener('click', () => openEditor(p.id));
+    if (isFree()) {
+      row.querySelector('[data-free=dup]').addEventListener('click', () => freeDuplicate(p.id));
+      row.querySelector('[data-free=del]').addEventListener('click', (ev) => freeDelete(p.id, ev.currentTarget));
+      row.querySelector('.pp-name').addEventListener('dblclick', () => freeRename(p.id, row.querySelector('.pp-name')));
+    }
     panel.appendChild(row);
   });
   if (Object.keys(W.project.poses || {}).length) {
@@ -427,7 +436,7 @@ function renderPartsPanel() {
   }
   const tip = document.createElement('div');
   tip.className = 'pp-tip';
-  tip.textContent = W.pose.on ? '点选板件后拖动摆放；Shift+点击多选' : '双击 3D 里的板件也可以编辑';
+  tip.textContent = isFree() ? '双击板名改名；用「🛠 3D 编辑器」把板拼起来，自动检查干涉' : '双击 3D 里的板件也可以编辑';
   panel.appendChild(tip);
 }
 
@@ -490,7 +499,8 @@ async function loadModel() {
   setNote('正在生成 3D 模型…');
   let m;
   try {
-    m = await api().get_model(name, window.SeedApp.collectParams());
+    m = await api().get_model(name, window.SeedApp.collectParams(),
+      isFree() ? { free: W.project.free, sketches: W.project.sketches, disabled: W.project.disabled } : null);
   } catch (err) {
     if (seq === W.loadSeq) setNote('3D 模型生成失败：' + err, 'error');
     return;
@@ -522,6 +532,7 @@ async function loadModel() {
     setNote('参数已改变，3D 编辑器里摆放过的板件位置可能需要重新调整（可点板件清单下方的「全部复位」）。', 'info');
     W.paramsDirty = false;
   } else if (!m.parts.length) setNote('这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
+  else if (m.free) setNote('自由设计：板件先平放在台面上。点「🛠 3D 编辑器」把它们拼起来，回来后自动检查有没有干涉。', 'info');
   else if (m.auto) {
     setNote(`自动装配（试验）：已拼上 ${m.placed} 块板${m.floating ? `，另有 ${m.floating} 块（隔板、盖子等）放在旁边` : ''}。` +
             '形状仅供参考，以图纸为准。', 'info');
@@ -605,7 +616,8 @@ async function openEditor(id) {
     ? `内部尺寸 ${fmt(p.w)} × ${fmt(p.h)} mm · 从外面看${p.mirror ? '（导出时这块板会翻面，刻字面朝外）' : ''}`
     : `约 ${fmt(p.bbox[2] - p.bbox[0])} × ${fmt(p.bbox[3] - p.bbox[1])} mm`;
   await sketchEd.open({
-    part: { name: p.name, sub, outline: partOutline(p), base: baseSig(p), thickness: W.model.thickness },
+    part: { name: p.name, sub: isFree() ? `约 ${fmt(p.w)} × ${fmt(p.h)} mm · 自由设计的板，外轮廓可以随意改` : sub, outline: partOutline(p),
+            base: isFree() ? undefined : baseSig(p), thickness: W.model.thickness, free: isFree() },
     sketch: sketchOf(id), legacy, fonts: W.fonts,
     onChange: (sk) => saveSketch(id, sk),
     onClose: (sk) => { saveSketch(id, sk); ED.part = null; attachView($('#view3d-canvas')); renderPartsPanel(); },
@@ -628,7 +640,7 @@ function attachView(el) {
 
 function saveSketch(id, sk) {
   W.project.sketches = W.project.sketches || {};
-  if (sk.modified) {
+  if (sk.modified || isFree()) {
     W.project.sketches[id] = { base: sk.base, items: sk.items };
     delete W.project.edits[id];          // 旧版开孔 / 刻字已迁移进草图
   } else {
@@ -643,6 +655,90 @@ function saveSketch(id, sk) {
 function closeEditor() {
   if (sketchEd && sketchEd.opened) sketchEd.close();
   ED.part = null;
+}
+
+// ------------------------------------------------------------------ 自由设计（FreeDesign）：板件增删改
+
+function rectSketch(w, h) {
+  return { items: [{ id: 'outline', mode: 'cut', role: 'outline',
+    paths: [{ closed: true, segs: [[0, 0, 0, 0, 0, 0], [w, 0, 0, 0, 0, 0], [w, h, 0, 0, 0, 0], [0, h, 0, 0, 0, 0]] }] }] };
+}
+
+function freeParts() {
+  if (!W.project.free) W.project.free = { parts: [] };
+  return W.project.free.parts;
+}
+
+function freePartForm() {
+  const box = document.createElement('div');
+  box.className = 'pp-free-new';
+  box.innerHTML = `<b>＋ 新建板件</b>
+    <label>宽<input type="number" data-k="w" value="${W.freeW || 100}" min="1" step="1"></label>
+    <label>高<input type="number" data-k="h" value="${W.freeH || 60}" min="1" step="1"></label>
+    <button class="primary">添加并编辑</button>`;
+  box.querySelector('button').addEventListener('click', () => {
+    const w = Math.max(1, Number(box.querySelector('[data-k=w]').value) || 100);
+    const h = Math.max(1, Number(box.querySelector('[data-k=h]').value) || 60);
+    W.freeW = w; W.freeH = h;
+    freeAdd(w, h, true);
+  });
+  return box;
+}
+
+async function freeAdd(w, h, edit, name, sketch) {
+  const id = 'p' + Date.now().toString(36) + (uidCounter++).toString(36);
+  const parts = freeParts();
+  parts.push({ id, name: name || `板件 ${parts.length + 1}`, w, h });
+  W.project.sketches[id] = sketch || rectSketch(w, h);
+  projectChanged();
+  await loadModel();
+  if (edit) openEditor(id);
+  return id;
+}
+
+function freeDuplicate(id) {
+  const src = freeParts().find((q) => q.id === id);
+  if (!src) return;
+  const sk = JSON.parse(JSON.stringify(W.project.sketches[id] || rectSketch(src.w, src.h)));
+  freeAdd(src.w, src.h, false, `${src.name} 副本`, sk);
+}
+
+function freeDelete(id, btn) {
+  if (!btn.classList.contains('confirm')) {          // 再点一次确认（WKWebView 里不用 confirm 对话框）
+    btn.classList.add('confirm');
+    btn.textContent = '删除?';
+    setTimeout(() => { btn.classList.remove('confirm'); btn.textContent = '✕'; }, 2500);
+    return;
+  }
+  W.project.free.parts = freeParts().filter((q) => q.id !== id);
+  delete W.project.sketches[id];
+  if (W.project.poses) delete W.project.poses[id];
+  W.project.disabled = W.project.disabled.filter((x) => x !== id);
+  if (W.selected === id) W.selected = null;
+  projectChanged();
+  loadModel();
+}
+
+function freeRename(id, el) {
+  const part = freeParts().find((q) => q.id === id);
+  if (!part) return;
+  const input = document.createElement('input');
+  input.className = 'pp-rename';
+  input.value = part.name;
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  const done = (save) => {
+    if (save && input.value.trim()) {
+      part.name = input.value.trim();
+      const mp = W.model && W.model.parts.find((q) => q.id === id);
+      if (mp) mp.name = part.name;
+      projectChanged();
+    }
+    renderPartsPanel();
+  };
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') done(true); if (ev.key === 'Escape') done(false); });
+  input.addEventListener('blur', () => done(true));
 }
 
 function debounce(fn, ms) {
@@ -1314,7 +1410,11 @@ document.addEventListener('keydown', (ev) => {
 // 用每块板上 3 个顶点前后的位置反求刚体变换，写回 W.project.poses（和「✋ 摆放」共用）。
 // 坐标：boxes（z 向上）经 view.root（绕 X -90°）变成 three / SketchForge（y 向上）。
 
+const SNAP_DIST = 10;     // mm：中心偏差在这以内
+const SNAP_ANGLE = 20;    // 度：方向偏差在这以内
+
 const SF = {
+  snap: true, neighbors: null, prevPoses: {},
   frame: null, origin: '*', ready: null, open: false,
   seq: 0, pending: new Map(),
   key: null,            // 已导入场景对应的 模型 token + 编辑 + 禁用
@@ -1425,35 +1525,164 @@ async function sfLoadScene() {
     worlds.forEach((w) => { for (let k = 0; k < w.length; k += 3) all.expandByPoint(new THREE.Vector3(w[k], w[k + 1], w[k + 2])); });
     const ctr = all.getCenter(new THREE.Vector3());
     SF.off = new THREE.Vector3(-Math.round(ctr.x), -all.min.y, -Math.round(ctr.z));
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      const w = worlds[i];
-      for (let k = 0; k < w.length; k += 3) { w[k] += SF.off.x; w[k + 1] += SF.off.y; w[k + 2] += SF.off.z; }
-      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
-      for (let k = 0; k < w.length; k += 3) {
-        minX = Math.min(minX, w[k]); maxX = Math.max(maxX, w[k]);
-        minY = Math.min(minY, w[k + 1]);
-        minZ = Math.min(minZ, w[k + 2]); maxZ = Math.max(maxZ, w[k + 2]);
-      }
-      const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
-      const local = new Array(w.length);
-      for (let k = 0; k < w.length; k += 3) {
-        local[k] = Math.round((w[k] - cx) * 1e4) / 1e4;
-        local[k + 1] = Math.round((w[k + 1] - minY) * 1e4) / 1e4;
-        local[k + 2] = Math.round((w[k + 2] - cz) * 1e4) / 1e4;
-      }
-      const idx = pickRefIdx(local);
-      const ref = idx.map((j) => new THREE.Vector3(local[j * 3] + cx, local[j * 3 + 1] + minY, local[j * 3 + 2] + cz).sub(SF.off));
-      const color = '#' + WOOD[W.model.parts.indexOf(p) % WOOD.length].toString(16).padStart(6, '0');
-      const r = await sfCommand('import_mesh', { positions: local, name: p.name, color, x: cx, z: cz, elevation: minY });
-      SF.map.set(r.object.id, { pid: p.id, idx, ref, base: new THREE.Matrix4().fromArray(poseOf(p)) });
-    }
+    for (let i = 0; i < parts.length; i++) await sfImportPart(parts[i], worlds[i]);
     if (SF.map.size) await sfCommand('select_objects', { ids: [] });
     await sfCommand('seedboxes_fit_view').catch(() => {});
     SF.key = sfSceneKey();
+    SF.prevPoses = currentPoses();
+    await sfLoadNeighbors(parts);
   } finally {
     SF.syncing = false;
   }
+}
+
+// 一块板 → 编辑器里的网格（w：three 世界坐标三角形，省略时按当前摆放计算）
+async function sfImportPart(p, w) {
+  if (!w) w = partWorldPositions(view.objects.get(p.id));
+  for (let k = 0; k < w.length; k += 3) { w[k] += SF.off.x; w[k + 1] += SF.off.y; w[k + 2] += SF.off.z; }
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (let k = 0; k < w.length; k += 3) {
+    minX = Math.min(minX, w[k]); maxX = Math.max(maxX, w[k]);
+    minY = Math.min(minY, w[k + 1]);
+    minZ = Math.min(minZ, w[k + 2]); maxZ = Math.max(maxZ, w[k + 2]);
+  }
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+  const local = new Array(w.length);
+  for (let k = 0; k < w.length; k += 3) {
+    local[k] = Math.round((w[k] - cx) * 1e4) / 1e4;
+    local[k + 1] = Math.round((w[k + 1] - minY) * 1e4) / 1e4;
+    local[k + 2] = Math.round((w[k + 2] - cz) * 1e4) / 1e4;
+  }
+  const idx = pickRefIdx(local);
+  const ref = idx.map((j) => new THREE.Vector3(local[j * 3] + cx, local[j * 3 + 1] + minY, local[j * 3 + 2] + cz).sub(SF.off));
+  const color = '#' + WOOD[W.model.parts.indexOf(p) % WOOD.length].toString(16).padStart(6, '0');
+  const r = await sfCommand('import_mesh', { positions: local, name: p.name, color, x: cx, z: cz, elevation: minY });
+  SF.map.set(r.object.id, { pid: p.id, idx, ref, base: new THREE.Matrix4().fromArray(poseOf(p)) });
+  return r.object.id;
+}
+
+// ---- 磁吸：板拖到和相邻板「正确的相对位置」附近时自动对准
+// 相邻关系取自生成器的装配结果（默认摆放下接触的板）。目标 = A 当前摆放 · A 默认⁻¹ · B 默认。
+
+function partById(id) { return W.model.parts.find((q) => q.id === id); }
+function currentPoses() {
+  const out = {};
+  SF.map.forEach((info) => { out[info.pid] = poseOf(partById(info.pid)).slice(); });
+  return out;
+}
+
+async function sfLoadNeighbors(parts) {
+  SF.neighbors = null;
+  if (!W.model.assembled || !W.model.token) return;
+  const ids = parts.map((p) => p.id);
+  const r = await api().check_pose(W.model.token, {}, ids, W.project.sketches || {});
+  if (r.error) return;
+  SF.neighbors = {};
+  ids.forEach((id) => { const q = r.report[id]; SF.neighbors[id] = q ? [...new Set([...q.touch, ...q.collide])] : []; });
+}
+
+function partCenter(p) {
+  const xs = p.outer.map((q) => q[0]); const ys = p.outer.map((q) => q[1]);
+  return new THREE.Vector3((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, (W.model.thickness || 3) / 2);
+}
+
+function poseError(M, T, c) {
+  const d = c.clone().applyMatrix4(M).distanceTo(c.clone().applyMatrix4(T));
+  // 相对旋转 M⁻¹T 的转角（两者含同样的镜像时也成立）
+  const e = M.clone().invert().multiply(T).elements;
+  const cos = Math.max(-1, Math.min(1, (e[0] + e[5] + e[10] - 1) / 2));
+  return { d, a: THREE.MathUtils.radToDeg(Math.acos(cos)) };
+}
+
+async function sfTrySnap(moved, prev) {
+  if (!SF.snap || !SF.neighbors || !moved.length) return false;
+  const movedSet = new Set(moved);
+  const M = (id, poses) => new THREE.Matrix4().fromArray(poses ? poses[id] : poseOf(partById(id)));
+  const D = (id) => new THREE.Matrix4().fromArray(partById(id).matrix);
+  let best = null;
+  moved.forEach((b) => {
+    const c = partCenter(partById(b));
+    (SF.neighbors[b] || []).forEach((a) => {
+      if (movedSet.has(a) || !prev[a]) return;
+      const target = M(a).multiply(D(a).invert()).multiply(D(b));
+      const now = poseError(M(b), target, c);
+      const before = prev[b] ? poseError(M(b, prev), target, c) : { d: Infinity, a: 0 };
+      if (now.d < 1e-3 && now.a < 0.05) return;                 // 已经对准
+      if (now.d > SNAP_DIST || now.a > SNAP_ANGLE) return;
+      if (now.d >= before.d - 1e-6 && now.a >= before.a - 1e-6) return;   // 正在远离：不抢回去
+      if (!best || now.d < best.d) best = { b, a, target, d: now.d };
+    });
+  });
+  if (!best) return false;
+  const delta = best.target.clone().multiply(M(best.b).invert());
+  W.project.poses = W.project.poses || {};
+  moved.forEach((id) => {
+    const p = partById(id);
+    const arr = delta.clone().multiply(M(id)).toArray().map((x) => Math.round(x * 1e4) / 1e4);
+    if (arr.every((x, k) => Math.abs(x - p.matrix[k]) < 1e-3)) delete W.project.poses[id]; else W.project.poses[id] = arr;
+    const o = view.objects.get(id);
+    if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
+  });
+  // 编辑器里换成对准后的网格
+  const old = [...SF.map.entries()].filter(([, info]) => movedSet.has(info.pid)).map(([sid]) => sid);
+  await sfCommand('delete_objects', { ids: old });
+  old.forEach((sid) => SF.map.delete(sid));
+  const fresh = [];
+  for (const id of moved) fresh.push(await sfImportPart(partById(id)));
+  await sfCommand('select_objects', { ids: fresh });
+  sfFlash(`🧲 ${nameOf(best.b)} 已吸附到 ${nameOf(best.a)}`);
+  return true;
+}
+
+function sfFlash(text) {
+  const el = $('#sf-msg');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove('hidden');
+  clearTimeout(sfFlash.t);
+  sfFlash.t = setTimeout(() => el.classList.add('hidden'), 2200);
+}
+
+// 一键装配：全部回到生成器的装配位置；拆开平铺：所有板平放在台面上
+async function sfAssembleAll() {
+  W.project.poses = {};
+  await sfReloadPoses('✓ 已一键装配');
+}
+
+async function sfExplode() {
+  const dis = new Set(W.project.disabled);
+  const parts = W.model.parts.filter((p) => !dis.has(p.id) && p.id !== 'reference');
+  const gap = 12;
+  const boxes = parts.map((p) => {
+    const xs = p.outer.map((q) => q[0]); const ys = p.outer.map((q) => q[1]);
+    return { p, x0: Math.min(...xs), y0: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  });
+  const total = boxes.reduce((s, b) => s + (b.w + gap) * (b.h + gap), 0);
+  const rowW = Math.max(Math.sqrt(total) * 1.3, ...boxes.map((b) => b.w));
+  let x = 0, y = 0, rowH = 0;
+  const placed = [];
+  boxes.sort((a, b) => b.h - a.h).forEach((b) => {
+    if (x > 0 && x + b.w > rowW) { x = 0; y += rowH + gap; rowH = 0; }
+    placed.push({ b, x, y });
+    x += b.w + gap; rowH = Math.max(rowH, b.h);
+  });
+  const W0 = Math.max(...placed.map((q) => q.x + q.b.w)), H0 = y + rowH;
+  W.project.poses = {};
+  placed.forEach(({ b, x: px, y: py }) => {
+    W.project.poses[b.p.id] = new THREE.Matrix4().makeTranslation(px - b.x0 - W0 / 2, py - b.y0 - H0 / 2, 0).toArray();
+  });
+  await sfReloadPoses('已拆开平铺：把板一块块拖回去试试（靠近正确位置会自动吸附）');
+}
+
+async function sfReloadPoses(msg) {
+  if (!W.model) return;
+  W.model.parts.forEach((p) => {
+    const o = view.objects.get(p.id);
+    if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
+  });
+  projectChanged();
+  await sfLoadScene();
+  sfFlash(msg);
 }
 
 // SketchForge 对象 → 指定顶点的世界坐标（与 WorkplaneViewport 的变换一致）
@@ -1503,6 +1732,11 @@ async function sfSync() {
     W.project.disabled = [...disabled];
     SF.stats = stats;
     projectChanged();
+    const prev = SF.prevPoses || {};
+    const now = currentPoses();
+    const moved = Object.keys(now).filter((id) => prev[id] && now[id].some((v, k) => Math.abs(v - prev[id][k]) > 1e-3));
+    if (moved.length) await sfTrySnap(moved, prev);
+    SF.prevPoses = currentPoses();
   } catch (err) {
     console.warn('sfSync', err);
   } finally {
@@ -1530,13 +1764,26 @@ async function openSketchForge() {
       await sfLoadScene();
     }
     loading.classList.add('hidden');
-    if (!$('#sf-host .sf-back')) {
-      const back = document.createElement('button');
-      back.className = 'sf-back';
-      back.textContent = '✓ 完成 · 返回 SeedBoxes';
-      back.title = '把摆放结果同步回 SeedBoxes（也可以点左上角「主页」）';
-      back.addEventListener('click', closeSketchForge);
-      $('#sf-host').appendChild(back);
+    if (!$('#sf-host .sf-bar')) {
+      const bar = document.createElement('div');
+      bar.className = 'sf-bar';
+      bar.innerHTML = '<button data-sf="assemble" title="所有板回到生成器算好的装配位置">一键装配</button>' +
+        '<button data-sf="explode" title="把所有板平放在台面上，练习手动拼装">拆开平铺</button>' +
+        '<button data-sf="snap" class="on" title="板拖到正确位置附近时自动对准相邻的板">🧲 磁吸</button>' +
+        '<button data-sf="back" class="sf-back">✓ 完成 · 返回 SeedBoxes</button>';
+      bar.querySelector('[data-sf=back]').addEventListener('click', closeSketchForge);
+      bar.querySelector('[data-sf=assemble]').addEventListener('click', () => sfAssembleAll());
+      bar.querySelector('[data-sf=explode]').addEventListener('click', () => sfExplode());
+      bar.querySelector('[data-sf=snap]').addEventListener('click', (ev) => {
+        SF.snap = !SF.snap;
+        ev.currentTarget.classList.toggle('on', SF.snap);
+        sfFlash(SF.snap ? '磁吸已打开' : '磁吸已关闭');
+      });
+      const msg = document.createElement('div');
+      msg.id = 'sf-msg';
+      msg.className = 'sf-msg hidden';
+      $('#sf-host').append(bar, msg);
+      if (!W.model.assembled) bar.querySelectorAll('[data-sf=assemble],[data-sf=snap]').forEach((b) => { b.disabled = true; b.title = '这个生成器没有装配信息'; });
     }
   } catch (err) {
     loading.textContent = String(err.message || err);
@@ -1576,6 +1823,7 @@ function setPartsPanelVisible(on) {
 // ------------------------------------------------------------------ 对外接口（app.js 调用）
 
 function hasContent() {
+  if (isFree()) return true;
   return W.project.disabled.length > 0 || Object.values(W.project.edits).some((l) => l && l.length)
     || Object.keys(W.project.poses || {}).length > 0 || Object.keys(W.project.sketches || {}).length > 0;
 }
@@ -1601,6 +1849,13 @@ window.SeedWorkshop = {
   },
   formReady() {
     W.stale = true;
+    if (isFree()) {
+      if (!freeParts().length) {
+        freeParts().push({ id: 'p1', name: '板件 1', w: 100, h: 60 });
+        W.project.sketches.p1 = rectSketch(100, 60);
+      }
+      if (W.mode !== '3d') { setMode('3d'); return; }
+    }
     if (W.mode === '3d') loadModel();
   },
   getProject() {
@@ -1608,12 +1863,14 @@ window.SeedWorkshop = {
     const edits = {};
     Object.entries(W.project.edits).forEach(([k, v]) => { if (v && v.length) edits[k] = v; });
     return { disabled: [...W.project.disabled], edits, poses: { ...(W.project.poses || {}) },
-             sketches: JSON.parse(JSON.stringify(W.project.sketches || {})) };
+             sketches: JSON.parse(JSON.stringify(W.project.sketches || {})),
+             free: W.project.free ? JSON.parse(JSON.stringify(W.project.free)) : null };
   },
   setProject(p) {
     W.project = { disabled: [...(p.disabled || [])], edits: JSON.parse(JSON.stringify(p.edits || {})),
                   poses: JSON.parse(JSON.stringify(p.poses || {})),
-                  sketches: JSON.parse(JSON.stringify(p.sketches || {})) };
+                  sketches: JSON.parse(JSON.stringify(p.sketches || {})),
+                  free: p.free ? JSON.parse(JSON.stringify(p.free)) : null };
     W.pose.undo = []; W.pose.redo = [];
     W.stale = true;
     if (W.mode === '3d') loadModel();
@@ -1644,6 +1901,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     W, THREE,
     get view() { return view; },
     get poser() { return poser; },
+    get sketchEd() { return sketchEd; },
     SF, sfCommand, sfSync, openSketchForge, closeSketchForge,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {

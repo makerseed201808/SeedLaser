@@ -21,6 +21,7 @@ import boxes.edges as boxes_edges
 import boxes.generators as gen_module
 
 import model3d
+import freedesign
 
 
 # 边缘字符 (e/f/F/...) → 描述（如 "Straight Edge"），由 boxes 提供
@@ -338,6 +339,9 @@ def _init_generators() -> None:
                 group.add(cls)
             except Exception as exc:
                 _FAILED_GENERATORS.append((full_name, f"{type(exc).__name__}: {exc}"))
+        # 自由设计：不进分组列表，由首页入口打开
+        freedesign.FreeDesign.UI = "web"
+        _GENERATORS["FreeDesign"] = freedesign.FreeDesign
         _INITIALIZED = True
 
 
@@ -540,11 +544,12 @@ class Api:
         try:
             instance = _new_instance(cls)
             HIDDEN = {"help", "format", "output"}
+            only = {"thickness", "burn", "reference"} if name == "FreeDesign" else None
             groups: list[dict[str, Any]] = []
             for arg_group in instance.argparser._action_groups:
                 params = []
                 for action in arg_group._group_actions:
-                    if action.dest in HIDDEN:
+                    if action.dest in HIDDEN or (only is not None and action.dest not in only):
                         continue
                     params.append(self._describe_action(action))
                 if params:
@@ -624,10 +629,11 @@ class Api:
 
     # --------------------------------------------------------- 3D / 局部修改
 
-    def get_model(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+    def get_model(self, name: str, params: dict[str, Any], project: dict[str, Any] | None = None) -> dict[str, Any]:
         """每块零件的精确轮廓（名义坐标系）+ 3D 摆放矩阵.
-        返回的 token 供 check_pose 复用几何（避免前端回传大量轮廓点）。"""
-        result = self._render(name, params, fmt="svg", to_file=None, model=True)
+        返回的 token 供 check_pose 复用几何（避免前端回传大量轮廓点）。
+        自由设计（FreeDesign）的板件来自 project。"""
+        result = self._render(name, params, fmt="svg", to_file=None, model=True, project=project)
         if "parts" in result:
             import copy
             token = f"m{next(_MODEL_SEQ)}"
@@ -825,6 +831,26 @@ class Api:
                 instance.metadata["url"] = ""
                 instance.metadata["url_short"] = ""
                 instance.qr_code = False
+                if name == "FreeDesign":
+                    if model:
+                        parts = freedesign.model_parts(project)
+                        return {"assembled": False, "dims": None, "bounds": None, "free": True,
+                                "thickness": float(instance.thickness), "parts": parts}
+                    instance.design = project or {}
+                    instance.open()
+                    instance.render()
+                    data = instance.close()
+                    instance = None
+                    if data is None:
+                        return {"error": "渲染失败：无输出"}
+                    raw = data.getvalue() if hasattr(data, "getvalue") else bytes(data)
+                    if to_file:
+                        with open(to_file, "wb") as f:
+                            f.write(raw)
+                        return {"ok": True, "bytes": len(raw), "notes": []}
+                    if fmt in ("svg", "svg_Ponoko"):
+                        return {"svg": raw.decode("utf-8"), "notes": []}
+                    return {"ok": True, "bytes": len(raw), "notes": []}
                 instance.open()
                 need_rec = model or _project_has_content(project)
                 rec = model3d.Recorder(instance) if need_rec else None

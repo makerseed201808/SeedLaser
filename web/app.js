@@ -251,7 +251,7 @@ async function selectGenerator(name) {
   $$('#group-list .gen-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.name === name);
   });
-  $('#gen-name').textContent = name;
+  $('#gen-name').textContent = name === 'FreeDesign' ? '自由设计' : name;
   $('#gen-desc').textContent = '加载中…';
   const ownerGroup = state.byName.get(name);
   $('#editor-bc-group').textContent = ownerGroup ? ownerGroup.title : '分组';
@@ -284,13 +284,51 @@ async function selectGenerator(name) {
     $('#param-form').innerHTML = `<div class="preview-error">加载失败：${escapeHtml(String(err))}</div>`;
   }
 
-  if (imgRes.status === 'fulfilled' && imgRes.value && imgRes.value.data) {
+  if (name !== 'FreeDesign' && imgRes.status === 'fulfilled' && imgRes.value && imgRes.value.data) {
     $('#sample-img').src = imgRes.value.data;
     $('#sample-card').classList.remove('hidden');
     const isRendered = imgRes.value.kind === 'rendered';
     $('#sample-card').classList.toggle('is-rendered', isRendered);
     $('.sample-caption').textContent = isRendered ? '示意图（自动渲染）' : '作品参考图';
   }
+}
+
+// 常用材料：选中后填入板厚和激光补偿（burn）
+const MATERIALS = [
+  { name: '椴木板 3 mm', t: 3, burn: 0.1 },
+  { name: '椴木板 5 mm', t: 5, burn: 0.1 },
+  { name: '亚克力 3 mm', t: 3, burn: 0.08 },
+  { name: '亚克力 5 mm', t: 5, burn: 0.1 },
+  { name: '密度板 3 mm', t: 3, burn: 0.12 },
+  { name: '瓦楞纸板 3 mm', t: 3, burn: 0.05 },
+];
+
+function materialField(form) {
+  const th = form.querySelector('[name=thickness]');
+  const burn = form.querySelector('[name=burn]');
+  if (!th || !burn) return null;
+  const fs = document.createElement('fieldset');
+  fs.className = 'material-fs';
+  fs.innerHTML = `<legend>材料</legend><div class="field"><label for="f_material"><span class="pmain">选择材料，自动填入板厚和激光补偿</span></label>
+    <select id="f_material" data-skip="1"><option value="">自定义（直接改下方「材料厚度」「burn」）</option>
+    ${MATERIALS.map((m, i) => `<option value="${i}">${m.name} · 补偿 ${m.burn} mm</option>`).join('')}</select>
+    <div class="material-tip">实测板厚和标称常有差别（如标称 3 mm 实测 2.8 mm），以实测为准，卡榫才会松紧合适。</div></div>`;
+  const sel = fs.querySelector('select');
+  const sync = () => {
+    const i = MATERIALS.findIndex((m) => Math.abs(m.t - Number(th.value)) < 1e-6 && Math.abs(m.burn - Number(burn.value)) < 1e-6);
+    sel.value = i >= 0 ? String(i) : '';
+  };
+  sel.addEventListener('change', () => {
+    const m = MATERIALS[Number(sel.value)];
+    if (!m || sel.value === '') return;
+    th.value = m.t;
+    burn.value = m.burn;
+    th.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  th.addEventListener('input', sync);
+  burn.addEventListener('input', sync);
+  sync();
+  return fs;
 }
 
 function renderForm(info) {
@@ -307,6 +345,8 @@ function renderForm(info) {
     g.params.forEach((p) => fs.appendChild(buildField(p)));
     form.appendChild(fs);
   });
+  const mat = materialField(form);
+  if (mat) form.insertBefore(mat, form.firstChild);
 }
 
 function buildField(param) {
@@ -375,6 +415,7 @@ function escapeHtml(s) {
 function collectParams() {
   const params = {};
   $('#param-form').querySelectorAll('input, select').forEach((el) => {
+    if (el.dataset.skip || !el.name) return;
     if (el.type === 'checkbox') {
       params[el.name] = el.checked ? 1 : 0;
     } else if (el.value !== '') {
@@ -510,6 +551,7 @@ async function doSaveProject() {
     edits: ws ? ws.edits : {},
     poses: ws ? ws.poses : {},
     sketches: ws ? ws.sketches : {},
+    free: ws ? ws.free : null,
   };
   try {
     const r = await window.pywebview.api.save_project(project);
@@ -544,7 +586,7 @@ async function doOpenProject() {
     const opt = $('#format-select').querySelector(`option[value="${CSS.escape(p.format)}"]`);
     if (opt) $('#format-select').value = p.format;
   }
-  if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits, poses: p.poses, sketches: p.sketches });
+  if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits, poses: p.poses, sketches: p.sketches, free: p.free });
   toast('项目已载入', 'success');
   doPreview();
 }
@@ -552,6 +594,7 @@ async function doOpenProject() {
 // ---- 事件 ----
 function bindEvents() {
   $('#btn-preview').addEventListener('click', doPreview);
+  $('#free-entry').addEventListener('click', () => selectGenerator('FreeDesign'));
   $('#btn-save').addEventListener('click', doSave);
   $('#btn-save-project').addEventListener('click', doSaveProject);
   $('#btn-open-project').addEventListener('click', doOpenProject);

@@ -117,6 +117,7 @@ hiddenimports = list({
     *fonttools_modules,
     'model3d',
     'sketch2d',
+    'freedesign',
     # 关键子模块（boxes/__init__.py 直接 import 的）
     'shapely',
     'shapely.geometry',
