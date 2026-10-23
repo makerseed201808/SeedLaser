@@ -1760,8 +1760,16 @@ export class SketchEditor {
     return out;
   }
 
+  // 选区 + 阵列参数：刚阵列过同样的东西时不再显示预览
+  arrayKey() {
+    const o = this.opts;
+    return JSON.stringify([[...this.sel].map((i) => i.data.id).sort(), o.arrType, o.arrCount, o.arrDist, o.arrAngle, o.arrRows,
+      o.arrCols, o.arrDx, o.arrDy, o.arrSweep, o.arrRotate, o.arrCenter, o.arrCx, o.arrCy]);
+  }
+
   drawArrayPreview() {
     if (!this.opts.arrPreview || !this.sel.size || this.tool !== 'select') return;
+    if (this.arrDoneKey && this.arrDoneKey === this.arrayKey()) return;
     const mats = this.arrayMatrices();
     if (mats.length > 400) return;
     const g = new this.ps.Group({ parent: this.overlay });
@@ -1790,9 +1798,11 @@ export class SketchEditor {
     if (!mats.length) { this.toast('数量至少为 2', 'error'); return; }
     if (mats.length * this.sel.size > 2000) { this.toast('复制太多了（超过 2000 份）', 'error'); return; }
     const src = [...this.sel];
-    const all = [...src];
-    mats.forEach((m) => src.forEach((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); all.push(k); }));
-    this.sel = new Set(all);
+    let n = 0;
+    mats.forEach((m) => src.forEach((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); n++; }));
+    // 只保留原来选中的对象（复制品不选中），并且不再显示同样的预览
+    this.sel = new Set(src);
+    this.arrDoneKey = this.arrayKey();
     const name = { grid: '矩形', line: '直线', circle: '环形' }[this.opts.arrType];
     this.commit(`已${name}阵列（共 ${mats.length + 1} 份）`);
   }

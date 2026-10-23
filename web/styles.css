@@ -916,3 +916,4 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-seg button:last-child { border-radius: 0 6px 6px 0 !important; }
 .sk-host .sk-primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
 .sk-row .sk-spacer { flex: 1; }
+.sk-host .sk-primary:hover { color: #fff; background: #1a5bc4; border-color: #1a5bc4; }
