@@ -38,6 +38,7 @@ SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光�
 - **3D 模型预览** — 预览区切到「3D 模型」：36 个盒、柜、机箱类生成器显示拼好的样子（其中 31 个为自动装配，经碰撞校验确认卡榫咬合），其余显示所有板件平铺
 - **局部修改** — 板件清单里可禁用某块板；「编辑」进入单块板编辑器，开圆孔 / 方孔 / 圆角矩形孔、刻中文字（系统中文字体转轮廓），导出的 SVG / PDF / DXF 等都会带上
 - **手动摆放（仿 Tinkercad）** — 3D 视图点「✋ 摆放」：拖动板件、黑色锥形手柄升降、彩色弧形箭头旋转，吸附网格、方向键微移、撤销；每次放下自动做碰撞校验，穿透的板标红、咬合的板在清单里注明
+- **二维草图编辑（参考 LightBurn / LaserMaker）** — 3D 视图里点板件的「编辑」：直线、曲线（钢笔）、矩形、椭圆、多边形 / 星形、文字、修剪（橡皮擦）、节点编辑，并集 / 差集 / 交集 / 异或、偏移、阵列、对齐、镜像；切割 / 雕刻 / 划线三个图层；外轮廓（卡榫边）也能改。右下角 3D 实时预览，每次修改后自动检查与相邻板是否穿透
 - **3D 编辑器（SketchForge 改版）** — 3D 视图点「🛠 3D 编辑器」：在完整的 SketchForge 编辑界面（中文）里移动、旋转、对齐、组合板件，点「✓ 完成 · 返回 SeedBoxes」或左上角「主页」后，摆放结果同步回来并自动做咬合检查；「☰ 板件」可隐藏板件清单
 - **项目文件** — 参数、局部修改和手动摆放位置保存为 `.seedbox.json`，随时打开继续改
 
@@ -142,6 +143,7 @@ build_uv.bat            :: 重新打包，自动用 .pyd 替代 .py
 SeedBoxes/
 ├── app.py                  PyWebView 入口
 ├── backend.py              JS↔Python 桥接 API（含 i18n / 自渲染兜底 / 边缘字符映射）
+├── sketch2d.py             二维草图：展平、导出（激光补偿）、3D 轮廓、偏移
 ├── model3d.py              3D 模型：零件捕获、组装配方、局部修改注入、中文字转轮廓
 ├── web/                    前端
 │   ├── index.html / app.js / styles.css
@@ -172,6 +174,7 @@ SeedBoxes/
 依赖：
 - [boxes](https://github.com/florianfesti/boxes) (GPL-3.0) by Florian Festi — 核心渲染引擎
 - [pywebview](https://github.com/r0x0r/pywebview) (BSD-3-Clause) — 桌面框架
+- [paper.js](http://paperjs.org/) (MIT) — 二维草图编辑（web/vendor/paper）
 - [SketchForge-3D](https://github.com/Formsmith746/SketchForge-3D) (AGPL-3.0-only) — 3D 编辑器；改版构建在 `web_sketchforge/`，对应源码 = 上游提交 `e9cb8e8` + `sketchforge/seedboxes.patch`（见 `sketchforge/README.md`）
 
 如分发本程序，需附带源码或源码获取方式（GPL 要求）。

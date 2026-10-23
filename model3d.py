@@ -736,7 +736,8 @@ def apply_project(name: str, box: Any, rec: Recorder, project: dict | None) -> l
         return notes
     disabled = set(project.get("disabled") or [])
     edits = project.get("edits") or {}
-    if not disabled and not any(edits.values()):
+    sketches = {k: v for k, v in (project.get("sketches") or {}).items() if v and v.get("items")}
+    if not disabled and not any(edits.values()) and not sketches:
         return notes
 
     parts = rec.extract()
@@ -756,8 +757,9 @@ def apply_project(name: str, box: Any, rec: Recorder, project: dict | None) -> l
         if meta["id"] in disabled:
             to_remove.append(part)
             continue
-        part_edits = [e for e in edits.get(meta["id"], []) if e]
-        if not part_edits:
+        sketch = sketches.get(meta["id"])
+        part_edits = [] if sketch else [e for e in edits.get(meta["id"], []) if e]
+        if not part_edits and not sketch:
             continue
         info = rec.info_for(part)
         m = info.matrix if info is not None else Affine.identity()
@@ -766,11 +768,18 @@ def apply_project(name: str, box: Any, rec: Recorder, project: dict | None) -> l
             flip = m * Affine.translation(meta["w"], 0) * Affine.scale(-1, 1) * ~m
             for path in part.pathes:
                 path.transform(1, flip)
+        if sketch:
+            # 二维草图替换整块板的切割 / 雕刻内容（保留红色标注文字）
+            part.pathes = [pa for pa in part.pathes
+                           if _close_rgb(tuple(float(c) for c in pa.params.get("rgb", (0, 0, 0))), _ANNOTATION_RGB)]
         surface._p = part
         ctx.save()
         ctx._m = m
         ctx._xy = (0, 0)
         ctx._mxy = m * (0, 0)
+        if sketch:
+            import sketch2d
+            sketch2d.draw(box, sketch, burn)
         for e in part_edits:
             polys, missing = edit_polygons(e, burn)
             if missing:
@@ -1042,6 +1051,36 @@ def check_collisions(parts: list[dict], t: float) -> int:
 
 
 # ================================================================== 手动摆放校验
+
+def parts_with_sketches(parts: list[dict], sketches: dict | None) -> list[dict]:
+    """把二维草图的轮廓换进零件几何（名义坐标），供碰撞检查用。碰撞数据按草图内容缓存."""
+    if not sketches:
+        return parts
+    import json
+    import sketch2d
+    out = []
+    for p in parts:
+        sk = sketches.get(p.get("id"))
+        if not sk or not sk.get("items"):
+            out.append(p)
+            continue
+        key = json.dumps(sk, sort_keys=True)
+        cache = p.setdefault("_sketch_cache", {})
+        q = cache.get(key)
+        if q is None:
+            g = sketch2d.geometry_3d(sk)
+            if g is None:
+                out.append(p)
+                continue
+            f = (lambda pts: [(p["w"] - x, y) for x, y in pts]) if p.get("mirror") else (lambda pts: pts)
+            q = {k: v for k, v in p.items() if not k.startswith("_")}
+            q["outer"] = f(g["outer"])
+            q["holes"] = [f(h) for h in g["holes"]]
+            cache.clear()
+            cache[key] = q
+        out.append(q)
+    return out
+
 
 def pose_report(parts: list[dict], t: float, poses: dict[str, list[float]],
                 ids: list[str] | None = None) -> dict:

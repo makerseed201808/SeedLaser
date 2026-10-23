@@ -3,6 +3,7 @@
 // 编辑（edit）存在「从外面看」坐标系：原点 = 内部矩形左下角，单位 mm，y 向上。
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
+import { SketchEditor, sketchPolys } from './sketch2d.js';
 
 const api = () => window.pywebview.api;
 const $ = (s) => document.querySelector(s);
@@ -25,7 +26,7 @@ const W = {
   pose: { on: false, report: null, undo: [], redo: [], snap: 1 },
 };
 
-function freshProject() { return { disabled: [], edits: {}, poses: {} }; }
+function freshProject() { return { disabled: [], edits: {}, poses: {}, sketches: {} }; }
 
 // 板件当前摆放矩阵：手动摆放过的优先
 function poseOf(p) { return (W.project.poses && W.project.poses[p.id]) || p.matrix; }
@@ -159,7 +160,8 @@ class View3D {
       if (id && this.onEdit) this.onEdit(id);
     });
 
-    new ResizeObserver(() => this.resize()).observe(host);
+    this.ro = new ResizeObserver(() => this.resize());
+    this.ro.observe(host);
     this.resize();
     const loop = () => {
       requestAnimationFrame(loop);
@@ -211,6 +213,8 @@ class View3D {
   buildPart(p, t, i) {
     const old = this.objects.get(p.id);
     if (old) { this.root.remove(old.group); disposeTree(old.group); }
+    const sk = sketchOf(p.id);
+    if (sk) return this.buildSketchPart(p, t, i, sk);
     const shape = new THREE.Shape(p.outer.map(v2));
     p.holes.forEach((h) => shape.holes.push(new THREE.Path(h.map(v2))));
     const engr = [];
@@ -251,6 +255,51 @@ class View3D {
       );
       em.position.z = t + 0.05;   // 外表面
       group.add(em);
+    }
+    group.matrixAutoUpdate = false;
+    group.matrix.fromArray(poseOf(p));
+    this.root.add(group);
+    this.objects.set(p.id, { group, mesh, edges, mat, color, part: p });
+  }
+
+  // 有二维草图的板：切割闭合路径按奇偶嵌套成实体（可能有多块），雕刻画在外表面
+  buildSketchPart(p, t, i, sk) {
+    const sp = sketchPolys(sk);
+    const shapes = nestContours(sp.cut.map((pl) => toLocal(p, pl))).map((s) => {
+      const sh = new THREE.Shape(s.outer.map(v2));
+      s.holes.forEach((h) => sh.holes.push(new THREE.Path(h.map(v2))));
+      return sh;
+    });
+    const color = WOOD[i % WOOD.length];
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
+    let geo;
+    try {
+      geo = new THREE.ExtrudeGeometry(shapes, { depth: t, bevelEnabled: false, curveSegments: 1, steps: 1 });
+    } catch (e) {
+      geo = new THREE.BufferGeometry();
+    }
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.userData.partId = p.id;
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25),
+      new THREE.LineBasicMaterial({ color: 0x7a5530, transparent: true, opacity: 0.55 }));
+    const group = new THREE.Group();
+    group.add(mesh, edges);
+    const zTop = t + 0.05;
+    const engr = nestContours(sp.engrave.map((pl) => toLocal(p, pl)));
+    if (engr.length) {
+      const es = engr.map((s) => { const sh = new THREE.Shape(s.outer.map(v2)); s.holes.forEach((h) => sh.holes.push(new THREE.Path(h.map(v2)))); return sh; });
+      const em = new THREE.Mesh(new THREE.ShapeGeometry(es, 1),
+        new THREE.MeshBasicMaterial({ color: ENGRAVE_COLOR, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }));
+      em.position.z = zTop;
+      group.add(em);
+    }
+    const lines = [...sp.lines, ...sp.open].map((pl) => toLocal(p, pl));
+    if (lines.length) {
+      const pos = [];
+      lines.forEach((pl) => { for (let k = 0; k + 1 < pl.length; k++) pos.push(pl[k][0], pl[k][1], zTop, pl[k + 1][0], pl[k + 1][1], zTop); });
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      group.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x9d2bb5 })));
     }
     group.matrixAutoUpdate = false;
     group.matrix.fromArray(poseOf(p));
@@ -347,7 +396,7 @@ function renderPartsPanel() {
   m.parts.forEach((p, i) => {
     const row = document.createElement('div');
     row.className = 'pp-row' + (p.id === W.selected ? ' sel' : '') + (dis.has(p.id) ? ' off' : '');
-    const n = (W.project.edits[p.id] || []).length;
+    const n = sketchOf(p.id) ? '✎' : (W.project.edits[p.id] || []).length;
     const rep = W.pose.report && W.pose.report[p.id];
     const badge = !rep || dis.has(p.id) ? ''
       : rep.collide.length ? `<i class="pp-bad" title="与 ${esc(rep.collide.map(nameOf).join('、'))} 穿透">穿透 ${rep.collide.length}</i>`
@@ -427,6 +476,7 @@ let view = null;
 let poser = null;
 
 function setNote(text, kind) {
+  if (sketchEd && sketchEd.opened) sketchEd.setPreviewStatus(text, kind);
   const el = $('#view3d-note');
   if (!text) { el.classList.add('hidden'); return; }
   el.textContent = text;
@@ -467,7 +517,7 @@ async function loadModel() {
   renderPartsPanel();
   view.resize();          // 清单宽度确定后再算画面偏移
   const posed = Object.keys(W.project.poses || {}).length > 0;
-  if (posed) checkPose(W.paramsDirty);
+  if (posed || Object.keys(W.project.sketches || {}).length) checkPose(W.paramsDirty);
   if (posed && W.paramsDirty) {
     setNote('参数已改变，3D 编辑器里摆放过的板件位置可能需要重新调整（可点板件清单下方的「全部复位」）。', 'info');
     W.paramsDirty = false;
@@ -520,247 +570,79 @@ function pathD(polys) {
   return polys.map((pl) => 'M' + pl.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join('L') + 'Z').join('');
 }
 
+// ------------------------------------------------------------------ 二维草图编辑（web/sketch2d.js）
+
+let sketchEd = null;
+
+// 原始轮廓签名：生成器参数变化后，提示草图是按旧尺寸画的
+function baseSig(p) {
+  const o = partOutline(p);
+  const str = JSON.stringify([o.outer, o.holes].flat(2).map((v) => Math.round(v * 100)));
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(36) + '-' + str.length.toString(36);
+}
+
+function sketchOf(id) { return W.project.sketches && W.project.sketches[id]; }
+
 async function openEditor(id) {
   if (!W.model) return;
   const p = W.model.parts.find((q) => q.id === id);
   if (!p) return;
-  ED.part = p;
-  ED.sel = null;
+  if (SF.open) await closeSketchForge();
+  if (sketchEd && sketchEd.opened) sketchEd.close();      // 在 3D 预览里双击了另一块板：切换
   select(id);
-  if (!W.project.edits[id]) W.project.edits[id] = [];
-  $('#pe-title').textContent = p.name;
-  $('#pe-sub').textContent = p.kind === 'rect'
-    ? `内部尺寸 ${fmt(p.w)} × ${fmt(p.h)} mm · 从外面看${p.mirror ? '（导出时这块板会翻面，刻字面朝外组装）' : ''}`
+  if (!sketchEd) {
+    sketchEd = new SketchEditor($('#sk-host'), { api: api(), toast });
+    sketchEd.onPreviewResize = () => { if (view) { view.resize(); } };
+  }
+  if (!W.fonts) W.fonts = await api().list_fonts();
+  const legacyEdits = (W.project.edits[id] || []).filter(Boolean);
+  if (legacyEdits.length) await ensureShapes(legacyEdits);
+  const legacy = legacyEdits.map((e) => ({ polys: editPolys(e), mode: e.mode === 'cut' ? 'cut' : 'engrave' }));
+  ED.part = p;
+  const sub = p.kind === 'rect'
+    ? `内部尺寸 ${fmt(p.w)} × ${fmt(p.h)} mm · 从外面看${p.mirror ? '（导出时这块板会翻面，刻字面朝外）' : ''}`
     : `约 ${fmt(p.bbox[2] - p.bbox[0])} × ${fmt(p.bbox[3] - p.bbox[1])} mm`;
-  $('#part-editor').classList.remove('hidden');
-  await ensureShapes(W.project.edits[id]);
-  drawEditor(true);
-  renderProps();
+  await sketchEd.open({
+    part: { name: p.name, sub, outline: partOutline(p), base: baseSig(p), thickness: W.model.thickness },
+    sketch: sketchOf(id), legacy, fonts: W.fonts,
+    onChange: (sk) => saveSketch(id, sk),
+    onClose: (sk) => { saveSketch(id, sk); ED.part = null; attachView($('#view3d-canvas')); renderPartsPanel(); },
+  });
+  attachView(sketchEd.previewHost);
+  const noteEl = $('#view3d-note');
+  sketchEd.setPreviewStatus(noteEl.classList.contains('hidden') ? '' : noteEl.textContent,
+    (noteEl.className.match(/\b(ok|error|info)\b/) || [])[1]);
+}
+
+// 3D 视图的画布在主界面和草图编辑器的预览框之间移动（同一个 three.js 场景，实时同步）
+function attachView(el) {
+  if (!view || !el || view.host === el) return;
+  view.host = el;
+  view.ro.observe(el);
+  el.appendChild(view.renderer.domElement);
+  view.resize();
+  if (W.model) view.fit(W.model);
+}
+
+function saveSketch(id, sk) {
+  W.project.sketches = W.project.sketches || {};
+  if (sk.modified) {
+    W.project.sketches[id] = { base: sk.base, items: sk.items };
+    delete W.project.edits[id];          // 旧版开孔 / 刻字已迁移进草图
+  } else {
+    delete W.project.sketches[id];
+  }
+  rebuildPart(id);
+  projectChanged();
+  renderPartsPanel();
+  checkPose();                           // 实时检查：改过的板还能不能拼上
 }
 
 function closeEditor() {
-  $('#part-editor').classList.add('hidden');
+  if (sketchEd && sketchEd.opened) sketchEd.close();
   ED.part = null;
-  ED.sel = null;
-  renderPartsPanel();
-}
-
-function curEdits() { return ED.part ? W.project.edits[ED.part.id] : []; }
-
-function drawEditor(refit) {
-  const p = ED.part;
-  const host = $('#pe-canvas');
-  const o = partOutline(p);
-  const xs = o.outer.map((q) => q[0]);
-  const ys = o.outer.map((q) => q[1]);
-  const pad = 10;
-  const minx = Math.min(...xs) - pad;
-  const maxx = Math.max(...xs) + pad;
-  const miny = Math.min(...ys) - pad;
-  const maxy = Math.max(...ys) + pad;
-  if (refit || !ED.svg) {
-    host.innerHTML = '';
-    const svg = document.createElementNS(SVGNS, 'svg');
-    svg.setAttribute('viewBox', `${minx} ${-maxy} ${maxx - minx} ${maxy - miny}`);
-    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-    const g = document.createElementNS(SVGNS, 'g');
-    g.setAttribute('transform', 'scale(1,-1)');
-    svg.appendChild(g);
-    host.appendChild(svg);
-    ED.svg = svg;
-    ED.g = g;
-    svg.addEventListener('pointerdown', (ev) => {
-      if (ev.target === svg || ev.target.classList.contains('pe-board')) { ED.sel = null; drawEditor(); renderProps(); }
-    });
-  }
-  const g = ED.g;
-  g.innerHTML = '';
-  // 1 mm / 10 mm 网格
-  const grid = document.createElementNS(SVGNS, 'path');
-  let d = '';
-  for (let x = Math.ceil(minx / 10) * 10; x <= maxx; x += 10) d += `M${x},${miny}V${maxy}`;
-  for (let y = Math.ceil(miny / 10) * 10; y <= maxy; y += 10) d += `M${minx},${y}H${maxx}`;
-  grid.setAttribute('d', d);
-  grid.setAttribute('class', 'pe-grid');
-  g.appendChild(grid);
-  // 板
-  const board = document.createElementNS(SVGNS, 'path');
-  board.setAttribute('d', pathD([o.outer, ...o.holes]));
-  board.setAttribute('fill-rule', 'evenodd');
-  board.setAttribute('class', 'pe-board');
-  g.appendChild(board);
-  if (p.kind === 'rect') {
-    const r = document.createElementNS(SVGNS, 'rect');
-    r.setAttribute('x', 0); r.setAttribute('y', 0);
-    r.setAttribute('width', p.w); r.setAttribute('height', p.h);
-    r.setAttribute('class', 'pe-inner');
-    g.appendChild(r);
-  }
-  // 编辑图形
-  curEdits().forEach((e) => {
-    const el = document.createElementNS(SVGNS, 'path');
-    const s = W.shapes.get(e.id);
-    el.setAttribute('d', s ? pathD(s.polys) : '');
-    el.setAttribute('fill-rule', 'evenodd');
-    el.setAttribute('transform', `translate(${e.x},${e.y})`);
-    el.setAttribute('class', `pe-shape ${e.mode}` + (e.id === ED.sel ? ' sel' : ''));
-    el.dataset.id = e.id;
-    el.addEventListener('pointerdown', (ev) => startDrag(ev, e));
-    g.appendChild(el);
-  });
-}
-
-function svgPoint(ev) {
-  const pt = ED.svg.createSVGPoint();
-  pt.x = ev.clientX;
-  pt.y = ev.clientY;
-  return pt.matrixTransform(ED.g.getScreenCTM().inverse());
-}
-
-const snap = (v) => ($('#pe-snap').checked ? Math.round(v) : Math.round(v * 10) / 10);
-
-function startDrag(ev, e) {
-  ev.preventDefault();
-  ev.stopPropagation();
-  if (ED.sel !== e.id) { ED.sel = e.id; renderProps(); }
-  const p0 = svgPoint(ev);
-  ED.drag = { e, x0: e.x, y0: e.y, p0 };
-  const el = ev.target;
-  el.setPointerCapture(ev.pointerId);
-  [...ED.g.querySelectorAll('.pe-shape')].forEach((n) => n.classList.toggle('sel', n.dataset.id === e.id));
-  const move = (mv) => {
-    const p = svgPoint(mv);
-    e.x = snap(ED.drag.x0 + p.x - ED.drag.p0.x);
-    e.y = snap(ED.drag.y0 + p.y - ED.drag.p0.y);
-    el.setAttribute('transform', `translate(${e.x},${e.y})`);
-    syncPosInputs(e);
-  };
-  const up = () => {
-    el.removeEventListener('pointermove', move);
-    el.removeEventListener('pointerup', up);
-    ED.drag = null;
-    editsChanged();
-  };
-  el.addEventListener('pointermove', move);
-  el.addEventListener('pointerup', up);
-}
-
-function syncPosInputs(e) {
-  const fx = $('#pe-props [data-k="x"]');
-  const fy = $('#pe-props [data-k="y"]');
-  if (fx) fx.value = e.x;
-  if (fy) fy.value = e.y;
-}
-
-function editsChanged() {
-  rebuildPart(ED.part.id);
-  projectChanged();
-}
-
-function addEdit(type) {
-  const p = ED.part;
-  const cx = p.kind === 'rect' ? p.w / 2 : (p.bbox[0] + p.bbox[2]) / 2;
-  const cy = p.kind === 'rect' ? p.h / 2 : (p.bbox[1] + p.bbox[3]) / 2;
-  const base = { id: newId(), type, x: Math.round(cx), y: Math.round(cy), angle: 0, mode: 'cut' };
-  const e = {
-    circle: { ...base, d: 10 },
-    rect: { ...base, w: 20, h: 10 },
-    rrect: { ...base, w: 30, h: 15, r: 4 },
-    text: { ...base, mode: 'engrave', text: '种子创客', size: 10, font: (W.fonts && W.fonts[0] && W.fonts[0].id) || '' },
-  }[type];
-  curEdits().push(e);
-  ED.sel = e.id;
-  refreshEdit(e);
-}
-
-async function refreshEdit(e) {
-  await ensureShapes([e]);
-  const s = W.shapes.get(e.id);
-  if (s && s.missing && s.missing.length) toast(`当前字体缺少：${s.missing.join('')}`, 'error');
-  drawEditor();
-  renderProps();
-  editsChanged();
-}
-
-function removeSelected() {
-  const list = curEdits();
-  const i = list.findIndex((e) => e.id === ED.sel);
-  if (i < 0) return;
-  list.splice(i, 1);
-  ED.sel = null;
-  drawEditor();
-  renderProps();
-  editsChanged();
-}
-
-function duplicateSelected() {
-  const e = curEdits().find((q) => q.id === ED.sel);
-  if (!e) return;
-  const c = { ...e, id: newId(), x: e.x + 5, y: e.y - 5 };
-  curEdits().push(c);
-  ED.sel = c.id;
-  refreshEdit(c);
-}
-
-const TYPE_NAMES = { circle: '圆孔', rect: '方孔', rrect: '圆角矩形', text: '文字' };
-
-async function renderProps() {
-  const box = $('#pe-props');
-  const e = curEdits().find((q) => q.id === ED.sel);
-  if (!e) {
-    const n = curEdits().length;
-    box.innerHTML = `<div class="pe-empty">
-      <p>用左边的工具在板上添加图形，拖动可以移动。</p>
-      <p>· <b>切割</b>：激光切穿，适合开孔（蓝色线）<br>· <b>雕刻</b>：只刻表面，适合写字（绿色线）</p>
-      <p>这块板上已有 ${n} 个图形。</p></div>`;
-    return;
-  }
-  if (e.type === 'text' && !W.fonts) {
-    W.fonts = await api().list_fonts();
-  }
-  const num = (k, label, step = 0.5, min = '') =>
-    `<label class="pe-f"><span>${label}</span><input type="number" data-k="${k}" step="${step}" ${min !== '' ? `min="${min}"` : ''} value="${e[k] ?? ''}"></label>`;
-  let html = `<div class="pe-ptitle">${TYPE_NAMES[e.type]}</div>`;
-  html += `<div class="pe-mode">
-      <button data-mode="cut" class="${e.mode === 'cut' ? 'on' : ''}">切割</button>
-      <button data-mode="engrave" class="${e.mode === 'engrave' ? 'on' : ''}">雕刻</button></div>`;
-  if (e.type === 'text') {
-    html += `<label class="pe-f wide"><span>文字</span><input type="text" data-k="text" value="${esc(e.text)}"></label>`;
-    html += num('size', '字高 mm', 0.5, 1);
-    const fonts = W.fonts || [];
-    html += `<label class="pe-f wide"><span>字体</span><select data-k="font">${
-      fonts.map((f) => `<option value="${esc(f.id)}" ${f.id === e.font ? 'selected' : ''}>${esc(f.name)}</option>`).join('')
-    }${fonts.length ? '' : '<option value="">（未找到中文字体）</option>'}</select></label>`;
-  }
-  html += num('x', '中心 X mm') + num('y', '中心 Y mm');
-  if (e.type === 'circle') html += num('d', '直径 mm', 0.5, 0.5);
-  if (e.type === 'rect' || e.type === 'rrect') html += num('w', '宽 mm', 0.5, 0.5) + num('h', '高 mm', 0.5, 0.5);
-  if (e.type === 'rrect') html += num('r', '圆角半径 mm', 0.5, 0);
-  if (e.type !== 'circle') html += num('angle', '旋转 °', 5);
-  html += `<div class="pe-actions"><button id="pe-dup">复制</button><button id="pe-del" class="danger">删除</button></div>`;
-  const s = W.shapes.get(e.id);
-  if (s && s.missing && s.missing.length) html += `<div class="pe-warn">字体缺少：${esc(s.missing.join(''))}</div>`;
-  box.innerHTML = html;
-  box.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
-    e.mode = b.dataset.mode; drawEditor(); renderProps(); editsChanged();
-  }));
-  box.querySelectorAll('[data-k]').forEach((inp) => {
-    const k = inp.dataset.k;
-    const apply = () => {
-      if (k === 'text' || k === 'font') e[k] = inp.value;
-      else { const v = parseFloat(inp.value); if (!Number.isFinite(v)) return; e[k] = v; }
-      if (k === 'x' || k === 'y') {
-        const el = ED.g.querySelector(`[data-id="${e.id}"]`);
-        if (el) el.setAttribute('transform', `translate(${e.x},${e.y})`);
-        editsChanged();
-      } else {
-        refreshEdit(e);
-      }
-    };
-    inp.addEventListener(k === 'text' ? 'input' : 'change', debounce(apply, k === 'text' ? 350 : 0));
-  });
-  $('#pe-del').addEventListener('click', removeSelected);
-  $('#pe-dup').addEventListener('click', duplicateSelected);
 }
 
 function debounce(fn, ms) {
@@ -770,28 +652,6 @@ function debounce(fn, ms) {
 }
 
 function fmt(v) { return Math.round(v * 10) / 10; }
-
-document.addEventListener('keydown', (ev) => {
-  if (!ED.part || !ED.sel) return;
-  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName)) return;
-  const e = curEdits().find((q) => q.id === ED.sel);
-  if (!e) return;
-  const step = ev.shiftKey ? 10 : 1;
-  const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
-  if (moves[ev.key]) {
-    ev.preventDefault();
-    e.x = fmt(e.x + moves[ev.key][0]);
-    e.y = fmt(e.y + moves[ev.key][1]);
-    const el = ED.g.querySelector(`[data-id="${e.id}"]`);
-    if (el) el.setAttribute('transform', `translate(${e.x},${e.y})`);
-    syncPosInputs(e);
-    editsChanged();
-  } else if (ev.key === 'Delete' || ev.key === 'Backspace') {
-    ev.preventDefault();
-    removeSelected();
-  }
-});
-
 
 // ------------------------------------------------------------------ 手动摆放（仿 Tinkercad）
 //
@@ -1369,7 +1229,7 @@ let poseCheckSeq = 0;
 // 咬合 / 穿透检查：只在有手动摆放（3D 编辑器里移动过）时运行；quiet 时只更新清单标记、不改提示
 const checkPose = debounce(async (quiet) => {
   if (!W.model || !W.model.token) return;
-  if (!Object.keys(W.project.poses || {}).length) {
+  if (!Object.keys(W.project.poses || {}).length && !Object.keys(W.project.sketches || {}).length) {
     W.pose.report = null;
     if (view) view.refreshStates();
     renderPartsPanel();
@@ -1378,7 +1238,7 @@ const checkPose = debounce(async (quiet) => {
   const seq = ++poseCheckSeq;
   const dis = new Set(W.project.disabled);
   const ids = W.model.parts.map((p) => p.id).filter((id) => !dis.has(id) && id !== 'reference');
-  const r = await api().check_pose(W.model.token, W.project.poses || {}, ids);
+  const r = await api().check_pose(W.model.token, W.project.poses || {}, ids, W.project.sketches || {});
   if (seq !== poseCheckSeq) return;
   if (r.error) { setNote(r.error, 'error'); return; }
   W.pose.report = r.report;
@@ -1505,7 +1365,7 @@ async function sfEnsureFrame() {
 }
 
 function sfSceneKey() {
-  return JSON.stringify([W.model && W.model.token, W.project.edits, [...W.project.disabled].sort()]);
+  return JSON.stringify([W.model && W.model.token, W.project.edits, W.project.sketches, [...W.project.disabled].sort()]);
 }
 
 // 板件 → three 世界坐标下的三角形（非索引）
@@ -1717,7 +1577,7 @@ function setPartsPanelVisible(on) {
 
 function hasContent() {
   return W.project.disabled.length > 0 || Object.values(W.project.edits).some((l) => l && l.length)
-    || Object.keys(W.project.poses || {}).length > 0;
+    || Object.keys(W.project.poses || {}).length > 0 || Object.keys(W.project.sketches || {}).length > 0;
 }
 
 window.SeedWorkshop = {
@@ -1747,11 +1607,13 @@ window.SeedWorkshop = {
     if (!hasContent()) return null;
     const edits = {};
     Object.entries(W.project.edits).forEach(([k, v]) => { if (v && v.length) edits[k] = v; });
-    return { disabled: [...W.project.disabled], edits, poses: { ...(W.project.poses || {}) } };
+    return { disabled: [...W.project.disabled], edits, poses: { ...(W.project.poses || {}) },
+             sketches: JSON.parse(JSON.stringify(W.project.sketches || {})) };
   },
   setProject(p) {
     W.project = { disabled: [...(p.disabled || [])], edits: JSON.parse(JSON.stringify(p.edits || {})),
-                  poses: JSON.parse(JSON.stringify(p.poses || {})) };
+                  poses: JSON.parse(JSON.stringify(p.poses || {})),
+                  sketches: JSON.parse(JSON.stringify(p.sketches || {})) };
     W.pose.undo = []; W.pose.redo = [];
     W.stale = true;
     if (W.mode === '3d') loadModel();
@@ -1775,11 +1637,6 @@ $('#btn-parts').addEventListener('click', () => setPartsPanelVisible($('#parts-p
 try { if (localStorage.getItem('seedboxes.partsPanel') === '0') setPartsPanelVisible(false); else $('#btn-parts').classList.add('on'); }
 catch (e) { $('#btn-parts').classList.add('on'); }
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view && view.view(b.dataset.view)));
-$('#pe-close').addEventListener('click', closeEditor);
-document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', async () => {
-  if (b.dataset.tool === 'text' && !W.fonts) W.fonts = await api().list_fonts();
-  addEdit(b.dataset.tool);
-}));
 
 // 浏览器调试模式（?dev=1）下暴露内部状态，供自动化测试
 if (new URLSearchParams(location.search).has('dev')) {

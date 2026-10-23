@@ -509,6 +509,7 @@ async function doSaveProject() {
     disabled: ws ? ws.disabled : [],
     edits: ws ? ws.edits : {},
     poses: ws ? ws.poses : {},
+    sketches: ws ? ws.sketches : {},
   };
   try {
     const r = await window.pywebview.api.save_project(project);
@@ -543,7 +544,7 @@ async function doOpenProject() {
     const opt = $('#format-select').querySelector(`option[value="${CSS.escape(p.format)}"]`);
     if (opt) $('#format-select').value = p.format;
   }
-  if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits, poses: p.poses });
+  if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits, poses: p.poses, sketches: p.sketches });
   toast('项目已载入', 'success');
   doPreview();
 }

@@ -136,28 +136,8 @@
             <div id="sf-host" class="sf-host hidden">
               <div id="sf-loading" class="sf-loading">正在启动 3D 编辑器…</div>
             </div>
-            <!-- 单块板编辑器（开孔 / 刻字） -->
-            <div id="part-editor" class="part-editor hidden">
-              <header class="pe-head">
-                <button id="pe-close" class="bc-pill">← 完成 · 返回 3D</button>
-                <div class="pe-titles">
-                  <div id="pe-title" class="pe-title">—</div>
-                  <div id="pe-sub" class="pe-sub"></div>
-                </div>
-                <label class="pe-snapbox"><input type="checkbox" id="pe-snap" checked>吸附 1 mm</label>
-              </header>
-              <div class="pe-body">
-                <div class="pe-tools">
-                  <button data-tool="circle" title="圆孔"><span class="ico">◯</span>圆孔</button>
-                  <button data-tool="rect" title="方孔"><span class="ico">▭</span>方孔</button>
-                  <button data-tool="rrect" title="圆角矩形"><span class="ico">▢</span>圆角矩形</button>
-                  <button data-tool="text" title="文字"><span class="ico">T</span>文字</button>
-                </div>
-                <div id="pe-canvas" class="pe-canvas"></div>
-                <div id="pe-props" class="pe-props"></div>
-              </div>
-              <footer class="pe-foot">拖动图形移动 · 方向键微调（Shift ×10）· Delete 删除 · 蓝色 = 切割，绿色 = 雕刻（在激光软件里把绿色图层设为雕刻 / 填充）</footer>
-            </div>
+            <!-- 二维草图编辑器（web/sketch2d.js 生成内容，全窗口） -->
+            <div id="sk-host" class="sk-host hidden"></div>
           </div>
         </div>
       </section>
@@ -165,6 +145,7 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+  <script src="vendor/paper/paper-core.min.js"></script>
   <script src="dev-bridge.js"></script>
   <script src="app.js"></script>
   <script type="module" src="workshop.js"></script>

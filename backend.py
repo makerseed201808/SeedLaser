@@ -350,7 +350,8 @@ _MODEL_SEQ = _itertools.count(1)
 def _project_has_content(project: dict[str, Any] | None) -> bool:
     if not project:
         return False
-    return bool(project.get("disabled")) or any((project.get("edits") or {}).values())
+    return (bool(project.get("disabled")) or any((project.get("edits") or {}).values())
+            or any(v and v.get("items") for v in (project.get("sketches") or {}).values()))
 
 
 def _coerce(value: Any) -> str:
@@ -637,13 +638,14 @@ class Api:
         return result
 
     def check_pose(self, token: str, poses: dict[str, list[float]],
-                   ids: list[str] | None = None) -> dict[str, Any]:
-        """手动摆放后的实时校准：每块板与哪些板穿透 / 咬合."""
+                   ids: list[str] | None = None, sketches: dict[str, Any] | None = None) -> dict[str, Any]:
+        """手动摆放后的实时校准：每块板与哪些板穿透 / 咬合（有二维草图的板用草图轮廓）."""
         cached = _MODEL_CACHE.get(token)
         if cached is None:
             return {"error": "模型已过期，请重新生成 3D 模型"}
         parts, t = cached
         try:
+            parts = model3d.parts_with_sketches(parts, sketches)
             return {"report": model3d.pose_report(parts, t, poses or {}, ids)}
         except Exception as exc:
             return {"error": f"校验失败：{exc}"}
@@ -654,6 +656,22 @@ class Api:
             return {"url": _start_sketchforge_server() + "?editor=1&embed=seedboxes"}
         except Exception as exc:
             return {"error": f"3D 编辑器启动失败：{exc}"}
+
+    def sketch_offset(self, paths: list[dict[str, Any]], distance: float, join: str = "round") -> dict[str, Any]:
+        """二维草图：轮廓偏移（外扩 / 内缩）."""
+        try:
+            import sketch2d
+            return {"rings": sketch2d.offset(paths, float(distance), join)}
+        except Exception as exc:
+            return {"error": f"偏移失败：{exc}"}
+
+    def text_outline(self, text: str, font: str, size: float) -> dict[str, Any]:
+        """二维草图：文字转轮廓（以文字中心为原点，y 向上）."""
+        try:
+            polys, missing = model3d.text_polygons(str(text), font or "", float(size))
+            return {"polys": [[[round(x, 3), round(y, 3)] for x, y in p] for p in polys], "missing": missing}
+        except Exception as exc:
+            return {"error": f"文字转轮廓失败：{exc}"}
 
     def edit_shapes(self, edits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """把编辑（圆/方/圆角矩形/文字）转成多边形（「从外面看」坐标系）."""
