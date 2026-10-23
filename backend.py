@@ -7,6 +7,7 @@ import gettext
 import mimetypes
 import os
 import re
+import subprocess
 import sys
 import threading
 import traceback
@@ -41,6 +42,9 @@ def strip_md_links(text: str) -> str:
 
 # --------------------------------------------------------------------- 资源定位
 
+_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
 def _boxes_root() -> str:
     """boxes 项目根目录（含 locale/、static/）。
     冻结模式下从 sys._MEIPASS 取，源码模式下从 boxes 包位置推断。"""
@@ -49,11 +53,35 @@ def _boxes_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(boxes.__file__)))
 
 
+def _find_asset_dir(kind: str) -> str:
+    """查找 boxes 的资源目录（kind = "static" 或 "locale"），找不到返回 ""。
+
+    boxes 通过 git URL 安装到 site-packages 时，static/ 不会被安装，
+    locale/ 的 .mo 被装到 <venv>/share/locale。查找顺序：
+      ① 打包后 sys._MEIPASS/<kind>
+      ② 本仓库 boxes_assets/<kind>（scripts/fetch_boxes_assets.py 下载）
+      ③ boxes 包上一级（editable / path 安装时就是 boxes 源码根）
+      ④ locale 专用：<sys.prefix>/share/locale
+    """
+    candidates = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidates.append(os.path.join(sys._MEIPASS, kind))
+    else:
+        candidates.append(os.path.join(_PROJECT_DIR, "boxes_assets", kind))
+        candidates.append(os.path.join(_boxes_root(), kind))
+        if kind == "locale":
+            candidates.append(os.path.join(sys.prefix, "share", "locale"))
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return ""
+
+
 # --------------------------------------------------------------------- i18n
 
 def _load_translation(lang: str = "zh_CN") -> gettext.NullTranslations:
-    locale_dir = os.path.join(_boxes_root(), "locale")
-    if not os.path.isdir(locale_dir):
+    locale_dir = _find_asset_dir("locale")
+    if not locale_dir:
         return gettext.NullTranslations()
     try:
         return gettext.translation("boxes.py", localedir=locale_dir, languages=[lang])
@@ -198,7 +226,7 @@ def _close_quietly(instance: boxes.Boxes) -> None:
 
 # --------------------------------------------------------------------- images
 
-_SAMPLES_DIR = os.path.join(_boxes_root(), "static", "samples")
+_SAMPLES_DIR = os.path.join(_find_asset_dir("static") or os.path.join(_boxes_root(), "static"), "samples")
 
 
 def _read_image_b64(filename: str) -> str | None:
@@ -450,8 +478,11 @@ class Api:
         ext = ext_map.get(fmt, fmt)
         try:
             file_types = (f"{fmt.upper()} (*.{ext})", "All files (*.*)")
+            # pywebview 5.x+ 推荐 FileDialog.SAVE，旧常量 SAVE_DIALOG 作兜底
+            _file_dialog = getattr(webview, "FileDialog", None)
+            save_mode = _file_dialog.SAVE if _file_dialog else webview.SAVE_DIALOG
             picked = self._window.create_file_dialog(
-                webview.SAVE_DIALOG,
+                save_mode,
                 save_filename=f"{name}.{ext}",
                 file_types=file_types,
             )
@@ -471,10 +502,19 @@ class Api:
             return {"error": "路径不存在"}
         target = path if os.path.isdir(path) else os.path.dirname(path)
         try:
-            os.startfile(target)
+            if sys.platform == "win32":
+                os.startfile(target)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                # 文件：在访达中定位并选中；目录：直接打开
+                if os.path.isdir(path):
+                    subprocess.Popen(["open", path])
+                else:
+                    subprocess.Popen(["open", "-R", path])
+            else:
+                subprocess.Popen(["xdg-open", target])
             return {"ok": True}
         except Exception as exc:
-            return {"error": str(exc)}
+            return {"error": f"无法打开文件夹: {exc}"}
 
     # --------------------------------------------------------- helper
 

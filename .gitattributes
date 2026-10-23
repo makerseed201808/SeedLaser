@@ -1,0 +1,4 @@
+# Windows 批处理必须 CRLF（否则 chcp 65001 失效，中文 echo 报错）
+*.bat text eol=crlf
+# shell 脚本必须 LF（否则 macOS / Linux 报 bad interpreter）
+*.sh text eol=lf

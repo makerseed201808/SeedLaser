@@ -29,6 +29,10 @@ if errorlevel 1 (
     goto end
 )
 
+echo [*] 准备 boxes 资源（作品照片 + 中文翻译，首次需联网）...
+uv run python scripts\fetch_boxes_assets.py
+if errorlevel 1 goto end
+
 echo.
 echo [2/2] 启动客户端 ...
 uv run python app.py

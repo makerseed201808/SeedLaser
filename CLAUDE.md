@@ -7,18 +7,19 @@
 
 ## 新 session 快速上手
 
-**当前状态**：v0.1，准备首次推 GitHub。开发完成，运行/打包/加密路径都已验证。
+**当前状态**：v0.1 已推 GitHub（liwlin/SeedBoxes）。分支 `feat/macos-support` 加了 macOS 支持，并修复了 git 安装 boxes 后缺少作品照片 / 中文翻译的问题。
 
 **第一次进 session 要做的事**：
 1. `git status` 确认仓库状态
 2. `cat README.md` 了解用户视角
 3. 阅读本文件下面的「关键架构事实」和「反模式」章节
 4. 按需 `uv sync` 拉依赖（首次 2~3 分钟，国内可能需要镜像）
+5. `uv run python scripts/fetch_boxes_assets.py` 下载上游 static/ + locale/ 到 boxes_assets/（否则无作品照片）
 
 **用户场景**（K12 STEAM 教育，种子创客工坊）：
 - 给学生/教师用，零门槛，必须中文界面
 - 完全离线（教学场景常无网）
-- Windows 单 .exe 分发
+- Windows 单 .exe 分发（主要）；macOS .app（开发 + 可选分发）
 - 后期可能：自定义生成器 / 预设管理 / 激光切割机直连
 
 **用户偏好**：中文回复、代码 / commit 英文、注释中文可以、嵌入式硬件背景、大改动用双重 AI 审核。
@@ -44,11 +45,8 @@ build_uv.bat    :: PyInstaller 自动用 .pyd 重新打包
 
 回到未加密：把 `backend.py.src` 重命名回 `backend.py`，删 `.pyd`。
 
-### 2. 推送到 GitHub
-```cmd
-gh repo create makerseed/SeedBoxes --public --source=. --description "..."
-git push -u origin main --tags
-```
+### 2. 推送到 GitHub ✅
+已推到 https://github.com/liwlin/SeedBoxes 。（pyproject 里的 URL 仍写 makerseed/SeedBoxes，如迁到组织账号再统一。）
 
 ### 3. 代码签名（远期）
 未签名 → SmartScreen 弹警告。OV 证书 ¥2000+/年。
@@ -91,7 +89,10 @@ SeedBoxes/
 ├── SeedBoxes.spec          PyInstaller 配置（importlib 检测 BOXES_ROOT）
 ├── logo.ico                .exe 图标 + 开发模式窗口图标
 ├── SeedBoxes_logo_vector.svg   主 logo 源
-├── run_uv.bat / build_uv.bat                       开发 / 打包
+├── run_uv.bat / build_uv.bat                       开发 / 打包（Windows）
+├── run_mac.sh / build_mac.sh                       开发 / 打包（macOS）
+├── scripts/fetch_boxes_assets.py                   下载上游 static/ + locale/ → boxes_assets/（gitignore）
+├── .gitattributes                                   .bat 强制 CRLF / .sh 强制 LF
 ├── build_pyd.bat / setup_ext.py / install_msvc.bat 加密路径
 ├── README.md / DEVELOPMENT.md / CLAUDE.md / LICENSE   文档
 ```
@@ -105,12 +106,21 @@ SeedBoxes/
 3. **`tr()` 4 级翻译链** — 每级都有真实命中场景，不要短路
 4. **`_render_lock`** 保护 `Boxes.ctx` — boxes 实例非线程安全
 5. **PyWebView API 在独立线程跑** — 任何全局可变状态需要锁
-6. **打包资源关键**：spec 必须显式 `extra_datas` 拷贝 `BOXES_ROOT/static/` 和 `BOXES_ROOT/locale/`，否则 frozen 后样图 + 中文翻译全失效
+6. **打包资源关键**：spec 必须显式 `extra_datas` 拷贝 `static/` 和 `locale/`，否则 frozen 后样图 + 中文翻译全失效。git 安装的 boxes **不带 static/**，locale 的 .mo 装在 `<venv>/share/locale`；统一用 `backend._find_asset_dir()`（spec 里有同顺序的 `_find_asset`）查找，优先 `boxes_assets/`
 7. **format/output 字段**：从生成器表单中**隐藏**（编辑器顶部已有专门下拉框 + 保存对话框），但 `_params_to_args` 还要 skip 一遍
+8. **跨平台分支**：`open_folder` 按 `sys.platform` 分 Windows（startfile）/ macOS（open -R）/ Linux（xdg-open）；图标 Windows 用 Win32 `WM_SETICON`，macOS 用 AppKit 设 Dock 图标；spec 按平台分 onefile .exe / onedir + BUNDLE .app
 
 ---
 
 ## 常用操作
+
+```bash
+# macOS 开发启动 / 打包
+./run_mac.sh
+./build_mac.sh
+# macOS 调试（右键 → 检查元素）
+SEEDBOXES_DEBUG=1 uv run python app.py
+```
 
 ```cmd
 :: 开发启动
@@ -166,6 +176,9 @@ build_pyd.bat && build_uv.bat
 3. **PyWebView 6.2.1 `create_window` 不支持 `icon` 参数** — 开发模式用 Win32 API `WM_SETICON` 注入；打包模式由 .spec 的 `icon` 控制
 4. **`.bat` 文件必须 UTF-8 BOM + CRLF** — 否则 `chcp 65001` 无效，中文 echo 报"命令不存在"
 5. **PyWebView JS API 在独立线程** — 不要假定 main thread
+6. **git 安装的 boxes 不带 static/（作品照片）** — 由 `scripts/fetch_boxes_assets.py` 按 uv.lock 锁定的 commit 下载；升级 boxes 后要重新跑（commit 变化会自动重新下载）
+7. **release-1.2 的生成器 / 照片数比旧 boxes-master 少** — 实测分组内 163 个生成器，145 个有照片、18 个自渲染
+8. **macOS .app 未签名** — Gatekeeper 拦截，需右键打开；产物架构随打包机
 
 ---
 

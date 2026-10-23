@@ -1,10 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for SeedBoxes 桌面客户端."""
+"""PyInstaller spec for SeedBoxes 桌面客户端.
+
+Windows：单文件 dist/SeedBoxes.exe
+macOS  ：dist/SeedBoxes.app（onedir + BUNDLE，PyInstaller 6 对 .app 不推荐 onefile）
+"""
 import os
+import sys
 import importlib.util
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
+IS_WIN = sys.platform == 'win32'
+IS_MAC = sys.platform == 'darwin'
+APP_VERSION = '0.1.0'
 
 # boxes 项目根目录（含 locale/、static/）— 从已安装的 boxes 包反推。
 # uv sync 时从上游 git 拉到 .venv，也兼容编辑式 path 安装。
@@ -22,8 +30,13 @@ boxes_datas, boxes_binaries, boxes_hiddenimports = collect_all('boxes')
 webview_datas, webview_binaries, webview_hiddenimports = collect_all('webview')
 
 # pywebview Windows 后端依赖（EdgeChromium 通过 .NET 桥接需要这些）
-pythonnet_datas, pythonnet_binaries, pythonnet_hiddenimports = collect_all('pythonnet')
-clr_loader_datas, clr_loader_binaries, clr_loader_hiddenimports = collect_all('clr_loader')
+# macOS 用 Cocoa/WebKit 后端（pyobjc），不需要 .NET 桥接
+if IS_WIN:
+    pythonnet_datas, pythonnet_binaries, pythonnet_hiddenimports = collect_all('pythonnet')
+    clr_loader_datas, clr_loader_binaries, clr_loader_hiddenimports = collect_all('clr_loader')
+else:
+    pythonnet_datas, pythonnet_binaries, pythonnet_hiddenimports = [], [], []
+    clr_loader_datas, clr_loader_binaries, clr_loader_hiddenimports = [], [], []
 
 # pywebview 内部 HTTP 服务器
 try:
@@ -54,10 +67,25 @@ extra_datas = [
     ('web', 'web'),
     ('logo.ico', '.'),
 ]
-if os.path.isdir(os.path.join(BOXES_ROOT, 'static')):
-    extra_datas.append((os.path.join(BOXES_ROOT, 'static'), 'static'))
-if os.path.isdir(os.path.join(BOXES_ROOT, 'locale')):
-    extra_datas.append((os.path.join(BOXES_ROOT, 'locale'), 'locale'))
+# 查找顺序与 backend._find_asset_dir 一致：
+#   boxes_assets/（scripts/fetch_boxes_assets.py 下载）→ BOXES_ROOT → <venv>/share/locale
+def _find_asset(kind):
+    candidates = [os.path.join('boxes_assets', kind), os.path.join(BOXES_ROOT, kind)]
+    if kind == 'locale':
+        candidates.append(os.path.join(sys.prefix, 'share', 'locale'))
+    for path in candidates:
+        if os.path.isdir(path):
+            return os.path.abspath(path)
+    return None
+
+for _kind in ('static', 'locale'):
+    _path = _find_asset(_kind)
+    if _path is None:
+        raise RuntimeError(
+            f"找不到 boxes 的 {_kind}/ 目录，请先运行 "
+            "`uv run python scripts/fetch_boxes_assets.py`")
+    print(f"[spec] {_kind} = {_path}")
+    extra_datas.append((_path, _kind))
 
 datas = (extra_datas + boxes_datas + webview_datas + pythonnet_datas + clr_loader_datas
          + bottle_datas + shapely_datas + numpy_datas + pil_datas + qrcode_datas
@@ -95,13 +123,28 @@ hiddenimports = list({
     'markdown',
     'affine',
     'yaml',
-    # pywebview Windows 后端关键模块
-    'webview.platforms.edgechromium',
-    'webview.platforms.winforms',
-    'pythonnet',
-    'clr_loader',
     'proxy_tools',
 })
+if IS_WIN:
+    # pywebview Windows 后端关键模块
+    hiddenimports += [
+        'webview.platforms.edgechromium',
+        'webview.platforms.winforms',
+        'pythonnet',
+        'clr_loader',
+    ]
+elif IS_MAC:
+    # pywebview macOS 后端（Cocoa + WKWebView，经 pyobjc 调用）
+    hiddenimports += [
+        'webview.platforms.cocoa',
+        'objc',
+        'AppKit',
+        'Foundation',
+        'WebKit',
+        'Quartz',
+        'Security',
+        'UniformTypeIdentifiers',
+    ]
 
 a = Analysis(
     ['app.py'],
@@ -131,25 +174,73 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='SeedBoxes',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon='logo.ico',
-)
+if IS_MAC:
+    # macOS：onedir → COLLECT → BUNDLE 生成 SeedBoxes.app
+    # icon 用 logo.ico，PyInstaller 会借助 Pillow 自动转为 .icns
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='SeedBoxes',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon='logo.ico',
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name='SeedBoxes',
+    )
+    app = BUNDLE(
+        coll,
+        name='SeedBoxes.app',
+        icon='logo.ico',
+        bundle_identifier='com.makerseed.seedboxes',
+        version=APP_VERSION,
+        info_plist={
+            'CFBundleName': 'SeedBoxes',
+            'CFBundleDisplayName': 'SeedBoxes',
+            'CFBundleShortVersionString': APP_VERSION,
+            'CFBundleDevelopmentRegion': 'zh_CN',
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '11.0',
+        },
+    )
+else:
+    # Windows：单文件 .exe
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name='SeedBoxes',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon='logo.ico',
+    )

@@ -25,6 +25,8 @@ echo [1/3] 同步依赖（含 build extras）...
 set "UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
 uv sync --extra build
 if errorlevel 1 goto fail
+uv run python scripts\fetch_boxes_assets.py
+if errorlevel 1 goto fail
 
 echo.
 echo [2/3] 清理旧产物 ...
@@ -33,7 +35,7 @@ if exist dist rmdir /s /q dist
 
 echo.
 echo [3/3] 运行 PyInstaller ...
-uv run pyinstaller --noconfirm --clean BoxesClient.spec
+uv run pyinstaller --noconfirm --clean SeedBoxes.spec
 if errorlevel 1 goto fail
 
 echo.

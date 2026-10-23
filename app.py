@@ -1,4 +1,4 @@
-"""Boxes.py 桌面客户端入口."""
+"""SeedBoxes 桌面客户端入口（Windows / macOS）."""
 from __future__ import annotations
 
 import os
@@ -36,6 +36,22 @@ def _apply_win_icon(window: webview.Window, ico_path: str, title: str) -> None:
         pass
 
 
+def _apply_mac_icon(ico_path: str) -> None:
+    """开发模式下把 macOS 程序坞（Dock）图标设为指定图标.
+    打包为 .app 后由 .spec 的 BUNDLE icon 控制（不依赖此函数）。
+    必须在主线程、webview.start() 之前调用。"""
+    if sys.platform != "darwin" or not os.path.isfile(ico_path):
+        return
+    try:
+        from AppKit import NSApplication, NSImage  # pyobjc，pywebview 在 macOS 上的依赖
+
+        image = NSImage.alloc().initWithContentsOfFile_(ico_path)
+        if image is not None:
+            NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        pass
+
+
 def get_web_path() -> str:
     if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, "web")
@@ -57,13 +73,15 @@ def main() -> None:
         text_select=False,
     )
     api.set_window(window)
-    # 开发模式下用 Win32 API 替换标题栏 + 任务栏图标。
-    # PyInstaller 打包后由 .spec 的 icon 参数控制（不依赖此函数）。
+    # 开发模式下替换窗口 / 任务栏（Windows）或程序坞（macOS）图标。
+    # PyInstaller 打包后由 .spec 的 icon 参数控制（不依赖这两个函数）。
     if hasattr(sys, "_MEIPASS"):
         ico = os.path.join(sys._MEIPASS, "logo.ico")
     else:
         ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.ico")
     _apply_win_icon(window, ico, title)
+    if not hasattr(sys, "_MEIPASS"):
+        _apply_mac_icon(ico)
     debug = os.environ.get("SEEDBOXES_DEBUG", "0") == "1"
     webview.start(debug=debug)
 

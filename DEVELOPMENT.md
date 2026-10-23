@@ -115,6 +115,15 @@ boxes 用单字符 (e/f/F/i/...) 做选项值，UI 不直观。用 `boxes.edges.
 - `.gitignore` 完善
 - git init + 首次 commit + tag v0.1
 
+### 阶段 10：macOS 支持 + 资源修复
+- `open_folder` 按平台分支（macOS 用 `open -R` 在访达中定位文件）
+- `app.py` 开发模式用 AppKit 设置 Dock 图标
+- `SeedBoxes.spec` 按平台分支：macOS 走 onedir + `BUNDLE` 生成 `SeedBoxes.app`，不再收集 pythonnet / clr_loader
+- 新增 `run_mac.sh` / `build_mac.sh`
+- **修复**：阶段 9 改为 git URL 引用 boxes 后，`uv.lock` 没有重新生成（仍指向本地 `../boxes-1.2/boxes-master`），且 git 安装的 boxes 不含 `static/`，新克隆的仓库会变成英文界面 + 无作品照片。现已重新 `uv lock`，并新增 `scripts/fetch_boxes_assets.py` 按锁定 commit 下载 `static/` + `locale/`
+- `build_uv.bat` 引用了不存在的 `BoxesClient.spec`，改为 `SeedBoxes.spec`
+- 新增 `.gitattributes`：`.bat` 强制 CRLF，`.sh` 强制 LF
+
 ---
 
 ## 四、关键设计决策详解
@@ -152,7 +161,7 @@ SeedBoxes logo 含 `#FBF6EC` 浅色 + `#FF5A0A` 橙色 + `#127bd4` 蓝色。最�
 
 ### 当前限制
 - **未签名**：SmartScreen 首次运行弹"未知发布者"
-- **Windows-only**：`os.startfile` + PyWebView WebView2 都是 Windows 特化
+- ~~**Windows-only**~~：阶段 10 已加 macOS 支持（Linux 理论可用，未测试）
 - **依赖系统 WebView2 Runtime**：Win10/11 默认有，老 Windows 需手动装
 - **桌面客户端不支持多语言切换**（写死 zh_CN）
 
@@ -161,7 +170,7 @@ SeedBoxes logo 含 `#FBF6EC` 浅色 + `#FF5A0A` 橙色 + `#127bd4` 蓝色。最�
 2. **Cython 加密发布**（已就绪，跑 build_pyd.bat 即可）
 3. **自定义生成器**：`boxes/generators/_custom/` 子目录自动发现
 4. **导出预设管理**：常用参数组合保存为 .json
-5. **跨平台**：PyWebView Linux/macOS 后端
+5. ~~**跨平台**~~：macOS 已完成（阶段 10）；Linux 待测
 6. **激光切割机直连**：通过串口发送 GCode
 
 ---

@@ -2,13 +2,13 @@
 
 <p align="center">
   基于开源项目 <a href="https://github.com/florianfesti/boxes">Boxes.py</a> 二次开发的桌面客户端<br/>
-  中文界面 · 100% 离线 · Windows 单 exe
+  中文界面 · 100% 离线 · Windows 单 exe / macOS .app
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <img src="https://img.shields.io/badge/python-3.10-blue.svg" alt="Python" />
-  <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform" />
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey.svg" alt="Platform" />
   <a href="https://github.com/liwlin/SeedBoxes/releases/tag/v0.1"><img src="https://img.shields.io/badge/release-v0.1-brightgreen.svg" alt="Release" /></a>
 </p>
 
@@ -24,7 +24,7 @@
 
 ## 简介
 
-SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光切割盒子生成器）开发的桌面客户端，由 [makerseed 种子创客工坊](https://github.com/makerseed) 维护。它把上游 Web 服务器版包装为本地 Windows 桌面 app（PyWebView），并补齐了完整中文界面。
+SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光切割盒子生成器）开发的桌面客户端，由 [makerseed 种子创客工坊](https://github.com/makerseed) 维护。它把上游 Web 服务器版包装为本地 Windows / macOS 桌面 app（PyWebView），并补齐了完整中文界面。
 
 ### 主要特性
 - **179 个生成器** — 完整覆盖上游 boxes 所有可视化生成器
@@ -34,6 +34,7 @@ SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光�
 - **本地渲染** — 所有 SVG 渲染在本地完成，无需联网，无服务器
 - **多种输出** — SVG / SVG_Ponoko / PostScript / Lightburn (lbrn2) 直接生成；DXF / GCode / PDF 需系统装 `pstoedit` / `ps2pdf`
 - **单文件 .exe** — PyInstaller 打包约 100 MB，复制即用，依赖 Windows 10/11 默认的 WebView2 Runtime
+- **macOS 支持** — 使用系统自带的 WKWebView，可打包为 `SeedBoxes.app`
 
 ---
 
@@ -47,7 +48,15 @@ cd SeedBoxes
 run_uv.bat
 ```
 
-首次运行会自动 `uv sync` 拉取依赖（包含从 GitHub 拉 boxes release-1.2），约 2~3 分钟。后续启动秒开。
+macOS / Linux：
+
+```bash
+./run_mac.sh
+```
+
+首次运行会自动 `uv sync` 拉取依赖（包含从 GitHub 拉 boxes release-1.2），并运行 `scripts/fetch_boxes_assets.py` 下载上游的作品照片和翻译文件到 `boxes_assets/`（约 30 MB），约 2~3 分钟。后续启动秒开，可离线。
+
+> 为什么要单独下载：boxes 通过 git 安装进 `.venv` 时只安装 `boxes` 包本身，上游仓库根目录的 `static/`（作品照片）不会被安装。
 
 ---
 
@@ -61,6 +70,16 @@ build_uv.bat
 
 复制到任意 Windows 10/11 机器即可运行（依赖系统默认的 WebView2 Runtime）。
 
+### macOS
+
+```bash
+./build_mac.sh
+```
+
+产物：`dist/SeedBoxes.app` 和分发用的 `dist/SeedBoxes-macOS.zip`。只能在 Mac 上打包，产物架构与打包机一致（Apple 芯片打出的是 arm64）。
+
+未签名的 .app 首次打开会被 Gatekeeper 拦截：右键 → 打开，或在「系统设置 → 隐私与安全性」中点「仍要打开」。
+
 ---
 
 ## 启用 PDF / DXF / GCode 输出
@@ -72,13 +91,20 @@ winget install --id=Cybernetic.pstoedit         :: DXF / GCode / PLT
 winget install --id=ArtifexSoftware.GhostScript :: PDF (内含 ps2pdf)
 ```
 
+macOS：
+
+```bash
+brew install pstoedit      # DXF / GCode / PLT
+brew install ghostscript   # PDF (内含 ps2pdf)
+```
+
 安装后重启客户端，下拉框会自动出现新格式选项。
 
 ---
 
 ## 加密路径（可选）
 
-`backend.py` 是核心业务代码。如需防反编译，可用 Cython 编译为 `.pyd`：
+`backend.py` 是核心业务代码。如需防反编译，可用 Cython 编译为 `.pyd`（目前脚本仅支持 Windows）：
 
 ```cmd
 install_msvc.bat        :: 一次性装 MSVC Build Tools (~4 GB)
@@ -103,8 +129,10 @@ SeedBoxes/
 ├── pyproject.toml          uv 项目（boxes 通过 git 引用上游 release-1.2）
 ├── uv.lock                 依赖锁文件
 ├── SeedBoxes.spec          PyInstaller 打包配置
-├── logo.ico                .exe 图标（多尺寸）
-├── run_uv.bat / build_uv.bat                       开发 / 打包
+├── logo.ico                .exe / .app 图标（多尺寸）
+├── run_uv.bat / build_uv.bat                       开发 / 打包（Windows）
+├── run_mac.sh / build_mac.sh                       开发 / 打包（macOS）
+├── scripts/fetch_boxes_assets.py                   下载上游作品照片 + 翻译到 boxes_assets/
 ├── build_pyd.bat / setup_ext.py / install_msvc.bat 加密路径预备
 ├── README.md / DEVELOPMENT.md / CLAUDE.md          文档
 └── LICENSE                 GPL-3.0
