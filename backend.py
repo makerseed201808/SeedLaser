@@ -282,6 +282,12 @@ def _init_generators() -> None:
         _INITIALIZED = True
 
 
+# get_model 结果缓存（手动摆放校验用）
+import itertools as _itertools
+_MODEL_CACHE: "OrderedDict[str, tuple]" = OrderedDict()
+_MODEL_SEQ = _itertools.count(1)
+
+
 def _project_has_content(project: dict[str, Any] | None) -> bool:
     if not project:
         return False
@@ -559,8 +565,29 @@ class Api:
     # --------------------------------------------------------- 3D / 局部修改
 
     def get_model(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
-        """每块零件的精确轮廓（名义坐标系）+ 3D 摆放矩阵."""
-        return self._render(name, params, fmt="svg", to_file=None, model=True)
+        """每块零件的精确轮廓（名义坐标系）+ 3D 摆放矩阵.
+        返回的 token 供 check_pose 复用几何（避免前端回传大量轮廓点）。"""
+        result = self._render(name, params, fmt="svg", to_file=None, model=True)
+        if "parts" in result:
+            import copy
+            token = f"m{next(_MODEL_SEQ)}"
+            _MODEL_CACHE[token] = (copy.deepcopy(result["parts"]), result["thickness"])
+            while len(_MODEL_CACHE) > 6:
+                _MODEL_CACHE.popitem(last=False)
+            result["token"] = token
+        return result
+
+    def check_pose(self, token: str, poses: dict[str, list[float]],
+                   ids: list[str] | None = None) -> dict[str, Any]:
+        """手动摆放后的实时校准：每块板与哪些板穿透 / 咬合."""
+        cached = _MODEL_CACHE.get(token)
+        if cached is None:
+            return {"error": "模型已过期，请重新生成 3D 模型"}
+        parts, t = cached
+        try:
+            return {"report": model3d.pose_report(parts, t, poses or {}, ids)}
+        except Exception as exc:
+            return {"error": f"校验失败：{exc}"}
 
     def edit_shapes(self, edits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """把编辑（圆/方/圆角矩形/文字）转成多边形（「从外面看」坐标系）."""

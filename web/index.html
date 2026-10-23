@@ -116,6 +116,7 @@
               <button id="btn-zoom-in" class="zoom-2d" title="放大">+</button>
               <button id="btn-zoom-out" class="zoom-2d" title="缩小">-</button>
               <button id="btn-zoom-reset" class="zoom-2d" title="适合窗口">⤢</button>
+              <button id="btn-pose" class="view-3d-btn hidden wide pose-btn" title="手动移动、旋转板件，实时检查是否咬合">✋ 摆放</button>
               <button data-view="iso" class="view-3d-btn hidden wide" title="斜视">斜视</button>
               <button data-view="front" class="view-3d-btn hidden wide" title="正面">正面</button>
               <button data-view="side" class="view-3d-btn hidden wide" title="侧面">侧面</button>
@@ -128,6 +129,15 @@
               <div id="view3d-canvas" class="view3d-canvas"></div>
               <aside id="parts-panel" class="parts-panel"></aside>
               <div id="view3d-note" class="view3d-note hidden"></div>
+              <div id="pose-snap" class="pose-snap hidden">吸附
+                <select>
+                  <option value="0.5">0.5 mm</option>
+                  <option value="1" selected>1 mm</option>
+                  <option value="t">板厚</option>
+                  <option value="5">5 mm</option>
+                  <option value="0">关</option>
+                </select>
+              </div>
               <div class="view3d-hint">拖动旋转 · 右键拖动平移 · 滚轮缩放 · 单击选中板件 · 双击编辑</div>
             </div>
             <!-- 单块板编辑器（开孔 / 刻字） -->

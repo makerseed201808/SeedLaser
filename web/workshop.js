@@ -21,9 +21,14 @@ const W = {
   stale: true,
   loadSeq: 0,
   fonts: null,
+  multi: new Set(),        // 摆放模式下的多选（W.selected 为主选）
+  pose: { on: false, report: null, undo: [], redo: [], snap: 1 },
 };
 
-function freshProject() { return { disabled: [], edits: {} }; }
+function freshProject() { return { disabled: [], edits: {}, poses: {} }; }
+
+// 板件当前摆放矩阵：手动摆放过的优先
+function poseOf(p) { return (W.project.poses && W.project.poses[p.id]) || p.matrix; }
 let uidCounter = 0;
 const newId = () => 'e' + Date.now().toString(36) + (uidCounter++).toString(36);
 
@@ -184,7 +189,7 @@ class View3D {
 
   pick(ev) {
     const id = this.hit(ev);
-    if (this.onPick) this.onPick(id);
+    if (this.onPick) this.onPick(id, ev);
   }
 
   clear() {
@@ -244,9 +249,9 @@ class View3D {
       group.add(em);
     }
     group.matrixAutoUpdate = false;
-    group.matrix.fromArray(p.matrix);
+    group.matrix.fromArray(poseOf(p));
     this.root.add(group);
-    this.objects.set(p.id, { group, mesh, edges, mat, color });
+    this.objects.set(p.id, { group, mesh, edges, mat, color, part: p });
   }
 
   refreshStates() {
@@ -256,8 +261,10 @@ class View3D {
       o.mat.transparent = off;
       o.mat.opacity = off ? 0.12 : 1;
       o.mat.depthWrite = !off;
-      o.mat.emissive.setHex(id === W.selected ? SELECT_COLOR : 0x000000);
-      o.mat.emissiveIntensity = id === W.selected ? 0.35 : 0;
+      const sel = id === W.selected || W.multi.has(id);
+      const bad = W.pose.report && W.pose.report[id] && W.pose.report[id].collide.length > 0;
+      o.mat.emissive.setHex(bad ? 0xff2020 : sel ? SELECT_COLOR : 0x000000);
+      o.mat.emissiveIntensity = bad ? 0.5 : sel ? 0.35 : 0;
       o.edges.material.opacity = off ? 0.15 : 0.55;
       o.group.children.slice(2).forEach((c) => { c.visible = !off; });
     });
@@ -330,9 +337,16 @@ function renderPartsPanel() {
     const row = document.createElement('div');
     row.className = 'pp-row' + (p.id === W.selected ? ' sel' : '') + (dis.has(p.id) ? ' off' : '');
     const n = (W.project.edits[p.id] || []).length;
+    const rep = W.pose.on && W.pose.report && W.pose.report[p.id];
+    const badge = !rep || dis.has(p.id) ? ''
+      : rep.collide.length ? `<i class="pp-bad" title="与 ${esc(rep.collide.map(nameOf).join('、'))} 穿透">穿透 ${rep.collide.length}</i>`
+      : rep.touch.length ? `<i class="pp-ok" title="与 ${esc(rep.touch.map(nameOf).join('、'))} 咬合">咬合 ${rep.touch.length}</i>`
+      : '<i class="pp-free" title="没有和其他板接触">未接触</i>';
+    const moved = W.project.poses && W.project.poses[p.id] ? '<b class="pp-moved" title="手动摆放过">✋</b>' : '';
+    row.className += W.multi.has(p.id) ? ' sel' : '';
     row.innerHTML = `
       <span class="pp-chip" style="background:#${WOOD[i % WOOD.length].toString(16)}">${String.fromCharCode(65 + (i % 26))}</span>
-      <span class="pp-name" title="${esc(p.name)}">${esc(p.name)}${n ? `<em>${n}</em>` : ''}</span>
+      <span class="pp-name" title="${esc(p.name)}">${moved}${esc(p.name)}${n ? `<em>${n}</em>` : ''}${badge}</span>
       <label class="pp-use" title="是否输出这块板"><input type="checkbox" ${dis.has(p.id) ? '' : 'checked'}>使用</label>
       <button class="pp-edit" title="开孔 / 刻字">编辑</button>`;
     row.addEventListener('click', (ev) => {
@@ -343,9 +357,17 @@ function renderPartsPanel() {
     row.querySelector('.pp-edit').addEventListener('click', () => openEditor(p.id));
     panel.appendChild(row);
   });
+  if (W.pose.on) {
+    const bar = document.createElement('div');
+    bar.className = 'pp-posebar';
+    bar.innerHTML = '<button id="pose-reset-sel">所选复位</button><button id="pose-reset-all">全部复位</button>';
+    panel.appendChild(bar);
+    bar.querySelector('#pose-reset-sel').addEventListener('click', () => resetPoses(false));
+    bar.querySelector('#pose-reset-all').addEventListener('click', () => resetPoses(true));
+  }
   const tip = document.createElement('div');
   tip.className = 'pp-tip';
-  tip.textContent = '双击 3D 里的板件也可以编辑';
+  tip.textContent = W.pose.on ? '点选板件后拖动摆放；Shift+点击多选' : '双击 3D 里的板件也可以编辑';
   panel.appendChild(tip);
 }
 
@@ -353,8 +375,22 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function select(id) {
-  W.selected = id;
+function nameOf(id) {
+  const p = W.model && W.model.parts.find((q) => q.id === id);
+  return p ? p.name : id;
+}
+
+function select(id, add) {
+  if (add && id) {
+    if (W.multi.has(id)) W.multi.delete(id); else W.multi.add(id);
+    if (W.selected && W.selected !== id) W.multi.add(W.selected);
+    W.selected = W.multi.size ? [...W.multi][W.multi.size - 1] : null;
+  } else {
+    W.multi.clear();
+    if (id) W.multi.add(id);
+    W.selected = id;
+  }
+  if (W.pose.on && poser) poser.updateGizmo();
   if (view) view.refreshStates();
   renderPartsPanel();
 }
@@ -375,6 +411,7 @@ function projectChanged() {
 // ------------------------------------------------------------------ 模型加载
 
 let view = null;
+let poser = null;
 
 function setNote(text, kind) {
   const el = $('#view3d-note');
@@ -404,12 +441,21 @@ async function loadModel() {
   if (seq !== W.loadSeq) return;
   if (!view) {
     view = new View3D($('#view3d-canvas'));
-    view.onPick = (id) => select(id);
+    view.onPick = (id, ev) => select(id, ev && ev.shiftKey);
     view.onEdit = (id) => openEditor(id);
+    poser = new Poser(view);
   }
   view.setModel(m);
+  W.multi.clear();
+  if (W.selected && !m.parts.some((q) => q.id === W.selected)) W.selected = null;
+  if (W.selected) W.multi.add(W.selected);
+  W.pose.report = null;
+  if (W.pose.on) { poser.updateGizmo(); checkPose(); }
   renderPartsPanel();
-  if (!m.parts.length) setNote('这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
+  if (W.pose.on && Object.keys(W.project.poses || {}).length && W.paramsDirty) {
+    setNote('参数已改变，手动摆放过的板件位置可能需要重新调整（可点「全部复位」）。', 'info');
+    W.paramsDirty = false;
+  } else if (!m.parts.length) setNote('这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
   else if (m.auto) {
     setNote(`自动装配（试验）：已拼上 ${m.placed} 块板${m.floating ? `，另有 ${m.floating} 块（隔板、盖子等）放在旁边` : ''}。` +
             '形状仅供参考，以图纸为准。', 'info');
@@ -729,10 +775,432 @@ document.addEventListener('keydown', (ev) => {
   }
 });
 
+
+// ------------------------------------------------------------------ 手动摆放（仿 Tinkercad）
+//
+// 坐标都在 root 局部空间（即 boxes 世界坐标：x 右、y 后、z 上，单位 mm）。
+// 摆放结果存在 W.project.poses[id]（16 位列主序矩阵），只影响 3D 显示，不影响导出图纸。
+
+const AXIS_COLORS = { x: 0xe5484d, y: 0x30a46c, z: 0x3e7bfa };
+
+class Poser {
+  constructor(v) {
+    this.v = v;
+    this.gizmo = new THREE.Group();
+    this.gizmo.visible = false;
+    v.root.add(this.gizmo);
+    this.handles = [];
+    this.drag = null;
+    this.label = document.createElement('div');
+    this.label.className = 'pose-label hidden';
+    v.host.appendChild(this.label);
+    const el = v.renderer.domElement;
+    // 捕获阶段先于 OrbitControls / 普通点选处理
+    el.addEventListener('pointerdown', (ev) => this.onDown(ev), { capture: true });
+    el.addEventListener('pointermove', (ev) => this.onMove(ev));
+    el.addEventListener('pointerup', (ev) => this.onUp(ev));
+  }
+
+  // ---- 射线工具 ----
+  localRay(ev) {
+    const v = this.v;
+    const r = v.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    v.raycaster.setFromCamera(ndc, v.camera);
+    const inv = new THREE.Matrix4().copy(v.root.matrixWorld).invert();
+    return v.raycaster.ray.clone().applyMatrix4(inv);
+  }
+
+  selectedIds() {
+    const ids = new Set(W.multi);
+    if (W.selected) ids.add(W.selected);
+    return [...ids].filter((id) => this.v.objects.has(id));
+  }
+
+  // 所选板件在 root 局部坐标的包围盒
+  selBox(ids) {
+    const box = new THREE.Box3();
+    ids.forEach((id) => {
+      const o = this.v.objects.get(id);
+      o.mesh.geometry.computeBoundingBox();
+      const b = o.mesh.geometry.boundingBox.clone().applyMatrix4(o.group.matrix);
+      box.union(b);
+    });
+    return box;
+  }
+
+  floorZ() {
+    const box = new THREE.Box3();
+    this.v.objects.forEach((o, id) => {
+      if (id === 'reference') return;
+      o.mesh.geometry.computeBoundingBox();
+      box.union(o.mesh.geometry.boundingBox.clone().applyMatrix4(o.group.matrix));
+    });
+    return box.isEmpty() ? 0 : box.min.z;
+  }
+
+  // ---- gizmo ----
+  updateGizmo() {
+    this.gizmo.clear();
+    this.handles = [];
+    const ids = W.pose.on ? this.selectedIds() : [];
+    if (!ids.length) { this.gizmo.visible = false; return; }
+    const box = this.selBox(ids);
+    const c = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const R = Math.max(Math.max(size.x, size.y, size.z) * 0.62, 12);
+    const tube = Math.max(0.9, R * 0.022);
+    const mk = (geo, color, kind, axis) => {
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+      m.renderOrder = 999;
+      m.userData = { kind, axis };
+      this.gizmo.add(m);
+      this.handles.push(m);
+      return m;
+    };
+    // 升降：顶部黑色锥形手柄
+    const coneH = Math.max(6, R * 0.16);
+    const cone = mk(new THREE.ConeGeometry(coneH * 0.45, coneH, 24), 0x222222, 'lift', 'z');
+    cone.rotation.x = Math.PI / 2;
+    cone.position.set(c.x, c.y, box.max.z + coneH * 0.9);
+    // 旋转：三条四分之一弧（Tinkercad 的弯箭头）
+    const arc = (axis) => {
+      const g = new THREE.TorusGeometry(R, tube, 8, 48, Math.PI / 2);
+      const m = mk(g, AXIS_COLORS[axis], 'rot', axis);
+      m.position.copy(c);
+      if (axis === 'x') m.rotation.y = Math.PI / 2;
+      if (axis === 'y') m.rotation.x = Math.PI / 2;
+      // 箭头尖
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(tube * 3, tube * 7, 12),
+        new THREE.MeshBasicMaterial({ color: AXIS_COLORS[axis], depthTest: false }));
+      tip.renderOrder = 999;
+      tip.userData = { kind: 'rot', axis };
+      tip.position.set(0, R, 0);
+      tip.rotation.z = Math.PI / 2;
+      m.add(tip);
+      this.handles.push(tip);
+    };
+    arc('z'); arc('x'); arc('y');
+    // 台面投影框（Tinkercad 的选中底框）
+    const fz = this.floorZ();
+    const pts = [[box.min.x, box.min.y], [box.max.x, box.min.y], [box.max.x, box.max.y], [box.min.x, box.max.y], [box.min.x, box.min.y]]
+      .map(([x, y]) => new THREE.Vector3(x, y, fz - 0.4));
+    const frame = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineDashedMaterial({ color: 0x3e7bfa, dashSize: 3, gapSize: 2 }));
+    frame.computeLineDistances();
+    this.gizmo.add(frame);
+    this.gizmo.visible = true;
+  }
+
+  hitHandle(ev) {
+    if (!this.gizmo.visible) return null;
+    this.v.root.updateMatrixWorld(true);
+    const r = this.v.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    this.v.raycaster.setFromCamera(ndc, this.v.camera);
+    const hits = this.v.raycaster.intersectObjects(this.handles, false);
+    return hits.length ? hits[0] : null;
+  }
+
+  hitPart(ev) {
+    const r = this.v.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    this.v.raycaster.setFromCamera(ndc, this.v.camera);
+    const dis = new Set(W.project.disabled);
+    const meshes = [...this.v.objects.entries()].filter(([id]) => !dis.has(id)).map(([, o]) => o.mesh);
+    const hits = this.v.raycaster.intersectObjects(meshes, false);
+    return hits.length ? hits[0] : null;
+  }
+
+  // ---- 拖动 ----
+  onDown(ev) {
+    if (!W.pose.on || ev.button !== 0) return;
+    const h = this.hitHandle(ev);
+    let mode = null;
+    let id = null;
+    if (h) {
+      mode = h.object.userData.kind;
+    } else {
+      const ph = this.hitPart(ev);
+      if (!ph) return;                         // 空白处：照常旋转视角
+      id = ph.object.userData.partId;
+      if (ev.shiftKey) { select(id, true); ev.stopImmediatePropagation(); return; }
+      if (!W.multi.has(id)) select(id);
+      mode = 'move';
+    }
+    ev.stopImmediatePropagation();
+    ev.preventDefault();
+    this.v.controls.enabled = false;
+    this.v.renderer.domElement.setPointerCapture(ev.pointerId);
+    const ids = this.selectedIds();
+    const start = {};
+    ids.forEach((pid) => { start[pid] = this.v.objects.get(pid).group.matrix.clone(); });
+    const ray = this.localRay(ev);
+    const box = this.selBox(ids);
+    const center = box.getCenter(new THREE.Vector3());
+    const d = { mode, ids, start, center, moved: false, axis: h && h.object.userData.axis };
+    if (mode === 'move') {
+      const p0 = ray.at(0, new THREE.Vector3());
+      const ph = this.hitPart(ev);
+      const z0 = ph ? this.v.root.worldToLocal(ph.point.clone()).z : center.z;
+      d.plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -z0);
+      d.p0 = ray.intersectPlane(d.plane, new THREE.Vector3()) || p0;
+    } else if (mode === 'lift') {
+      // 过手柄、正对相机的竖直平面
+      const camLocal = this.v.root.worldToLocal(this.v.camera.position.clone());
+      const n = new THREE.Vector3(camLocal.x - center.x, camLocal.y - center.y, 0).normalize();
+      if (n.lengthSq() < 1e-6) n.set(0, -1, 0);
+      d.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, center);
+      d.p0 = ray.intersectPlane(d.plane, new THREE.Vector3()) || center.clone();
+    } else if (mode === 'rot') {
+      const ax = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) }[d.axis];
+      d.axisVec = ax;
+      d.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(ax, center);
+      const p = ray.intersectPlane(d.plane, new THREE.Vector3());
+      d.v0 = p ? p.sub(center) : null;
+    }
+    pushUndo();
+    this.drag = d;
+  }
+
+  onMove(ev) {
+    const d = this.drag;
+    if (!d) return;
+    const ray = this.localRay(ev);
+    const step = snapStep();
+    let T = new THREE.Matrix4();
+    let text = '';
+    if (d.mode === 'move' || d.mode === 'lift') {
+      const p = ray.intersectPlane(d.plane, new THREE.Vector3());
+      if (!p) return;
+      const delta = p.sub(d.p0);
+      if (d.mode === 'move') {
+        delta.z = 0;
+        delta.x = snapTo(delta.x, step);
+        delta.y = snapTo(delta.y, step);
+        text = `X ${fmtSigned(delta.x)} · Y ${fmtSigned(delta.y)} mm`;
+      } else {
+        delta.x = 0; delta.y = 0;
+        delta.z = snapTo(delta.z, step);
+        text = `高度 ${fmtSigned(delta.z)} mm`;
+      }
+      T.makeTranslation(delta.x, delta.y, delta.z);
+    } else if (d.mode === 'rot' && d.v0) {
+      const p = ray.intersectPlane(d.plane, new THREE.Vector3());
+      if (!p) return;
+      const v1 = p.sub(d.center);
+      const cross = new THREE.Vector3().crossVectors(d.v0, v1).dot(d.axisVec);
+      let ang = Math.atan2(cross, d.v0.dot(v1));
+      const deg = ev.shiftKey ? 15 : 90;
+      ang = Math.round(THREE.MathUtils.radToDeg(ang) / deg) * deg;
+      text = `${'XYZ'['xyz'.indexOf(d.axis)]} 轴 ${ang > 0 ? '+' : ''}${ang}°`;
+      const rad = THREE.MathUtils.degToRad(ang);
+      T = new THREE.Matrix4().makeTranslation(d.center.x, d.center.y, d.center.z)
+        .multiply(new THREE.Matrix4().makeRotationAxis(d.axisVec, rad))
+        .multiply(new THREE.Matrix4().makeTranslation(-d.center.x, -d.center.y, -d.center.z));
+    }
+    d.moved = true;
+    d.ids.forEach((pid) => {
+      const o = this.v.objects.get(pid);
+      o.group.matrix.copy(T.clone().multiply(d.start[pid]));
+      o.group.matrixWorldNeedsUpdate = true;
+    });
+    this.updateGizmo();
+    this.showLabel(ev, text);
+  }
+
+  onUp() {
+    const d = this.drag;
+    if (!d) return;
+    this.drag = null;
+    this.v.controls.enabled = true;
+    this.label.classList.add('hidden');
+    if (!d.moved) { W.pose.undo.pop(); return; }
+    d.ids.forEach((pid) => this.commit(pid));
+    afterPoseChange();
+  }
+
+  commit(pid) {
+    const o = this.v.objects.get(pid);
+    const arr = o.group.matrix.toArray().map((x) => Math.round(x * 1e4) / 1e4);
+    W.project.poses = W.project.poses || {};
+    W.project.poses[pid] = arr;
+  }
+
+  // 键盘：整体平移 / 旋转所选
+  applyAll(T) {
+    const ids = this.selectedIds();
+    if (!ids.length) return;
+    pushUndo();
+    ids.forEach((pid) => {
+      const o = this.v.objects.get(pid);
+      o.group.matrix.premultiply(T);
+      o.group.matrixWorldNeedsUpdate = true;
+      this.commit(pid);
+    });
+    this.updateGizmo();
+    afterPoseChange();
+  }
+
+  showLabel(ev, text) {
+    if (!text) return;
+    const r = this.v.host.getBoundingClientRect();
+    this.label.textContent = text;
+    this.label.style.left = `${ev.clientX - r.left + 14}px`;
+    this.label.style.top = `${ev.clientY - r.top + 14}px`;
+    this.label.classList.remove('hidden');
+  }
+
+  // 相机视角下「上 / 右」对应的台面方向
+  screenAxes() {
+    const camLocal = this.v.root.worldToLocal(this.v.camera.position.clone());
+    const tgtLocal = this.v.root.worldToLocal(this.v.controls.target.clone());
+    const f = new THREE.Vector3(tgtLocal.x - camLocal.x, tgtLocal.y - camLocal.y, 0);
+    if (f.lengthSq() < 1e-6) f.set(0, 1, 0);
+    const fwd = Math.abs(f.x) > Math.abs(f.y) ? new THREE.Vector3(Math.sign(f.x), 0, 0) : new THREE.Vector3(0, Math.sign(f.y), 0);
+    const right = new THREE.Vector3(fwd.y, -fwd.x, 0);
+    return { fwd, right };
+  }
+}
+
+function snapStep() {
+  const v = W.pose.snap;
+  if (v === 't') return (W.model && W.model.thickness) || 3;
+  return Number(v) || 0;
+}
+function snapTo(x, step) { return step ? Math.round(x / step) * step : Math.round(x * 100) / 100; }
+function fmtSigned(x) { const r = Math.round(x * 100) / 100; return (r > 0 ? '+' : '') + r; }
+
+function pushUndo() {
+  W.pose.undo.push(JSON.stringify(W.project.poses || {}));
+  if (W.pose.undo.length > 60) W.pose.undo.shift();
+  W.pose.redo = [];
+}
+
+function restorePoses(json) {
+  W.project.poses = JSON.parse(json);
+  if (!view || !W.model) return;
+  W.model.parts.forEach((p) => {
+    const o = view.objects.get(p.id);
+    if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
+  });
+  if (poser) poser.updateGizmo();
+  afterPoseChange();
+}
+
+function undoPose() {
+  if (!W.pose.undo.length) return;
+  W.pose.redo.push(JSON.stringify(W.project.poses || {}));
+  restorePoses(W.pose.undo.pop());
+}
+function redoPose() {
+  if (!W.pose.redo.length) return;
+  W.pose.undo.push(JSON.stringify(W.project.poses || {}));
+  restorePoses(W.pose.redo.pop());
+}
+
+function resetPoses(all) {
+  pushUndo();
+  const poses = { ...(W.project.poses || {}) };
+  if (all) Object.keys(poses).forEach((k) => delete poses[k]);
+  else poser.selectedIds().forEach((id) => delete poses[id]);
+  restorePoses(JSON.stringify(poses));
+}
+
+let poseCheckSeq = 0;
+const checkPose = debounce(async () => {
+  if (!W.pose.on || !W.model || !W.model.token) return;
+  const seq = ++poseCheckSeq;
+  const dis = new Set(W.project.disabled);
+  const ids = W.model.parts.map((p) => p.id).filter((id) => !dis.has(id) && id !== 'reference');
+  const r = await api().check_pose(W.model.token, W.project.poses || {}, ids);
+  if (seq !== poseCheckSeq) return;
+  if (r.error) { setNote(r.error, 'error'); return; }
+  W.pose.report = r.report;
+  if (view) view.refreshStates();
+  renderPartsPanel();
+  // 汇总：全部咬合且连通？
+  const rep = r.report;
+  const bad = ids.filter((id) => rep[id] && rep[id].collide.length);
+  // 连通分量：最大的一组视为主体
+  const comp = new Map();
+  let biggest = [];
+  ids.forEach((start) => {
+    if (comp.has(start)) return;
+    const group = [];
+    const stack = [start];
+    while (stack.length) {
+      const id = stack.pop();
+      if (comp.has(id)) continue;
+      comp.set(id, start);
+      group.push(id);
+      (rep[id] ? rep[id].touch.concat(rep[id].collide) : []).forEach((n) => { if (ids.includes(n)) stack.push(n); });
+    }
+    if (group.length > biggest.length) biggest = group;
+  });
+  const loose = ids.filter((id) => !biggest.includes(id));
+  if (bad.length) setNote(`有 ${bad.length} 块板互相穿透（红色）：${bad.map(nameOf).join('、')}`, 'error');
+  else if (!loose.length && ids.length > 1) setNote('✓ 所有板件都已咬合，没有穿透', 'ok');
+  else setNote(`没有穿透；${loose.map(nameOf).join('、')} 还没有和主体连在一起`, 'info');
+}, 150);
+
+function afterPoseChange() {
+  if (view) view.refreshStates();
+  renderPartsPanel();
+  checkPose();
+}
+
+function setPoseMode(on) {
+  W.pose.on = on;
+  $('#btn-pose').classList.toggle('on', on);
+  $('#pose-snap').classList.toggle('hidden', !on);
+  $('.view3d-hint').textContent = on
+    ? '拖动板件在台面上移动 · 黑色锥形手柄升降 · 彩色弧形箭头旋转（Shift 15°）· 方向键微移 · Ctrl/⌘+↑↓ 升降 · R 转 90° · D 落到台面 · Ctrl/⌘+Z 撤销 · Esc 取消选中'
+    : '拖动旋转 · 右键拖动平移 · 滚轮缩放 · 单击选中板件 · 双击编辑';
+  if (!on) { W.pose.report = null; setNote(''); }
+  if (poser) poser.updateGizmo();
+  if (view) view.refreshStates();
+  renderPartsPanel();
+  if (on) checkPose();
+}
+
+document.addEventListener('keydown', (ev) => {
+  if (!W.pose.on || W.mode !== '3d' || ED.part || !poser) return;
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName)) return;
+  const mod = ev.ctrlKey || ev.metaKey;
+  if (mod && (ev.key === 'z' || ev.key === 'Z')) { ev.preventDefault(); if (ev.shiftKey) redoPose(); else undoPose(); return; }
+  if (mod && (ev.key === 'y' || ev.key === 'Y')) { ev.preventDefault(); redoPose(); return; }
+  if (ev.key === 'Escape') { select(null); return; }
+  const ids = poser.selectedIds();
+  if (!ids.length) return;
+  const step = snapStep() || 1;
+  const s = ev.shiftKey ? step * 10 : step;
+  const { fwd, right } = poser.screenAxes();
+  let T = null;
+  if (mod && ev.key === 'ArrowUp') T = new THREE.Matrix4().makeTranslation(0, 0, s);
+  else if (mod && ev.key === 'ArrowDown') T = new THREE.Matrix4().makeTranslation(0, 0, -s);
+  else if (ev.key === 'ArrowUp') T = new THREE.Matrix4().makeTranslation(fwd.x * s, fwd.y * s, 0);
+  else if (ev.key === 'ArrowDown') T = new THREE.Matrix4().makeTranslation(-fwd.x * s, -fwd.y * s, 0);
+  else if (ev.key === 'ArrowRight') T = new THREE.Matrix4().makeTranslation(right.x * s, right.y * s, 0);
+  else if (ev.key === 'ArrowLeft') T = new THREE.Matrix4().makeTranslation(-right.x * s, -right.y * s, 0);
+  else if (ev.key === 'r' || ev.key === 'R') {
+    const c = poser.selBox(ids).getCenter(new THREE.Vector3());
+    T = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z)
+      .multiply(new THREE.Matrix4().makeRotationZ(ev.shiftKey ? -Math.PI / 2 : Math.PI / 2))
+      .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+  } else if (ev.key === 'd' || ev.key === 'D') {
+    const others = poser.floorZ();
+    const box = poser.selBox(ids);
+    T = new THREE.Matrix4().makeTranslation(0, 0, others - box.min.z);
+  }
+  if (T) { ev.preventDefault(); poser.applyAll(T); }
+});
+
 // ------------------------------------------------------------------ 对外接口（app.js 调用）
 
 function hasContent() {
-  return W.project.disabled.length > 0 || Object.values(W.project.edits).some((l) => l && l.length);
+  return W.project.disabled.length > 0 || Object.values(W.project.edits).some((l) => l && l.length)
+    || Object.keys(W.project.poses || {}).length > 0;
 }
 
 window.SeedWorkshop = {
@@ -741,6 +1209,9 @@ window.SeedWorkshop = {
     W.model = null;
     W.project = freshProject();
     W.selected = null;
+    W.multi.clear();
+    W.pose.report = null;
+    W.pose.undo = []; W.pose.redo = [];
     W.stale = true;
     W.previewStale = false;
     closeEditor();
@@ -757,16 +1228,19 @@ window.SeedWorkshop = {
     if (!hasContent()) return null;
     const edits = {};
     Object.entries(W.project.edits).forEach(([k, v]) => { if (v && v.length) edits[k] = v; });
-    return { disabled: [...W.project.disabled], edits };
+    return { disabled: [...W.project.disabled], edits, poses: { ...(W.project.poses || {}) } };
   },
   setProject(p) {
-    W.project = { disabled: [...(p.disabled || [])], edits: JSON.parse(JSON.stringify(p.edits || {})) };
+    W.project = { disabled: [...(p.disabled || [])], edits: JSON.parse(JSON.stringify(p.edits || {})),
+                  poses: JSON.parse(JSON.stringify(p.poses || {})) };
+    W.pose.undo = []; W.pose.redo = [];
     W.stale = true;
     if (W.mode === '3d') loadModel();
   },
   hasContent,
   paramsChanged: debounce(() => {
     W.stale = true;
+    W.paramsDirty = true;
     if (W.mode === '3d') loadModel();
   }, 600),
   refresh() { W.stale = true; if (W.mode === '3d') loadModel(); },
@@ -777,9 +1251,36 @@ window.SeedWorkshop = {
 
 $('#tab-2d').addEventListener('click', () => setMode('2d'));
 $('#tab-3d').addEventListener('click', () => setMode('3d'));
+$('#btn-pose').addEventListener('click', () => setPoseMode(!W.pose.on));
+$('#pose-snap select').addEventListener('change', (ev) => { W.pose.snap = ev.target.value; });
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view && view.view(b.dataset.view)));
 $('#pe-close').addEventListener('click', closeEditor);
 document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', async () => {
   if (b.dataset.tool === 'text' && !W.fonts) W.fonts = await api().list_fonts();
   addEdit(b.dataset.tool);
 }));
+
+// 浏览器调试模式（?dev=1）下暴露内部状态，供自动化测试
+if (new URLSearchParams(location.search).has('dev')) {
+  window.__seedDebug = {
+    W, THREE,
+    get view() { return view; },
+    get poser() { return poser; },
+    // 板件在屏幕上的位置（像素，相对视口）
+    screenOf(id) {
+      const o = view.objects.get(id);
+      o.mesh.geometry.computeBoundingBox();
+      const c = o.mesh.geometry.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(o.mesh.matrixWorld);
+      c.project(view.camera);
+      const r = view.renderer.domElement.getBoundingClientRect();
+      return [r.left + (c.x + 1) / 2 * r.width, r.top + (1 - c.y) / 2 * r.height];
+    },
+    handleScreen(kind, axis) {
+      const h = poser.handles.find((m) => m.userData.kind === kind && (!axis || m.userData.axis === axis));
+      const c = new THREE.Vector3().setFromMatrixPosition(h.matrixWorld);
+      c.project(view.camera);
+      const r = view.renderer.domElement.getBoundingClientRect();
+      return [r.left + (c.x + 1) / 2 * r.width, r.top + (1 - c.y) / 2 * r.height];
+    },
+  };
+}

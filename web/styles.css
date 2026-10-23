@@ -664,15 +664,15 @@ input, textarea, select { font: inherit; user-select: text; }
   padding: 4px 12px; border-radius: 14px; pointer-events: none; white-space: nowrap;
 }
 .view3d-note {
-  position: absolute; top: 12px; left: 262px; right: 12px; margin: 0 auto; width: fit-content;
+  position: absolute; top: 12px; left: 312px; right: 12px; margin: 0 auto; width: fit-content;
   background: rgba(255,255,255,0.95); border: 1px solid var(--border); border-radius: 8px;
-  padding: 8px 14px; font-size: 12.5px; color: var(--text); box-shadow: var(--shadow); max-width: calc(100% - 274px);
+  padding: 8px 14px; font-size: 12.5px; color: var(--text); box-shadow: var(--shadow); max-width: calc(100% - 324px);
 }
 .view3d-note.error { color: var(--danger); border-color: #f5cdc8; background: #fff5f4; }
 .view3d-note.info { color: #6b5320; background: #fff8e6; border-color: #f0dfb3; }
 
 .parts-panel {
-  position: absolute; top: 12px; left: 12px; width: 236px; max-height: calc(100% - 60px);
+  position: absolute; top: 12px; left: 12px; width: 286px; max-height: calc(100% - 60px);
   overflow: auto; background: rgba(255,255,255,0.96); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: var(--shadow); padding: 6px;
 }
@@ -751,3 +751,25 @@ input, textarea, select { font: inherit; user-select: text; }
 .pe-actions .danger { color: var(--danger); }
 .pe-warn { margin-top: 10px; font-size: 12px; color: var(--danger); }
 .pe-foot { font-size: 11.5px; color: var(--text-mute); padding: 6px 12px; background: var(--bg-elev); border-top: 1px solid var(--border); }
+
+/* 手动摆放 */
+.preview-toolbar button.pose-btn.on { background: #1F6FEB; color: white; border-color: #1F6FEB; }
+.pose-snap {
+  position: absolute; right: 12px; bottom: 44px; background: rgba(255,255,255,0.95);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12px;
+  color: var(--text-mute); box-shadow: var(--shadow);
+}
+.pose-snap select { margin-left: 4px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; }
+.pose-label {
+  position: absolute; pointer-events: none; background: #222; color: white; font-size: 12px;
+  padding: 3px 8px; border-radius: 4px; white-space: nowrap; z-index: 5;
+}
+.view3d-note.ok { color: #1d6b3a; background: #ecf8f0; border-color: #b7e2c6; }
+.pp-name i { font-style: normal; font-size: 10.5px; border-radius: 8px; padding: 0 5px; margin-left: 4px; white-space: nowrap; }
+.pp-ok { background: #e3f4ea; color: #1d6b3a; }
+.pp-bad { background: #fde8e8; color: #c4453b; }
+.pp-free { background: #f1f0ec; color: #8a877f; }
+.pp-moved { font-weight: normal; margin-right: 3px; }
+.pp-posebar { display: flex; gap: 6px; padding: 6px 6px 0; }
+.pp-posebar button { flex: 1; font-size: 11.5px; padding: 3px 0; border: 1px solid var(--border); border-radius: 5px; background: white; cursor: pointer; }
+.pp-posebar button:hover { background: #eef4fe; }

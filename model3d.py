@@ -1038,3 +1038,51 @@ def check_collisions(parts: list[dict], t: float) -> int:
             if i != j:
                 total += sol[i].hits(sol[j])[0]
     return total
+
+
+
+# ================================================================== 手动摆放校验
+
+def pose_report(parts: list[dict], t: float, poses: dict[str, list[float]],
+                ids: list[str] | None = None) -> dict:
+    """按给定（或默认）矩阵摆放板件，返回每块板的穿透 / 接触对象.
+
+    poses: {part id: 16 位列主序矩阵}，没给的用 part["matrix"]。
+    ids:   参与检测的板（前端只传启用的），None 表示全部（校准尺除外）。
+    """
+    import numpy as np
+    sel = [p for p in parts if p.get("id") != "reference" and (ids is None or p.get("id") in ids)]
+    sol = []
+    for p in sel:
+        s = p.get("_solid")
+        if s is None:
+            try:
+                s = _Solid(p, t)
+            except Exception:
+                continue
+            p["_solid"] = s
+        m = poses.get(p["id"]) or p["matrix"]
+        s.place(np.array(m, float).reshape(4, 4).T)
+        sol.append((p["id"], s))
+    report = {pid: {"collide": [], "touch": []} for pid, _s in sol}
+    for i in range(len(sol)):
+        for j in range(i + 1, len(sol)):
+            a_id, a = sol[i]
+            b_id, b = sol[j]
+            # 快速排除：两块板的包围盒离得远
+            wa, wb = a.world, b.world
+            if wa.shape[1] == 0 or wb.shape[1] == 0:
+                continue
+            lo_a, hi_a = wa[:3].min(1), wa[:3].max(1)
+            lo_b, hi_b = wb[:3].min(1), wb[:3].max(1)
+            if (lo_a > hi_b + 2 * t).any() or (lo_b > hi_a + 2 * t).any():
+                continue
+            c1, n1 = a.hits(b)
+            c2, n2 = b.hits(a)
+            if c1 + c2 > 3:
+                report[a_id]["collide"].append(b_id)
+                report[b_id]["collide"].append(a_id)
+            elif n1 + n2 > 8:
+                report[a_id]["touch"].append(b_id)
+                report[b_id]["touch"].append(a_id)
+    return report
