@@ -129,6 +129,23 @@
               <div id="view3d-canvas" class="view3d-canvas"></div>
               <aside id="parts-panel" class="parts-panel"></aside>
               <div id="view3d-note" class="view3d-note hidden"></div>
+              <div id="kbd-help" class="kbd-help hidden">
+                <b>摆放模式操作</b>
+                <table>
+                  <tr><td>左键拖板件</td><td>在台面上移动（靠近其他板的边会自动对齐，按住 Alt 不对齐）</td></tr>
+                  <tr><td>黑色锥形手柄</td><td>升降</td></tr>
+                  <tr><td>彩色弧形箭头</td><td>绕红 X / 绿 Y / 蓝 Z 轴旋转，45° 吸附，Shift 22.5°</td></tr>
+                  <tr><td>左键拖空白处</td><td>框选；Shift+点击 加选 / 减选</td></tr>
+                  <tr><td>右键拖动</td><td>旋转视角</td></tr>
+                  <tr><td>中键 / Ctrl+左键</td><td>平移视角；滚轮缩放（朝鼠标位置）</td></tr>
+                  <tr><td>方向键</td><td>按吸附步长平移（Shift ×10）；Ctrl/⌘+↑↓ 升降</td></tr>
+                  <tr><td>R / Shift+R</td><td>绕竖直轴转 ±90°</td></tr>
+                  <tr><td>D</td><td>落到台面</td></tr>
+                  <tr><td>Ctrl/⌘+Z</td><td>撤销；Ctrl/⌘+Shift+Z 重做</td></tr>
+                  <tr><td>Esc</td><td>取消选中</td></tr>
+                </table>
+                <p>板拖回原来的装配位置附近会自动吸附；放下后自动检查卡榫是否咬合。</p>
+              </div>
               <div id="pose-snap" class="pose-snap hidden">吸附
                 <select>
                   <option value="0.5">0.5 mm</option>
