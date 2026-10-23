@@ -116,6 +116,7 @@ SeedBoxes/
 - 新增生成器的 3D 拼装：在 `SUPPORTED_3D` 加名字，确认 `_box_dims` 和标签映射；用 dev_server 截图检查卡榫是否咬合
 - **自动装配（试验）**：没写配方的生成器走 `auto_assemble`——按 rect 板尺寸推断 X/Y/H（取前 8 个候选），多轮逐板试放到 6 个面（含旋转 90°、翻面），`_Solid.hits` 在板边缘带取样做穿透 / 接触检测，要求零穿透、≥4 块、全部连通；选放上板最多、体积最大的方案；四面墙只缺一面时整体转向让开口朝前。目前 31 个通过（另 5 个配方，共 36 个拼装）
 - **手动摆放**（workshop.js 的 `Poser`，交互参考 Tinkercad / SketchForge，代码自写）：位置存 `W.project.poses[id]`（16 位列主序矩阵，boxes 世界坐标），只影响 3D、不影响导出；`get_model` 返回 `token`，后端缓存几何，`check_pose(token, poses, ids)` 用 `pose_report` 返回每块板的穿透 / 接触；`?dev=1` 下有 `window.__seedDebug` 供自动化测试
+- **3D 编辑器**（SketchForge-3D 改版，AGPL-3.0，详见 `sketchforge/README.md`）：`backend.sketchforge_url()` 首次调用时用 http.server 把 `web_sketchforge/` 挂到 127.0.0.1:47321（占用则随机端口）；workshop.js 用 iframe（`#sf-host`，全窗口）+ postMessage（`seedboxes:command/result/ready/changed/home`，命令同 SketchForge MCP）驱动。导入：板件三角网格（含开孔）整体平移到原点、底面贴地（`SF.off`）；回读：每块板 3 个参考顶点反求刚体变换 → `W.project.poses`。改界面文字：`sketchforge/` 里改补丁中的 `public/seedboxes-zh.js` 词典后 `bash sketchforge/build.sh` 重建；index.html 的 CSP 需保留 `frame-src http://127.0.0.1:*`
 - `AUTO_DENY`：能通过校验但人工看过形状不对的（HingeBox、OrganPipe、Rotary、PirateChest、Arcade、CanStorage、CoinDisplay、DiceBox、WallRack），继续平铺
 - 校验器自检：5 个配方方盒全部 0 穿透；把前板上移 1.5mm 能检出 84 个穿透点
 

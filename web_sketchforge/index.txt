@@ -1,0 +1,20 @@
+1:"$Sreact.fragment"
+2:I[5341,[],""]
+3:I[25,[],""]
+4:I[1012,[],"ClientPageRoot"]
+5:I[8010,["787","static/chunks/f858556e-c2093651ae278e13.js","747","static/chunks/38b89ec4-12c3aa044ed1de09.js","34","static/chunks/ff8076c3-07f9b4dcc39165b6.js","103","static/chunks/9a4e65d8-8f394bc74e6c6234.js","295","static/chunks/9d78c252-b590d4c1acd212bf.js","388","static/chunks/63d2ba32-2dc4e04b1ff55d5f.js","884","static/chunks/884-14427c01149bfa6e.js","974","static/chunks/app/page-292a0982e0994aff.js"],"default"]
+8:I[5104,[],"OutletBoundary"]
+a:I[7158,[],"AsyncMetadataOutlet"]
+c:I[5104,[],"ViewportBoundary"]
+e:I[5104,[],"MetadataBoundary"]
+f:"$Sreact.suspense"
+11:I[4431,[],""]
+:HL["/_next/static/css/a32d3b864fed2b1c.css","style"]
+0:{"P":null,"b":"qfrBlGld9gZCQaLkyGrg5","p":"","c":["",""],"i":false,"f":[[["",{"children":["__PAGE__",{}]},"$undefined","$undefined",true],["",["$","$1","c",{"children":[[["$","link","0",{"rel":"stylesheet","href":"/_next/static/css/a32d3b864fed2b1c.css","precedence":"next","crossOrigin":"$undefined","nonce":"$undefined"}]],["$","html",null,{"lang":"en","style":{"colorScheme":"light"},"children":["$","body",null,{"suppressHydrationWarning":true,"children":[["$","$L2",null,{"parallelRouterKey":"children","error":"$undefined","errorStyles":"$undefined","errorScripts":"$undefined","template":["$","$L3",null,{}],"templateStyles":"$undefined","templateScripts":"$undefined","notFound":[[["$","title",null,{"children":"404: This page could not be found."}],["$","div",null,{"style":{"fontFamily":"system-ui,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif,\"Apple Color Emoji\",\"Segoe UI Emoji\"","height":"100vh","textAlign":"center","display":"flex","flexDirection":"column","alignItems":"center","justifyContent":"center"},"children":["$","div",null,{"children":[["$","style",null,{"dangerouslySetInnerHTML":{"__html":"body{color:#000;background:#fff;margin:0}.next-error-h1{border-right:1px solid rgba(0,0,0,.3)}@media (prefers-color-scheme:dark){body{color:#fff;background:#000}.next-error-h1{border-right:1px solid rgba(255,255,255,.3)}}"}}],["$","h1",null,{"className":"next-error-h1","style":{"display":"inline-block","margin":"0 20px 0 0","padding":"0 23px 0 0","fontSize":24,"fontWeight":500,"verticalAlign":"top","lineHeight":"49px"},"children":404}],["$","div",null,{"style":{"display":"inline-block"},"children":["$","h2",null,{"style":{"fontSize":14,"fontWeight":400,"lineHeight":"49px","margin":0},"children":"This page could not be found."}]}]]}]}]],[]],"forbidden":"$undefined","unauthorized":"$undefined"}],["$","script",null,{"src":"/seedboxes-zh.js","defer":true}]]}]}]]}],{"children":["__PAGE__",["$","$1","c",{"children":[["$","$L4",null,{"Component":"$5","searchParams":{},"params":{},"promises":["$@6","$@7"]}],null,["$","$L8",null,{"children":["$L9",["$","$La",null,{"promise":"$@b"}]]}]]}],{},null,false]},null,false],["$","$1","h",{"children":[null,[["$","$Lc",null,{"children":"$Ld"}],null],["$","$Le",null,{"children":["$","div",null,{"hidden":true,"children":["$","$f",null,{"fallback":null,"children":"$L10"}]}]}]]}],false]],"m":"$undefined","G":["$11",[]],"s":false,"S":true}
+6:{}
+7:"$0:f:0:1:2:children:1:props:children:0:props:params"
+d:[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}]]
+9:null
+12:I[6505,[],"IconMark"]
+b:{"metadata":[["$","title","0",{"children":"SketchForge 3D editor"}],["$","meta","1",{"name":"description","content":"Browser-based SketchForge editor workspace"}],["$","link","2",{"rel":"icon","href":"assets/sketchforge/sketchforge-logo.png"}],["$","link","3",{"rel":"apple-touch-icon","href":"assets/sketchforge/sketchforge-logo.png"}],["$","$L12","4",{}]],"error":null,"digest":"$undefined"}
+10:"$b:metadata"

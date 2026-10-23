@@ -38,6 +38,7 @@ SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光�
 - **3D 模型预览** — 预览区切到「3D 模型」：36 个盒、柜、机箱类生成器显示拼好的样子（其中 31 个为自动装配，经碰撞校验确认卡榫咬合），其余显示所有板件平铺
 - **局部修改** — 板件清单里可禁用某块板；「编辑」进入单块板编辑器，开圆孔 / 方孔 / 圆角矩形孔、刻中文字（系统中文字体转轮廓），导出的 SVG / PDF / DXF 等都会带上
 - **手动摆放（仿 Tinkercad）** — 3D 视图点「✋ 摆放」：拖动板件、黑色锥形手柄升降、彩色弧形箭头旋转，吸附网格、方向键微移、撤销；每次放下自动做碰撞校验，穿透的板标红、咬合的板在清单里注明
+- **3D 编辑器（SketchForge 改版）** — 3D 视图点「🛠 3D 编辑器」：在完整的 SketchForge 编辑界面（中文）里移动、旋转、对齐、组合板件，点「✓ 完成 · 返回 SeedBoxes」或左上角「主页」后，摆放结果同步回来并自动做咬合检查；「☰ 板件」可隐藏板件清单
 - **项目文件** — 参数、局部修改和手动摆放位置保存为 `.seedbox.json`，随时打开继续改
 
 ---
@@ -144,7 +145,7 @@ SeedBoxes/
 ├── model3d.py              3D 模型：零件捕获、组装配方、局部修改注入、中文字转轮廓
 ├── web/                    前端
 │   ├── index.html / app.js / styles.css
-│   ├── workshop.js         3D 视图 + 板件清单 + 单块板编辑器（ES 模块）
+│   ├── workshop.js         3D 视图 + 板件清单 + 单块板编辑器 + 3D 编辑器桥接（ES 模块）
 │   ├── vendor/three/       three.js r169（MIT，离线打包）
 │   ├── seedboxes-logo.svg  主软件 logo
 │   └── makerseed-logo.svg  种子创客工坊标识
@@ -157,6 +158,8 @@ SeedBoxes/
 ├── scripts/fetch_boxes_assets.py                   下载上游作品照片 + 翻译到 boxes_assets/
 ├── build_pyd.bat / setup_ext.py / install_msvc.bat 加密路径预备
 ├── README.md / DEVELOPMENT.md / CLAUDE.md          文档
+├── sketchforge/            3D 编辑器改版：补丁、构建脚本、说明
+├── web_sketchforge/        3D 编辑器构建产物（SketchForge-3D 改版，AGPL-3.0）
 └── LICENSE                 GPL-3.0
 ```
 
@@ -169,6 +172,7 @@ SeedBoxes/
 依赖：
 - [boxes](https://github.com/florianfesti/boxes) (GPL-3.0) by Florian Festi — 核心渲染引擎
 - [pywebview](https://github.com/r0x0r/pywebview) (BSD-3-Clause) — 桌面框架
+- [SketchForge-3D](https://github.com/Formsmith746/SketchForge-3D) (AGPL-3.0-only) — 3D 编辑器；改版构建在 `web_sketchforge/`，对应源码 = 上游提交 `e9cb8e8` + `sketchforge/seedboxes.patch`（见 `sketchforge/README.md`）
 
 如分发本程序，需附带源码或源码获取方式（GPL 要求）。
 

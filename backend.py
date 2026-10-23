@@ -79,6 +79,65 @@ def _find_asset_dir(kind: str) -> str:
     return ""
 
 
+# --------------------------------------------------------------- SketchForge
+# 3D 编辑器是 SketchForge-3D（AGPL-3.0）的改版静态构建，放在 web_sketchforge/。
+# 它的资源路径都是绝对路径（/_next、/occt…），所以单独起一个本地静态服务器，
+# 在 3D 视图里用 iframe 嵌入。端口固定（浏览器存储按端口区分），被占用时退到随机端口。
+
+SKETCHFORGE_PORT = 47321
+_SF_LOCK = threading.Lock()
+_SF_URL: str | None = None
+
+
+def _sketchforge_dir() -> str:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        path = os.path.join(sys._MEIPASS, "web_sketchforge")
+    else:
+        path = os.path.join(_PROJECT_DIR, "web_sketchforge")
+    return path if os.path.isfile(os.path.join(path, "index.html")) else ""
+
+
+def _start_sketchforge_server() -> str:
+    """启动（只启动一次）SketchForge 静态服务器，返回根 URL；找不到构建时抛错."""
+    global _SF_URL
+    with _SF_LOCK:
+        if _SF_URL:
+            return _SF_URL
+        root = _sketchforge_dir()
+        if not root:
+            raise FileNotFoundError("找不到 3D 编辑器文件（web_sketchforge/），请先运行 sketchforge/build.sh")
+        import http.server
+        import socketserver
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map,
+                              ".wasm": "application/wasm", ".js": "text/javascript",
+                              ".mjs": "text/javascript", ".json": "application/json",
+                              ".svg": "image/svg+xml", ".txt": "text/plain"}
+
+            def __init__(self, *a, **kw):
+                super().__init__(*a, directory=root, **kw)
+
+            def log_message(self, *a):   # 静默
+                pass
+
+            def end_headers(self):
+                self.send_header("Cache-Control", "no-cache")
+                super().end_headers()
+
+        class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        try:
+            httpd = Server(("127.0.0.1", SKETCHFORGE_PORT), Handler)
+        except OSError:
+            httpd = Server(("127.0.0.1", 0), Handler)
+        threading.Thread(target=httpd.serve_forever, name="sketchforge-http", daemon=True).start()
+        _SF_URL = f"http://127.0.0.1:{httpd.server_address[1]}/"
+        return _SF_URL
+
+
 # --------------------------------------------------------------------- i18n
 
 def _parse_po(path: str) -> dict[str, str]:
@@ -588,6 +647,13 @@ class Api:
             return {"report": model3d.pose_report(parts, t, poses or {}, ids)}
         except Exception as exc:
             return {"error": f"校验失败：{exc}"}
+
+    def sketchforge_url(self) -> dict[str, Any]:
+        """3D 编辑器（SketchForge）地址；首次调用时启动本地静态服务器."""
+        try:
+            return {"url": _start_sketchforge_server() + "?editor=1&embed=seedboxes"}
+        except Exception as exc:
+            return {"error": f"3D 编辑器启动失败：{exc}"}
 
     def edit_shapes(self, edits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """把编辑（圆/方/圆角矩形/文字）转成多边形（「从外面看」坐标系）."""

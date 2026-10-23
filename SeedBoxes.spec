@@ -70,6 +70,7 @@ fonttools_modules = collect_submodules('fontTools.ttLib.tables') + [
 # 必须显式拷贝，否则打包后中文翻译失效 + 168 张样图全部丢失
 extra_datas = [
     ('web', 'web'),
+    ('web_sketchforge', 'web_sketchforge'),   # 3D 编辑器（SketchForge 改版，AGPL-3.0）
     ('logo.ico', '.'),
     ('i18n', 'i18n'),   # 较新的 zh_CN.po（backend._load_translation 优先使用）
 ]

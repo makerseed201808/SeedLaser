@@ -489,6 +489,7 @@ function rebuildPart(id) {
 // ------------------------------------------------------------------ 视图切换
 
 function setMode(mode) {
+  if (mode !== '3d' && SF.open) closeSketchForge();
   W.mode = mode;
   $('#tab-2d').classList.toggle('on', mode === '2d');
   $('#tab-3d').classList.toggle('on', mode === '3d');
@@ -1457,6 +1458,270 @@ document.addEventListener('keydown', (ev) => {
   if (T) { ev.preventDefault(); poser.applyAll(T); }
 });
 
+// ------------------------------------------------------------------ 3D 编辑器（SketchForge 改版）
+// 打开时把启用的板件（含开孔）按当前摆放导入 SketchForge；在编辑器里移动 / 旋转后，
+// 用每块板上 3 个顶点前后的位置反求刚体变换，写回 W.project.poses（和「✋ 摆放」共用）。
+// 坐标：boxes（z 向上）经 view.root（绕 X -90°）变成 three / SketchForge（y 向上）。
+
+const SF = {
+  frame: null, origin: '*', ready: null, open: false,
+  seq: 0, pending: new Map(),
+  key: null,            // 已导入场景对应的 模型 token + 编辑 + 禁用
+  map: new Map(),       // SketchForge 对象 id → { pid, idx:[3], ref:[Vector3×3], base:Matrix4（导入时的摆放） }
+  syncing: false, dirty: false, stats: null,
+  off: new THREE.Vector3(),
+};
+
+function sfCommand(action, params) {
+  return new Promise((resolve, reject) => {
+    const id = 'sb' + (++SF.seq);
+    const timer = setTimeout(() => { SF.pending.delete(id); reject(new Error('3D 编辑器无响应')); }, 30000);
+    SF.pending.set(id, (msg) => {
+      clearTimeout(timer);
+      if (msg.ok) resolve(msg.data); else reject(new Error(msg.error || '命令失败'));
+    });
+    SF.frame.contentWindow.postMessage({ type: 'seedboxes:command', id, action, params: params || {} }, SF.origin);
+  });
+}
+
+window.addEventListener('message', (ev) => {
+  if (!SF.frame || ev.source !== SF.frame.contentWindow) return;
+  const msg = ev.data || {};
+  if (msg.type === 'seedboxes:ready') { if (SF.ready) SF.ready.resolve(); }
+  else if (msg.type === 'seedboxes:result') {
+    const cb = SF.pending.get(msg.id);
+    if (cb) { SF.pending.delete(msg.id); cb(msg); }
+  } else if (msg.type === 'seedboxes:changed') { if (SF.open && !SF.syncing) sfSync(); }
+  else if (msg.type === 'seedboxes:home') closeSketchForge();
+});
+
+async function sfEnsureFrame() {
+  if (SF.frame) return SF.ready.promise;
+  const r = await api().sketchforge_url();
+  if (r.error) throw new Error(r.error);
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  SF.ready = { promise, resolve };
+  SF.origin = new URL(r.url).origin;
+  const f = document.createElement('iframe');
+  f.src = r.url;
+  f.title = '3D 编辑器';
+  f.allow = 'clipboard-read; clipboard-write';
+  $('#sf-host').appendChild(f);
+  SF.frame = f;
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('3D 编辑器加载超时')), 90000));
+  return Promise.race([promise, timeout]);
+}
+
+function sfSceneKey() {
+  return JSON.stringify([W.model && W.model.token, W.project.edits, [...W.project.disabled].sort()]);
+}
+
+// 板件 → three 世界坐标下的三角形（非索引）
+function partWorldPositions(o) {
+  view.root.updateMatrixWorld(true);
+  let g = o.mesh.geometry;
+  if (g.index) g = g.toNonIndexed();
+  const m = new THREE.Matrix4().multiplyMatrices(view.root.matrix, o.group.matrix);
+  const pos = g.attributes.position;
+  const out = new Float64Array(pos.count * 3);
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(m);
+    out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z;
+  }
+  if (g !== o.mesh.geometry) g.dispose();
+  return out;
+}
+
+// 选 3 个相距较远、不共线的顶点，作为回读姿态的参考点
+function pickRefIdx(p) {
+  const n = p.length / 3;
+  const at = (i) => new THREE.Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
+  const a = at(0);
+  let b = 0, bd = -1;
+  for (let i = 1; i < n; i++) { const d = at(i).distanceToSquared(a); if (d > bd) { bd = d; b = i; } }
+  const ab = at(b).sub(a).normalize();
+  let c = 0, cd = -1;
+  for (let i = 1; i < n; i++) {
+    const w = at(i).sub(a);
+    const d = w.sub(ab.clone().multiplyScalar(w.dot(ab))).lengthSq();
+    if (d > cd) { cd = d; c = i; }
+  }
+  return [0, b, c];
+}
+
+function frameOf(a, b, c) {
+  const x = b.clone().sub(a).normalize();
+  const y = c.clone().sub(a);
+  y.sub(x.clone().multiplyScalar(y.dot(x))).normalize();
+  const z = new THREE.Vector3().crossVectors(x, y);
+  return new THREE.Matrix4().makeBasis(x, y, z).setPosition(a);
+}
+
+async function sfLoadScene() {
+  const scene = await sfCommand('get_scene');
+  const ids = (scene.shapes || []).map((s) => s.id);
+  SF.syncing = true;
+  try {
+    if (ids.length) await sfCommand('delete_objects', { ids });
+    SF.map.clear();
+    const dis = new Set(W.project.disabled);
+    const parts = W.model.parts.filter((p) => !dis.has(p.id) && p.id !== 'reference' && view.objects.get(p.id));
+    // 整体平移：模型放到工作平面中央、底面贴地（SF.off 为 three 世界 → 编辑器 的偏移）
+    const worlds = parts.map((p) => partWorldPositions(view.objects.get(p.id)));
+    const all = new THREE.Box3();
+    worlds.forEach((w) => { for (let k = 0; k < w.length; k += 3) all.expandByPoint(new THREE.Vector3(w[k], w[k + 1], w[k + 2])); });
+    const ctr = all.getCenter(new THREE.Vector3());
+    SF.off = new THREE.Vector3(-Math.round(ctr.x), -all.min.y, -Math.round(ctr.z));
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const w = worlds[i];
+      for (let k = 0; k < w.length; k += 3) { w[k] += SF.off.x; w[k + 1] += SF.off.y; w[k + 2] += SF.off.z; }
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+      for (let k = 0; k < w.length; k += 3) {
+        minX = Math.min(minX, w[k]); maxX = Math.max(maxX, w[k]);
+        minY = Math.min(minY, w[k + 1]);
+        minZ = Math.min(minZ, w[k + 2]); maxZ = Math.max(maxZ, w[k + 2]);
+      }
+      const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+      const local = new Array(w.length);
+      for (let k = 0; k < w.length; k += 3) {
+        local[k] = Math.round((w[k] - cx) * 1e4) / 1e4;
+        local[k + 1] = Math.round((w[k + 1] - minY) * 1e4) / 1e4;
+        local[k + 2] = Math.round((w[k + 2] - cz) * 1e4) / 1e4;
+      }
+      const idx = pickRefIdx(local);
+      const ref = idx.map((j) => new THREE.Vector3(local[j * 3] + cx, local[j * 3 + 1] + minY, local[j * 3 + 2] + cz).sub(SF.off));
+      const color = '#' + WOOD[W.model.parts.indexOf(p) % WOOD.length].toString(16).padStart(6, '0');
+      const r = await sfCommand('import_mesh', { positions: local, name: p.name, color, x: cx, z: cz, elevation: minY });
+      SF.map.set(r.object.id, { pid: p.id, idx, ref, base: new THREE.Matrix4().fromArray(poseOf(p)) });
+    }
+    if (SF.map.size) await sfCommand('select_objects', { ids: [] });
+    await sfCommand('seedboxes_fit_view').catch(() => {});
+    SF.key = sfSceneKey();
+  } finally {
+    SF.syncing = false;
+  }
+}
+
+// SketchForge 对象 → 指定顶点的世界坐标（与 WorkplaneViewport 的变换一致）
+function sfVertex(s, j) {
+  const m = s.importedMesh;
+  const h = s.height;
+  const sx = (s.width ?? s.size) / Math.max(0.001, m.baseWidth);
+  const sy = h / Math.max(0.001, m.baseHeight);
+  const sz = (s.depth ?? s.size) / Math.max(0.001, m.baseDepth);
+  const v = new THREE.Vector3(m.positions[j * 3] * sx, m.positions[j * 3 + 1] * sy - h / 2, m.positions[j * 3 + 2] * sz);
+  v.multiply(new THREE.Vector3(s.mirrorX ? -1 : 1, s.mirrorY ? -1 : 1, s.mirrorZ ? -1 : 1));
+  v.applyEuler(new THREE.Euler(THREE.MathUtils.degToRad(s.rotationX || 0), THREE.MathUtils.degToRad(s.rotation || 0),
+                               THREE.MathUtils.degToRad(s.rotationZ || 0), 'XYZ'));
+  return v.add(new THREE.Vector3(s.x, (s.elevation || 0) + h / 2, s.z));
+}
+
+// 读回编辑器里的摆放 → W.project.poses
+async function sfSync() {
+  if (!SF.frame || !W.model || SF.syncing) { SF.dirty = true; return; }
+  SF.syncing = true;
+  try {
+    const scene = await sfCommand('get_scene', { includeRawShapes: true });
+    const raw = new Map((scene.rawShapes || []).map((s) => [s.id, s]));
+    const C = view.root.matrix.clone();
+    const Ci = C.clone().invert();
+    const stats = { moved: 0, missing: [], reshaped: [], scaled: [] };
+    W.project.poses = W.project.poses || {};
+    SF.map.forEach((info, sid) => {
+      const s = raw.get(sid);
+      if (!s || s.hidden) { stats.missing.push(info.pid); return; }
+      const m = s.importedMesh;
+      if (!m || !m.positions || m.positions.length / 3 <= Math.max(...info.idx)) { stats.reshaped.push(info.pid); return; }
+      const now = info.idx.map((j) => sfVertex(s, j).sub(SF.off));
+      const d01 = now[1].distanceTo(now[0]), r01 = info.ref[1].distanceTo(info.ref[0]);
+      if (Math.abs(d01 - r01) > 0.05 + r01 * 0.002) stats.scaled.push(info.pid);
+      const delta = frameOf(...now).multiply(frameOf(...info.ref).invert());   // three 世界中的刚体变换
+      const pose = Ci.clone().multiply(delta).multiply(C).multiply(info.base);
+      const arr = pose.toArray().map((x) => Math.round(x * 1e4) / 1e4);
+      const p = W.model.parts.find((q) => q.id === info.pid);
+      const same = arr.every((x, k) => Math.abs(x - p.matrix[k]) < 1e-3);
+      if (same) delete W.project.poses[info.pid]; else { W.project.poses[info.pid] = arr; stats.moved++; }
+      const o = view.objects.get(info.pid);
+      if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
+    });
+    SF.stats = stats;
+    projectChanged();
+  } catch (err) {
+    console.warn('sfSync', err);
+  } finally {
+    SF.syncing = false;
+    if (SF.dirty) { SF.dirty = false; setTimeout(sfSync, 50); }
+  }
+}
+
+async function openSketchForge() {
+  if (SF.open) return;
+  if (!W.model || W.stale) await loadModel();
+  if (!W.model || !W.model.parts.length || !view) { toast('没有可编辑的 3D 模型', 'error'); return; }
+  closeEditor();
+  SF.open = true;
+  $('#btn-sf').classList.add('on');
+  $('#sf-host').classList.remove('hidden');
+  const loading = $('#sf-loading');
+  loading.classList.remove('hidden');
+  loading.textContent = '正在启动 3D 编辑器…';
+  try {
+    await sfEnsureFrame();
+    if (SF.key !== sfSceneKey()) {
+      loading.textContent = '正在导入板件…';
+      pushUndo();
+      await sfLoadScene();
+    }
+    loading.classList.add('hidden');
+    if (!$('#sf-host .sf-back')) {
+      const back = document.createElement('button');
+      back.className = 'sf-back';
+      back.textContent = '✓ 完成 · 返回 SeedBoxes';
+      back.title = '把摆放结果同步回 SeedBoxes（也可以点左上角「主页」）';
+      back.addEventListener('click', closeSketchForge);
+      $('#sf-host').appendChild(back);
+    }
+  } catch (err) {
+    loading.textContent = String(err.message || err);
+    toast(String(err.message || err), 'error');
+    setTimeout(() => { if (SF.open && !SF.frame) closeSketchForge(); }, 2500);
+  }
+}
+
+async function closeSketchForge() {
+  if (!SF.open) return;
+  SF.open = false;
+  $('#btn-sf').classList.remove('on');
+  if (SF.frame && SF.key) {
+    if (SF.syncing) await new Promise((r) => { const t = setInterval(() => { if (!SF.syncing) { clearInterval(t); r(); } }, 40); });
+    await sfSync();
+  }
+  $('#sf-host').classList.add('hidden');
+  if (view) { view.refreshStates(); view.resize(); }
+  renderPartsPanel();
+  const st = SF.stats;
+  if (!st) return;
+  const warn = [];
+  if (st.missing.length) warn.push(`${st.missing.map(nameOf).join('、')} 在编辑器里被删除、隐藏或合并，位置未同步`);
+  if (st.reshaped.length) warn.push(`${st.reshaped.map(nameOf).join('、')} 形状被修改，位置未同步`);
+  if (st.scaled.length) warn.push(`${st.scaled.map(nameOf).join('、')} 尺寸改动不会影响图纸（请改左侧参数）`);
+  if (st.moved) {
+    if (!W.pose.on) setPoseMode(true);   // 进入摆放模式：显示咬合 / 穿透检查结果
+    else checkPose();
+  }
+  if (warn.length) setTimeout(() => setNote(warn.join('；'), 'info'), st.moved ? 600 : 0);
+}
+
+function setPartsPanelVisible(on) {
+  $('#parts-panel').classList.toggle('gone', !on);
+  $('#btn-parts').classList.toggle('on', on);
+  try { localStorage.setItem('seedboxes.partsPanel', on ? '1' : '0'); } catch (e) { /* 忽略 */ }
+  if (view) view.resize();
+}
+
 // ------------------------------------------------------------------ 对外接口（app.js 调用）
 
 function hasContent() {
@@ -1476,6 +1741,8 @@ window.SeedWorkshop = {
     W.stale = true;
     W.previewStale = false;
     closeEditor();
+    if (SF.open) { SF.open = false; $('#sf-host').classList.add('hidden'); $('#btn-sf').classList.remove('on'); }
+    SF.key = null; SF.map.clear(); SF.stats = null;
     if (view) view.clear();
     $('#parts-panel').innerHTML = '';
     setNote('');
@@ -1513,6 +1780,10 @@ window.SeedWorkshop = {
 $('#tab-2d').addEventListener('click', () => setMode('2d'));
 $('#tab-3d').addEventListener('click', () => setMode('3d'));
 $('#btn-pose').addEventListener('click', () => setPoseMode(!W.pose.on));
+$('#btn-sf').addEventListener('click', () => (SF.open ? closeSketchForge() : openSketchForge()));
+$('#btn-parts').addEventListener('click', () => setPartsPanelVisible($('#parts-panel').classList.contains('gone')));
+try { if (localStorage.getItem('seedboxes.partsPanel') === '0') setPartsPanelVisible(false); else $('#btn-parts').classList.add('on'); }
+catch (e) { $('#btn-parts').classList.add('on'); }
 $('#pose-snap select').addEventListener('change', (ev) => { W.pose.snap = ev.target.value; });
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view && view.view(b.dataset.view)));
 $('#pe-close').addEventListener('click', closeEditor);
@@ -1527,6 +1798,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     W, THREE,
     get view() { return view; },
     get poser() { return poser; },
+    SF, sfCommand, sfSync, openSketchForge, closeSketchForge,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);

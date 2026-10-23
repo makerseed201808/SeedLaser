@@ -1,0 +1,281 @@
+/* SeedBoxes：SketchForge 简体中文界面（运行时翻译层）
+ * 监听 DOM 变化，把界面文字、title / aria-label / placeholder 按词典替换成中文。
+ * 不改动 SketchForge 组件源码，便于合并上游更新。词典之外的文字保持原样。
+ * 术语：Solid 实体 / Hole 挖孔 / Workplane 工作平面 / Group 组合 / Align 对齐 / Snap Grid 吸附网格
+ */
+(function () {
+  "use strict";
+  var D = {
+    // ---- 功能区 ----
+    "Geometry": "几何", "Sketch": "草图", "Home": "主页", "Clipboard": "剪贴板", "History": "历史",
+    "Shapes": "形状", "Visibility": "显示", "Combine": "组合运算", "Modify": "修改", "Arrange": "排列",
+    "Manage": "管理", "Ready": "就绪", "Snap Grid": "吸附网格", "Copy": "复制", "Paste": "粘贴",
+    "Duplicate": "复制一份", "Delete": "删除", "Undo": "撤销", "Redo": "重做", "Add shape": "添加形状",
+    "Group": "组合", "Ungroup": "取消组合", "Intersection": "求交", "Boolean Intersection": "布尔求交",
+    "Align": "对齐", "Mirror": "镜像", "Lock": "锁定", "Workplane": "工作平面", "Place workplane": "放置工作平面",
+    "Place workplane (W)": "放置工作平面（W）", "Continue workplane": "继续使用工作平面", "Drop to workplane": "落到工作平面",
+    "Export": "导出", "Import": "导入", "Settings": "设置", "Measure": "测量", "Measurement": "测量",
+    "Ruler tools": "标尺工具", "Ruler actions": "标尺操作", "Ruler measurements": "标尺测量",
+    "Add measurement": "添加测量", "Remove measurement": "移除测量", "Move measurement points": "移动测量点",
+    "Delete measurement part": "删除测量段", "Choose the second measurement point": "选择第二个测量点",
+    "Separate Parts": "拆分零件", "Inspect": "检查", "Fillet": "圆角", "Chamfer": "倒角", "Edit": "编辑",
+    "Resize": "调整尺寸", "Rotate": "旋转", "Lift": "升降", "Scale": "缩放", "Split": "拆分",
+    "Solid": "实体", "Hole": "挖孔", "Shape": "形状", "Color": "颜色", "Shape color": "形状颜色",
+    "Custom color": "自定义颜色", "Opacity": "不透明度", "Properties": "属性", "Shape details": "形状详情",
+    "Shape mode": "形状模式", "Name": "名称", "Width": "宽度", "Length": "长度", "Height": "高度",
+    "Elevation": "离地高度", "Position X": "X 位置", "Position Y": "Y 位置", "Angle": "角度",
+    "Thickness": "厚度", "Sides": "边数", "Segments": "分段", "Steps": "步数", "Bevel": "倒斜边",
+    "Radius": "半径", "Base radius": "底面半径", "Base Radius": "底面半径", "Top radius": "顶面半径",
+    "Top Radius": "顶面半径", "Top Width": "顶部宽度", "Top Length": "顶部长度", "Bottom Width": "底部宽度",
+    "Bottom Length": "底部长度", "Start Angle": "起始角度", "Taper": "锥度", "Font": "字体", "Text": "文字",
+    "TEXT": "文字", "Quality": "质量", "Preview quality": "预览质量", "Fast": "快速", "Standard": "标准",
+    "Fine": "精细", "Draft": "草稿", "Slow": "慢速", "Smooth": "平滑", "Corner": "尖角",
+    "Make corner": "设为尖角", "Make smooth": "设为平滑", "Keep edge size when resizing": "调整尺寸时保持边缘大小",
+    "Edge feature history": "边缘特征历史", "All sharp edges": "所有尖锐边", "Sharp-edge threshold": "尖锐边阈值",
+    "Select tangent chains": "选择相切链", "Choose an edge feature to remove": "选择要移除的边缘特征",
+    "Edge treatment preview ready": "边缘处理预览已就绪", "Edge treatment needs adjustment": "边缘处理需要调整",
+    "Edge modifier cancelled": "已取消边缘修改", "Wait for a valid edge preview before applying": "请等预览有效后再应用",
+    "Select highlighted edges, then adjust the preview": "选择高亮的边，然后调整预览",
+    // ---- 基本形状 ----
+    "Basic Shapes": "基本形状", "Basic shapes": "基本形状", "Box": "立方体", "Cube": "正方体",
+    "Cylinder": "圆柱", "Sphere": "球体", "Half Sphere": "半球", "Cone": "圆锥", "Pyramid": "棱锥",
+    "Wedge": "楔形", "Torus": "圆环", "Tube": "管", "Hexagon": "六棱柱", "Triangle": "三角形",
+    "Round Roof": "圆屋顶", "Gable roof": "人字屋顶", "Gear": "齿轮", "Gear type": "齿轮类型",
+    "Gear Type": "齿轮类型", "Spur gear": "直齿轮", "Helical gear": "斜齿轮", "Bevel gear": "锥齿轮",
+    "Teeth": "齿数", "Tooth size": "齿大小", "Tooth Size": "齿大小", "Tooth width": "齿宽",
+    "Tooth Width": "齿宽", "Helix angle": "螺旋角", "Helix Angle": "螺旋角", "Helix": "螺旋",
+    "Helix quality": "螺旋质量", "Rail": "导轨", "Sweep": "扫掠", "Center hole": "中心孔",
+    "Center Hole": "中心孔", "Upright": "竖直", "Shape defaults": "形状默认值",
+    "Extra defaults used when this shape is added.": "添加此形状时使用的额外默认值。",
+    "Custom size limit": "自定义尺寸上限", "Use app defaults": "使用应用默认值",
+    "Required dimensions": "必填尺寸",
+    // ---- 草图 ----
+    "Sketch Shapes": "草图形状", "Sketch shapes": "草图形状", "Sketch toolbar": "草图工具栏",
+    "Sketch to 3D": "草图转 3D", "Edit Sketch to 3D": "编辑草图转 3D", "Sketch to 3D method": "草图转 3D 方式",
+    "Sketch to 3D options": "草图转 3D 选项", "Extrude sketch": "拉伸草图", "Revolve sketch": "旋转草图",
+    "Raise the profile into a 3D shape": "把轮廓拉伸成 3D 形状", "Rotate the profile around an axis": "让轮廓绕轴旋转成形",
+    "Revolve 3D preview": "旋转成形预览", "REVOLVE AXIS": "旋转轴", "Draw a closed profile left of the axis": "在轴左侧画一个闭合轮廓",
+    "Edit sketch": "编辑草图", "Sketch extrusion": "草图拉伸", "Draw": "绘制", "Erase": "擦除", "Line": "直线",
+    "Rectangle": "矩形", "Circle": "圆", "Bezier Curve": "贝塞尔曲线", "Smooth Curve": "平滑曲线",
+    "Add or Remove Points": "添加 / 删除点", "Point actions": "点操作", "Finish": "完成", "Clear": "清除",
+    "Add Image": "添加图片", "Delete sketch image": "删除草图图片", "Close image settings": "关闭图片设置",
+    "Reset sketch view": "重置草图视图", "Sketch view controls": "草图视图控制", "Sketch cancelled": "已取消草图",
+    "Sketch undo": "草图撤销", "Sketch redo": "草图重做", "Current sketch chain cleared": "已清除当前草图线",
+    "Close at least one profile before finishing the sketch": "完成草图前请至少闭合一个轮廓",
+    "Nothing to undo in this sketch": "草图里没有可撤销的操作", "Nothing to redo in this sketch": "草图里没有可重做的操作",
+    "Select one shape created from a sketch to edit it": "请选择一个由草图生成的形状来编辑",
+    "Rotation is available only for closed sketch objects": "只有闭合的草图对象可以旋转",
+    "Select a closed sketch object to rotate": "请选择一个闭合的草图对象来旋转",
+    "Sketch geometry transformed": "草图几何已变换", "Sketch image selected": "已选中草图图片",
+    "Sketch image updated": "草图图片已更新", "Sketch measurement removed": "已移除草图测量",
+    "Choose Select before adding a sketch image": "添加草图图片前请先选择「选择」工具",
+    "Choose a PNG, JPG, WebP, GIF, or other image file": "请选择 PNG、JPG、WebP、GIF 等图片文件",
+    "The sketch image could not be added": "无法添加草图图片",
+    "Select a sketch image to lock or unlock": "请选择要锁定 / 解锁的草图图片",
+    "Select a sketch point or segment to remove it": "请选择要删除的草图点或线段",
+    "Unlock the sketch image with L before deleting it": "删除前请先按 L 解锁草图图片",
+    "Unlock the sketch image with L before editing it": "编辑前请先按 L 解锁草图图片",
+    "Updating revolve preview…": "正在更新旋转成形预览…", "The revolve settings could not be applied": "无法应用旋转成形设置",
+    "Building exact sketch geometry…": "正在生成精确草图几何…",
+    // ---- 视图 / 相机 ----
+    "Camera controls": "视角控制", "Show camera controls": "显示视角控制", "Hide camera controls": "隐藏视角控制",
+    "Show controls": "显示控制", "Hide controls": "隐藏控制", "Zoom in": "放大", "Zoom out": "缩小",
+    "View orientation cube": "视角方块", "Front view": "前视图", "Back view": "后视图", "Left view": "左视图",
+    "Right view": "右视图", "Top view": "俯视图", "Bottom view": "仰视图", "Front view (1)": "前视图（1）",
+    "Left view (3)": "左视图（3）", "Right view (4)": "右视图（4）", "Top view (5)": "俯视图（5）",
+    "Bottom view (6)": "仰视图（6）", "Back view (2)": "后视图（2）", "FRONT": "前", "BACK": "后",
+    "LEFT": "左", "RIGHT": "右", "TOP": "上", "BOTTOM": "下", "Project view": "项目视图",
+    "Movement dimensions": "移动尺寸", "Show movement dimensions": "显示移动尺寸", "Alignment handles": "对齐手柄",
+    "Mirror handles": "镜像手柄", "Split handles": "拆分手柄", "Mirror left-right": "左右镜像",
+    "Mirror front-back": "前后镜像", "Mirror top-bottom": "上下镜像", "Nothing to mirror": "没有可镜像的对象",
+    "Visibility options": "显示选项", "No hidden shapes": "没有隐藏的形状",
+    // ---- 选择 / 提示 ----
+    "Select": "选择", "Selected all visible shapes": "已选中所有可见形状", "Selection cleared": "已取消选择",
+    "Selection is locked": "所选对象已锁定", "Moved selection": "已移动所选对象", "Select a shape first": "请先选择一个形状",
+    "Select a group first": "请先选择一个组合", "Select at least two shapes to align": "至少选择两个形状才能对齐",
+    "Select at least two shapes to group": "至少选择两个形状才能组合",
+    "Select at least one solid and one hole for Intersection": "求交需要至少一个实体和一个挖孔",
+    "Select one object to separate": "请选择一个要拆分的对象", "Already aligned": "已经对齐",
+    "Nothing to copy yet": "还没有可复制的对象", "Nothing to redo": "没有可重做的操作",
+    "SketchForge clipboard is empty": "剪贴板是空的", "Paste cancelled because the project changed": "项目已变化，已取消粘贴",
+    "Unlock every selected shape before grouping": "组合前请先解锁所有选中的形状",
+    "Unlock the object before separating parts": "拆分前请先解锁该对象",
+    "Unlock the shape before removing an edge feature": "移除边缘特征前请先解锁该形状",
+    "Select a shape with an edge feature first": "请先选择带边缘特征的形状",
+    "The selected object has only one connected part": "所选对象只有一个连通部分",
+    "The selected object has no printable surface": "所选对象没有可打印的表面",
+    "The scene changed while grouping; select the objects and try again": "组合时场景发生了变化，请重新选择后再试",
+    "The scene changed while intersecting; select the objects and try again": "求交时场景发生了变化，请重新选择后再试",
+    "Finish the current drag or transform before undoing": "请先完成当前的拖动或变换再撤销",
+    "Finish the current drag or transform before redoing": "请先完成当前的拖动或变换再重做",
+    "Finish the current drag or transform before rotating": "请先完成当前的拖动或变换再旋转",
+    "Finish the current drag or transform before saving the project file": "请先完成当前的拖动或变换再保存项目文件",
+    "This mesh is too dense for interactive edge treatment. Simplify it below 180,000 triangles first.": "网格太密，无法交互式处理边缘，请先简化到 18 万个三角形以下。",
+    "Older edge features do not have stored undo history.": "较早的边缘特征没有保存撤销历史。",
+    "The object changed while removing the edge feature; try again": "移除边缘特征时对象发生了变化，请重试",
+    "Edge modifier cancelled because the object changed": "对象已变化，已取消边缘修改",
+    "Select before moving": "移动前先选择", "Snap to grid": "吸附到网格", "Grid and snapping": "网格与吸附",
+    "Shift": "Shift", "Mount": "安装座", "Coming soon": "即将推出",
+    // ---- 文件 / 项目 ----
+    "Projects": "项目", "Recent": "最近", "Shared": "共享", "Shared projects": "共享项目", "Dashboard": "项目列表",
+    "Home dashboard": "项目列表", "SketchForge home": "SketchForge 主页", "Create": "新建", "Create new 3D design": "新建 3D 设计",
+    "Create a 3D design and it will appear here.": "新建一个 3D 设计后会显示在这里。", "No projects yet": "还没有项目",
+    "Search projects": "搜索项目", "Sort projects": "项目排序", "Grid view": "网格视图", "List view": "列表视图",
+    "Rename": "重命名", "Rename project": "重命名项目", "Project name": "项目名称", "Project options": "项目选项",
+    "Delete project?": "删除项目？", "Cancel": "取消", "Save": "保存", "Refresh": "刷新", "Previous": "上一步",
+    "Not now": "以后再说", "Format": "格式", "Export format": "导出格式", "File name": "文件名", "Save method": "保存方式",
+    "Browser downloads": "浏览器下载", "Save to folder": "保存到文件夹", "Folder path": "文件夹路径",
+    "Save to shared": "保存到共享空间", "Editable project": "可编辑项目", "3D print mesh": "3D 打印网格",
+    "Universal 3D mesh": "通用 3D 网格", "CAD / B-Rep": "CAD / B-Rep", "Top-view vector": "俯视矢量图",
+    "Top-view vector projection exported by SketchForge": "SketchForge 导出的俯视矢量投影",
+    "Open SketchForge Project": "打开 SketchForge 项目", "Open SKF or import geometry": "打开 SKF 或导入几何体",
+    "Drop STL, OBJ, STEP, or SVG files": "拖入 STL、OBJ、STEP 或 SVG 文件",
+    "or click to choose from your computer": "或点击从电脑中选择", "or add geometry": "或添加几何体",
+    "Restore an editable .skf file as a new local project": "把可编辑的 .skf 文件恢复为新的本地项目",
+    "Open one .skf project at a time; import STL, OBJ, STEP, and SVG geometry separately": "一次打开一个 .skf 项目；STL、OBJ、STEP、SVG 需分别导入",
+    "Saved history": "保存的历史", "Saved action history": "保存的操作历史", "Saved SKF action history": "SKF 保存的操作历史",
+    "Saved history actions": "保存的历史操作数", "Actions to retain": "保留的操作数",
+    "Choose how many recent undo actions travel with the project": "选择随项目保存多少步撤销历史",
+    "Choose how many completed actions remain available after saving or reopening this project.": "选择保存或重新打开项目后还能撤销多少步。",
+    "Could not read file": "无法读取文件", "Could not save file": "无法保存文件", "Could not export STEP": "无法导出 STEP",
+    "Could not open SketchForge project": "无法打开 SketchForge 项目", "Could not save SketchForge project": "无法保存 SketchForge 项目",
+    "Select at least one solid shape before exporting STEP": "导出 STEP 前至少选择一个实体",
+    "Building SVG top-view projection…": "正在生成 SVG 俯视投影…",
+    "Building B-Rep… first STEP export loads the OpenCascade kernel (~22 MB), one time per session": "正在生成 B-Rep…首次导出 STEP 会加载 OpenCascade 内核（约 22 MB），每次会话只加载一次",
+    "Imported SketchForge project": "导入的 SketchForge 项目", "Loading editor": "正在加载编辑器", "No snapshot yet": "还没有缩略图",
+    // ---- 设置 ----
+    "Workspace settings": "工作区设置", "Workspace preferences": "工作区偏好", "Workspace settings sections": "工作区设置分组",
+    "Close settings": "关闭设置", "Theme": "主题", "Light": "浅色", "Dark": "深色", "System": "跟随系统",
+    "Theme applies across SketchForge and all projects.": "主题对 SketchForge 和所有项目生效。", "Appearance": "外观",
+    "Units": "单位", "Units: Millimeters": "单位：毫米", "Accuracy": "精度", "Workplane size": "工作平面大小",
+    "Grid block size": "网格块大小", "Block size": "块大小", "Grid color": "网格颜色", "Reset grid color": "重置网格颜色",
+    "Grid color presets": "网格颜色预设", "Grid color picker": "网格颜色选择器", "Lighting and shadows": "光照与阴影",
+    "Show shadows": "显示阴影", "Zoom speed": "缩放速度", "Cruise when adding new shapes": "添加新形状时跟随移动",
+    "Show project name in toolbar": "在工具栏显示项目名称", "Custom": "自定义", "Customization": "自定义设置",
+    "Editor mode": "编辑器模式", "App limits": "应用限制",
+    "Choose units, precision, scale, and snapping.": "选择单位、精度、比例和吸附。",
+    "Set the plate dimensions and visible grid spacing.": "设置底板尺寸和网格间距。",
+    "Adjust the canvas and navigation behavior.": "调整画布和导航方式。",
+    "Save the current settings for this project.": "为当前项目保存这些设置。",
+    "Customize how each toolbar shape starts. Existing limits stay unchanged until you enter a custom limit.": "自定义各个形状添加时的初始值。未填写自定义上限时，现有上限保持不变。",
+    "Leave blank to keep all current inspector and drag limits for this shape.": "留空则保留此形状当前的属性和拖动上限。",
+    "1:1 (millimeters)": "1:1（毫米）", "1:10 (centimeters)": "1:10（厘米）", "1:1000 (meters)": "1:1000（米）",
+    "1:1 (inches)": "1:1（英寸）", "1:1 (feet)": "1:1（英尺）", "1:1 (studs)": "1:1（乐高颗粒）",
+    "Software updates": "软件更新", "Up to date": "已是最新", "Could not check for updates": "无法检查更新",
+    "Dismiss update": "忽略更新", "SketchForge version": "SketchForge 版本", "License": "许可证",
+    "View source": "查看源码", "Corresponding source": "对应源码", "Account": "账户", "Sign out": "退出登录",
+    // ---- 挑战教程 ----
+    "Challenges": "挑战", "Challenge 1": "挑战 1", "Challenge 2": "挑战 2", "Start Challenge": "开始挑战",
+    "Key Tag": "钥匙牌", "Build a Key Tag": "做一个钥匙牌", "Nameplate": "姓名牌", "Personalized Nameplate": "个性姓名牌",
+    "Build a Nameplate": "做一个姓名牌", "Skills used in this challenge": "本挑战用到的技能",
+    "SketchForge design": "SeedBoxes 装配", "Make default": "设为默认", "Hide selected": "隐藏所选",
+    "Base": "底座", "Board": "板", "Cancel project rename": "取消重命名", "Cancel project deletion": "取消删除",
+    "Could not load project shapes": "无法加载项目形状", "Could not save project shapes": "无法保存项目形状",
+    "Could not save project list": "无法保存项目列表", "Could not save thumbnail": "无法保存缩略图",
+    "Could not delete project shapes from local storage": "无法从本地存储删除项目形状",
+    "Could not prepare project shape storage": "无法准备项目存储", "Could not migrate project shapes to larger storage": "无法迁移项目存储",
+    "Could not create a project for the imported files": "无法为导入的文件创建项目",
+    "Opening SketchForge project files is unavailable here": "这里不能打开 SketchForge 项目文件",
+    "Updates are checked automatically but are never installed without your approval.": "会自动检查更新，但不经你同意不会安装。",
+    "Grid color hexadecimal value": "网格颜色十六进制值", "SketchForge 3D editor": "SketchForge 3D 编辑器", "Intersection is empty": "求交结果为空",
+    "Grouped: hole consumed solid": "组合：挖孔吃掉了实体", "Made a copy of the design": "已复制设计",
+    "New empty design": "新的空白设计", "Revolve updated": "旋转成形已更新", "Revolved sketch created": "已创建旋转成形",
+    "MCP boolean cut complete": "布尔挖切完成", "MCP cut consumed solid": "挖切吃掉了实体", "MCP group consumed solid": "组合吃掉了实体", "MCP cleared selection": "已取消选择",
+  };
+  var P = [
+    [/^Untitled design( \d+)?$/, function (m, n) { return "未命名设计" + (n || ""); }],
+    [/^(\d+) selected$/, function (m, n) { return "已选 " + n + " 个"; }],
+    [/^(.+) imported by MCP$/, function (m, n) { return "已导入 " + n; }],
+    [/^(.+) added by MCP$/, function (m, n) { return "已添加 " + n; }],
+    [/^(.+) updated by MCP$/, function (m, n) { return "已更新 " + n; }],
+    [/^MCP grouped (\d+) objects$/, function (m, n) { return "已组合 " + n + " 个对象"; }],
+    [/^MCP separated (\d+) parts$/, function (m, n) { return "已拆分为 " + n + " 个零件"; }],
+    [/^MCP ungrouped (\d+) groups?$/, function (m, n) { return "已取消 " + n + " 个组合"; }],
+    [/^Aligned (\d+) shapes?\b.*$/, function (m, n) { return "已对齐 " + n + " 个形状"; }],
+    [/^Mirrored (\d+) shapes?\b.*$/, function (m, n) { return "已镜像 " + n + " 个形状"; }],
+    [/^Saved design with (\d+) shapes?$/, function (m, n) { return "已保存设计（" + n + " 个形状）"; }],
+    [/^Removed (.+)$/, function (m, n) { return "已移除 " + n; }],
+    [/^(.+) added$/, function (m, n) { return "已添加 " + n; }],
+    [/^(.+) imported$/, function (m, n) { return "已导入 " + n; }],
+    [/^MCP selected (\d+) objects?$/, function (m, n) { return "已选中 " + n + " 个对象"; }],
+    [/^MCP deleted (\d+) objects?$/, function (m, n) { return "已删除 " + n + " 个对象"; }],
+    [/^Grouped (\d+) shapes$/, function (m, n) { return "已组合 " + n + " 个形状"; }],
+    [/^Ungrouped (\d+) groups?$/, function (m, n) { return "已取消 " + n + " 个组合"; }],
+    [/^Separated (\d+) parts$/, function (m, n) { return "已拆分为 " + n + " 个零件"; }],
+    [/^Intersected (\d+) shapes$/, function (m, n) { return "已对 " + n + " 个形状求交"; }],
+    [/^Deleted (\d+) shapes?$/, function (m, n) { return "已删除 " + n + " 个形状"; }],
+    [/^Duplicated (\d+) shapes?$/, function (m, n) { return "已复制 " + n + " 个形状"; }],
+    [/^Pasted (\d+) shapes?$/, function (m, n) { return "已粘贴 " + n + " 个形状"; }],
+    [/^Copied (\d+) shapes?$/, function (m, n) { return "已复制 " + n + " 个形状"; }],
+  ];
+  var ATTRS = ["title", "aria-label", "placeholder", "alt"];
+  var SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, CODE: 1, PRE: 1 };
+
+  function tr(raw) {
+    if (!raw) return null;
+    var t = raw.replace(/\s+/g, " ").trim();
+    if (!t || !/[A-Za-z]/.test(t)) return null;
+    if (Object.prototype.hasOwnProperty.call(D, t)) return raw.replace(t, D[t]);
+    var lower = t.charAt(0) + t.slice(1).toLowerCase();       // 功能区标题常是全大写（CSS 也可能大写）
+    if (t === t.toUpperCase() && Object.prototype.hasOwnProperty.call(D, lower)) return raw.replace(t, D[lower]);
+    for (var i = 0; i < P.length; i++) {
+      if (P[i][0].test(t)) return raw.replace(t, t.replace(P[i][0], P[i][1]));
+    }
+    return null;
+  }
+
+  function walk(node) {
+    if (!node) return;
+    if (node.nodeType === 3) {
+      var p = node.parentNode;
+      if (p && SKIP[p.nodeName]) return;
+      if (p && p.isContentEditable) return;
+      var v = tr(node.nodeValue);
+      if (v !== null && v !== node.nodeValue) node.nodeValue = v;
+      return;
+    }
+    if (node.nodeType !== 1 || SKIP[node.nodeName]) return;
+    for (var a = 0; a < ATTRS.length; a++) {
+      var val = node.getAttribute(ATTRS[a]);
+      if (val) {
+        var tv = tr(val);
+        if (tv !== null && tv !== val) node.setAttribute(ATTRS[a], tv);
+      }
+    }
+    if (node.nodeName === "INPUT" && (node.type === "button" || node.type === "submit") && node.value) {
+      var bv = tr(node.value);
+      if (bv) node.value = bv;
+    }
+    for (var c = node.firstChild; c; c = c.nextSibling) walk(c);
+  }
+
+  var pending = [];
+  var scheduled = false;
+  function flush() {
+    scheduled = false;
+    var list = pending;
+    pending = [];
+    for (var i = 0; i < list.length; i++) walk(list[i]);
+  }
+  function queue(n) {
+    pending.push(n);
+    if (!scheduled) { scheduled = true; (window.requestAnimationFrame || setTimeout)(flush); }
+  }
+
+  function start() {
+    document.documentElement.lang = "zh-CN";
+    walk(document.body);
+    new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var m = muts[i];
+        if (m.type === "characterData") queue(m.target);
+        else if (m.type === "attributes") queue(m.target);
+        else for (var j = 0; j < m.addedNodes.length; j++) queue(m.addedNodes[j]);
+      }
+    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ATTRS });
+    var title = tr(document.title);
+    if (title) document.title = title;
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start); else start();
+  window.__seedboxesZh = { dict: D, translate: tr };
+})();
