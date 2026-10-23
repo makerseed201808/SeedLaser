@@ -35,6 +35,9 @@ SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光�
 - **多种输出** — SVG / SVG_Ponoko / PostScript / Lightburn (lbrn2) 直接生成；DXF / GCode / PDF 需系统装 `pstoedit` / `ps2pdf`
 - **单文件 .exe** — PyInstaller 打包约 100 MB，复制即用，依赖 Windows 10/11 默认的 WebView2 Runtime
 - **macOS 支持** — 使用系统自带的 WKWebView，可打包为 `SeedBoxes.app`
+- **3D 模型预览** — 预览区切到「3D 模型」：ABox / ClosedBox / UniversalBox / BasedBox / TypeTray 显示拼好的盒子（卡榫真实咬合），其余生成器显示所有板件平铺
+- **局部修改** — 板件清单里可禁用某块板；「编辑」进入单块板编辑器，开圆孔 / 方孔 / 圆角矩形孔、刻中文字（系统中文字体转轮廓），导出的 SVG / PDF / DXF 等都会带上
+- **项目文件** — 参数 + 局部修改保存为 `.seedbox.json`，随时打开继续改
 
 ---
 
@@ -59,6 +62,19 @@ macOS / Linux：
 > 连不上 GitHub？在能访问 GitHub 的电脑上运行 `scripts/make_boxes_mirror.sh`，把整个文件夹（含 `third_party/`）拷过去，`run_mac.sh` 会自动改用本地镜像。
 >
 > 为什么要单独下载：boxes 通过 git 安装进 `.venv` 时只安装 `boxes` 包本身，上游仓库根目录的 `static/`（作品照片）不会被安装。
+
+---
+
+## 浏览器调试模式
+
+不开桌面窗口，用普通浏览器调试前端（可以用浏览器开发者工具）：
+
+```bash
+uv run python scripts/dev_server.py
+# 浏览器打开 http://127.0.0.1:8765/index.html?dev=1
+```
+
+此模式下「保存到文件」「打开 / 保存项目」的系统对话框不可用。
 
 ---
 
@@ -124,8 +140,11 @@ build_uv.bat            :: 重新打包，自动用 .pyd 替代 .py
 SeedBoxes/
 ├── app.py                  PyWebView 入口
 ├── backend.py              JS↔Python 桥接 API（含 i18n / 自渲染兜底 / 边缘字符映射）
+├── model3d.py              3D 模型：零件捕获、组装配方、局部修改注入、中文字转轮廓
 ├── web/                    前端
 │   ├── index.html / app.js / styles.css
+│   ├── workshop.js         3D 视图 + 板件清单 + 单块板编辑器（ES 模块）
+│   ├── vendor/three/       three.js r169（MIT，离线打包）
 │   ├── seedboxes-logo.svg  主软件 logo
 │   └── makerseed-logo.svg  种子创客工坊标识
 ├── pyproject.toml          uv 项目（boxes 通过 git 引用上游 release-1.2）

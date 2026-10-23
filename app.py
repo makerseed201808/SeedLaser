@@ -83,9 +83,10 @@ def main() -> None:
     if not hasattr(sys, "_MEIPASS"):
         _apply_mac_icon(ico)
     debug = os.environ.get("SEEDBOXES_DEBUG", "0") == "1"
-    # macOS WKWebView 对 file:// 页面的 CSP 'self' 匹配不可靠，改用 pywebview 内置
-    # 本地 HTTP 服务器（仅监听 127.0.0.1，完全离线）提供 web/ 目录。
-    webview.start(debug=debug, http_server=(sys.platform == "darwin"))
+    # 用 pywebview 内置本地 HTTP 服务器（仅监听 127.0.0.1，完全离线）提供 web/ 目录：
+    #  - 3D 视图的 three.js 是 ES 模块，file:// 下 WebView2 / WKWebView 都会拦截模块加载
+    #  - macOS WKWebView 对 file:// 页面的 CSP 'self' 匹配不可靠
+    webview.start(debug=debug, http_server=True)
 
 
 if __name__ == "__main__":

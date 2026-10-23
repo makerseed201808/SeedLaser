@@ -61,6 +61,11 @@ svgpath_datas, svgpath_binaries, svgpath_hiddenimports = _safe_collect('svgpatht
 # 全部生成器子模块（pkgutil 动态发现需要在打包时落实）
 gen_modules = collect_submodules('boxes.generators')
 
+# 中文刻字：fontTools 按表名动态导入 ttLib.tables.* 子模块
+fonttools_modules = collect_submodules('fontTools.ttLib.tables') + [
+    'fontTools.ttLib', 'fontTools.cffLib', 'fontTools.pens.basePen', 'fontTools.misc.psCharStrings',
+]
+
 # Critical: boxes 项目根目录下的 static/ 和 locale/ 不在 boxes 包内
 # 必须显式拷贝，否则打包后中文翻译失效 + 168 张样图全部丢失
 extra_datas = [
@@ -108,6 +113,8 @@ hiddenimports = list({
     *markdown_hiddenimports,
     *svgpath_hiddenimports,
     *gen_modules,
+    *fonttools_modules,
+    'model3d',
     # 关键子模块（boxes/__init__.py 直接 import 的）
     'shapely',
     'shapely.geometry',

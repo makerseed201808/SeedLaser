@@ -80,8 +80,12 @@ cl     :: 应输出 Microsoft (R) C/C++ Optimizing Compiler Version 19.44.xxx
 SeedBoxes/
 ├── app.py                  PyWebView 入口
 ├── backend.py              JS↔Python 桥接 API（核心业务）
+├── model3d.py              3D 模型 / 局部修改（见上节）
 ├── web/                    前端
 │   ├── index.html / app.js / styles.css
+│   ├── workshop.js         3D 视图 + 板件清单 + 单块板编辑器
+│   ├── dev-bridge.js       浏览器调试桥（?dev=1 时生效）
+│   ├── vendor/three/       three.js r169 + OrbitControls（MIT）
 │   ├── seedboxes-logo.svg  主 logo
 │   └── makerseed-logo.svg  种子创客工坊标识
 ├── pyproject.toml          uv 项目（boxes 通过 git URL @release-1.2 引用）
@@ -96,6 +100,20 @@ SeedBoxes/
 ├── build_pyd.bat / setup_ext.py / install_msvc.bat 加密路径
 ├── README.md / DEVELOPMENT.md / CLAUDE.md / LICENSE   文档
 ```
+
+---
+
+## 3D 模型 / 局部修改（model3d.py + web/workshop.js）
+
+- **零件捕获**：渲染时用实例属性覆盖 `move` / `rectangularWall`（`model3d.Recorder`），记录每个 Part 的 `ctx._m`。rectangularWall 的「名义（内部）矩形」原点 = 起笔点 + (左边 spacing, 底边 margin + 底边 startwidth)——boxes 的边线画在内部空间外 startwidth 处
+- **组装配方**：`SUPPORTED_3D` 里的 5 个方盒按标签（front / Wall 1 …）或「边类型 + 尺寸」分配到面；TypeTray 隔板按 sx / sy 算位置。`_FACES` 给出每个面的 (u, v, w) → 世界坐标映射。boxes 约定：四面墙和底板按「从盒内看」画，顶板按「从上方看」画（由 TypeTray 孔位一致性推得）
+- **mirror**：从盒内看画的板，编辑器以「从外面看」显示；导出时有修改的板会整块翻面（`apply_project`），保证刻字面朝外组装、几何不变
+- **编辑坐标**：从外面看，原点 = 内部矩形左下角，mm，y 向上；文字由 `fontTools` 读系统中文字体转轮廓（`_font_candidates` 按平台列字体，项目 `fonts/` 目录可放自带字体）
+- **导出**：切割孔 = INNER_CUT 蓝色（按 burn 内收），雕刻 = ETCHING 绿色；禁用的板从 `surface.parts` 移除
+- **3D 用 burn=0 渲染**；重叠的孔用 shapely 合并（TypeTray 提手孔与卡榫孔重叠）
+- **前端是 ES 模块** → 必须走 pywebview 内置 HTTP 服务器（`http_server=True`），file:// 会拦截模块
+- **调试**：`scripts/dev_server.py` + `web/dev-bridge.js`（`?dev=1`）在浏览器里跑整个前端
+- 新增生成器的 3D 拼装：在 `SUPPORTED_3D` 加名字，确认 `_box_dims` 和标签映射；用 dev_server 截图检查卡榫是否咬合
 
 ---
 

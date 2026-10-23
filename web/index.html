@@ -7,7 +7,7 @@
        不加会导致 window.pywebview.api 无法创建（卡在"加载中"）。仍禁止内联脚本。 -->
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self' data:; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';">
-  <title>Boxes.py 客户端</title>
+  <title>SeedBoxes</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -88,6 +88,9 @@
             </div>
           </div>
           <div class="editor-actions">
+            <button id="btn-open-project" title="打开 .seedbox.json 项目">打开项目</button>
+            <button id="btn-save-project" title="把参数和局部修改存成项目文件">保存项目</button>
+            <span class="actions-sep"></span>
             <select id="format-select" title="输出格式"></select>
             <button id="btn-preview" class="primary">预览</button>
             <button id="btn-save">保存到文件…</button>
@@ -104,14 +107,50 @@
           </div>
           <div id="preview-pane" class="preview-pane">
             <div id="preview-toolbar" class="preview-toolbar">
+              <div class="seg">
+                <button id="tab-2d" class="on">图纸</button>
+                <button id="tab-3d">3D 模型</button>
+              </div>
               <span id="preview-info">未渲染</span>
               <span class="spacer"></span>
-              <button id="btn-zoom-in" title="放大">+</button>
-              <button id="btn-zoom-out" title="缩小">-</button>
-              <button id="btn-zoom-reset" title="适合窗口">⤢</button>
+              <button id="btn-zoom-in" class="zoom-2d" title="放大">+</button>
+              <button id="btn-zoom-out" class="zoom-2d" title="缩小">-</button>
+              <button id="btn-zoom-reset" class="zoom-2d" title="适合窗口">⤢</button>
+              <button data-view="iso" class="view-3d-btn hidden wide" title="斜视">斜视</button>
+              <button data-view="front" class="view-3d-btn hidden wide" title="正面">正面</button>
+              <button data-view="side" class="view-3d-btn hidden wide" title="侧面">侧面</button>
+              <button data-view="top" class="view-3d-btn hidden wide" title="俯视">俯视</button>
             </div>
             <div id="preview-host" class="preview-host">
               <div class="preview-empty">点击「预览」即可渲染当前参数</div>
+            </div>
+            <div id="view3d" class="view3d hidden">
+              <div id="view3d-canvas" class="view3d-canvas"></div>
+              <aside id="parts-panel" class="parts-panel"></aside>
+              <div id="view3d-note" class="view3d-note hidden"></div>
+              <div class="view3d-hint">拖动旋转 · 右键拖动平移 · 滚轮缩放 · 单击选中板件 · 双击编辑</div>
+            </div>
+            <!-- 单块板编辑器（开孔 / 刻字） -->
+            <div id="part-editor" class="part-editor hidden">
+              <header class="pe-head">
+                <button id="pe-close" class="bc-pill">← 完成 · 返回 3D</button>
+                <div class="pe-titles">
+                  <div id="pe-title" class="pe-title">—</div>
+                  <div id="pe-sub" class="pe-sub"></div>
+                </div>
+                <label class="pe-snapbox"><input type="checkbox" id="pe-snap" checked>吸附 1 mm</label>
+              </header>
+              <div class="pe-body">
+                <div class="pe-tools">
+                  <button data-tool="circle" title="圆孔"><span class="ico">◯</span>圆孔</button>
+                  <button data-tool="rect" title="方孔"><span class="ico">▭</span>方孔</button>
+                  <button data-tool="rrect" title="圆角矩形"><span class="ico">▢</span>圆角矩形</button>
+                  <button data-tool="text" title="文字"><span class="ico">T</span>文字</button>
+                </div>
+                <div id="pe-canvas" class="pe-canvas"></div>
+                <div id="pe-props" class="pe-props"></div>
+              </div>
+              <footer class="pe-foot">拖动图形移动 · 方向键微调（Shift ×10）· Delete 删除 · 蓝色 = 切割，绿色 = 雕刻（在激光软件里把绿色图层设为雕刻 / 填充）</footer>
             </div>
           </div>
         </div>
@@ -120,6 +159,8 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+  <script src="dev-bridge.js"></script>
   <script src="app.js"></script>
+  <script type="module" src="workshop.js"></script>
 </body>
 </html>

@@ -246,6 +246,8 @@ function applyThumb(el, uri, kind) {
 async function selectGenerator(name) {
   const myReq = ++state.reqId;
   state.current = name;
+  state.hasPreview = false;
+  if (window.SeedWorkshop) window.SeedWorkshop.reset(name);
   $$('#group-list .gen-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.name === name);
   });
@@ -390,7 +392,9 @@ async function doPreview() {
   $('#btn-preview').disabled = true;
   try {
     const params = collectParams();
-    const result = await window.pywebview.api.preview(targetName, params);
+    const project = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
+    if (window.SeedWorkshop && window.SeedWorkshop.mode === '3d') window.SeedWorkshop.refresh();
+    const result = await window.pywebview.api.preview(targetName, params, project);
     // 过期：用户已切走或重新点了预览
     if (myReq !== state.reqId || targetName !== state.current) return;
     if (result.error) {
@@ -406,7 +410,9 @@ async function doPreview() {
     if (result.svg) {
       state.zoom = 1.0;
       mountSvg(result.svg);
+      state.hasPreview = true;
       $('#preview-info').textContent = `SVG · ${formatBytes(result.svg.length)}`;
+      if (result.notes && result.notes.length) toast(result.notes.join('；'), 'error');
       setStatus('就绪');
     }
   } catch (err) {
@@ -472,11 +478,13 @@ async function doSave() {
   $('#btn-save').disabled = true;
   try {
     const params = collectParams();
-    const result = await window.pywebview.api.save(state.current, params, fmt);
+    const project = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
+    const result = await window.pywebview.api.save(state.current, params, fmt, project);
     if (result.cancelled) { setStatus('已取消'); return; }
     if (result.error) { toast(result.error, 'error'); setStatus('保存失败'); return; }
     if (result.path) {
-      toast(`已保存：${result.path}`, 'success');
+      const extra = result.notes && result.notes.length ? `（注意：${result.notes.join('；')}）` : '';
+      toast(`已保存：${result.path}${extra}`, extra ? 'error' : 'success');
       setStatus('已保存');
     }
   } catch (err) {
@@ -487,10 +495,66 @@ async function doSave() {
   }
 }
 
+// ---- 项目文件（.seedbox.json）----
+async function doSaveProject() {
+  if (!state.current) return;
+  const ws = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
+  const project = {
+    app: 'SeedBoxes',
+    version: 1,
+    generator: state.current,
+    params: collectParams(),
+    format: $('#format-select').value,
+    disabled: ws ? ws.disabled : [],
+    edits: ws ? ws.edits : {},
+  };
+  try {
+    const r = await window.pywebview.api.save_project(project);
+    if (r.cancelled) return;
+    if (r.error) { toast(r.error, 'error'); return; }
+    toast(`项目已保存：${r.path}`, 'success');
+  } catch (err) {
+    toast('保存项目失败: ' + err, 'error');
+  }
+}
+
+async function doOpenProject() {
+  let r;
+  try {
+    r = await window.pywebview.api.open_project();
+  } catch (err) {
+    toast('打开项目失败: ' + err, 'error');
+    return;
+  }
+  if (!r || r.cancelled) return;
+  if (r.error) { toast(r.error, 'error'); return; }
+  const p = r.project;
+  await selectGenerator(p.generator);
+  const form = $('#param-form');
+  Object.entries(p.params || {}).forEach(([k, v]) => {
+    const el = form.querySelector(`[name="${CSS.escape(k)}"]`);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = String(v) === '1' || v === true || String(v).toLowerCase() === 'true';
+    else el.value = v;
+  });
+  if (p.format) {
+    const opt = $('#format-select').querySelector(`option[value="${CSS.escape(p.format)}"]`);
+    if (opt) $('#format-select').value = p.format;
+  }
+  if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits });
+  toast('项目已载入', 'success');
+  doPreview();
+}
+
 // ---- 事件 ----
 function bindEvents() {
   $('#btn-preview').addEventListener('click', doPreview);
   $('#btn-save').addEventListener('click', doSave);
+  $('#btn-save-project').addEventListener('click', doSaveProject);
+  $('#btn-open-project').addEventListener('click', doOpenProject);
+  const onParam = () => { if (window.SeedWorkshop) window.SeedWorkshop.paramsChanged(); };
+  $('#param-form').addEventListener('input', onParam);
+  $('#param-form').addEventListener('change', onParam);
   $('#search').addEventListener('input', (e) => renderSidebar(e.target.value));
   $('#btn-zoom-in').addEventListener('click', () => { state.zoom = Math.min(8, state.zoom * 1.25); applyZoom(); });
   $('#btn-zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.1, state.zoom / 1.25); applyZoom(); });
@@ -502,6 +566,14 @@ function bindEvents() {
     if (g) browseGroup(g.name); else showView('welcome');
   });
 }
+
+// 供 workshop.js（ES 模块）调用
+window.toast = toast;
+window.SeedApp = {
+  collectParams,
+  doPreview,
+  hasPreview: () => !!state.hasPreview,
+};
 
 // ---- 启动 ----
 (async () => {

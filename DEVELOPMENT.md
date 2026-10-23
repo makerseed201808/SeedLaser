@@ -124,6 +124,15 @@ boxes 用单字符 (e/f/F/i/...) 做选项值，UI 不直观。用 `boxes.edges.
 - `build_uv.bat` 引用了不存在的 `BoxesClient.spec`，改为 `SeedBoxes.spec`
 - 新增 `.gitattributes`：`.bat` 强制 CRLF，`.sh` 强制 LF
 
+### 阶段 11：3D 模型 + 局部修改（参考 Laserform 的交互）
+- 需求：现有生成器做到 Laserform 那样的 3D 可视化，并能局部修改（开孔、刻字、禁用板、存项目）
+- Laserform 无开源许可，只借鉴交互思路，代码全部自写
+- 关键发现：boxes 的 Surface 本来就把每个零件存成独立 Part；挂钩 move 记录坐标系即可拿到每块板的精确轮廓（含卡榫），3D 与图纸几何完全一致
+- 5 个常用方盒写了组装配方；其余生成器显示板件平铺
+- 局部修改在 boxes 渲染管线内注入，所有输出格式都生效；中文字用 fontTools 读系统字体转轮廓
+- 修复原有 bug：参数按 dest 名拼命令行，TypeTray 的 gh / gw（实际选项 --gripheight / --gripwidth）报「参数无效」
+- 新增浏览器调试模式（scripts/dev_server.py），用 Chromium 截图核对 3D 拼装
+
 ---
 
 ## 四、关键设计决策详解

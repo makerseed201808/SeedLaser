@@ -24,6 +24,7 @@ classifiers = [
 dependencies = [
     "pywebview>=5.0",
     "boxes",
+    "fonttools>=4.40",  # 中文刻字：系统字体字形 → 轮廓
 ]
 
 [project.optional-dependencies]

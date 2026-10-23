@@ -20,6 +20,8 @@ import boxes
 import boxes.edges as boxes_edges
 import boxes.generators as gen_module
 
+import model3d
+
 
 # 边缘字符 (e/f/F/...) → 描述（如 "Straight Edge"），由 boxes 提供
 _EDGE_DESCRIPTIONS = boxes_edges.getDescriptions()
@@ -278,6 +280,12 @@ def _init_generators() -> None:
             except Exception as exc:
                 _FAILED_GENERATORS.append((full_name, f"{type(exc).__name__}: {exc}"))
         _INITIALIZED = True
+
+
+def _project_has_content(project: dict[str, Any] | None) -> bool:
+    if not project:
+        return False
+    return bool(project.get("disabled")) or any((project.get("edits") or {}).values())
 
 
 def _coerce(value: Any) -> str:
@@ -544,10 +552,88 @@ class Api:
 
     # --------------------------------------------------------- render
 
-    def preview(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
-        return self._render(name, params, fmt="svg", to_file=None)
+    def preview(self, name: str, params: dict[str, Any],
+                project: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._render(name, params, fmt="svg", to_file=None, project=project)
 
-    def save(self, name: str, params: dict[str, Any], fmt: str) -> dict[str, Any]:
+    # --------------------------------------------------------- 3D / 局部修改
+
+    def get_model(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """每块零件的精确轮廓（名义坐标系）+ 3D 摆放矩阵."""
+        return self._render(name, params, fmt="svg", to_file=None, model=True)
+
+    def edit_shapes(self, edits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """把编辑（圆/方/圆角矩形/文字）转成多边形（「从外面看」坐标系）."""
+        out = []
+        for e in edits or []:
+            try:
+                polys, missing = model3d.edit_polygons(e)
+                out.append({"id": e.get("id"), "polys": [[[round(x, 3), round(y, 3)] for x, y in p] for p in polys],
+                            "missing": missing})
+            except Exception as exc:
+                out.append({"id": e.get("id"), "polys": [], "missing": [], "error": f"{exc}"})
+        return out
+
+    def list_fonts(self) -> list[dict[str, Any]]:
+        try:
+            return model3d.list_fonts()
+        except Exception:
+            return []
+
+    def save_project(self, project: dict[str, Any]) -> dict[str, Any]:
+        import json
+        if self._window is None:
+            return {"error": "窗口未初始化"}
+        try:
+            _fd = getattr(webview, "FileDialog", None)
+            picked = self._window.create_file_dialog(
+                _fd.SAVE if _fd else webview.SAVE_DIALOG,
+                save_filename=f"{project.get('generator', 'project')}.seedbox.json",
+                file_types=("SeedBoxes 项目 (*.json)", "All files (*.*)"),
+            )
+        except Exception as exc:
+            return {"error": f"保存对话框失败: {exc}"}
+        if not picked:
+            return {"cancelled": True}
+        if isinstance(picked, (list, tuple)):
+            picked = picked[0]
+        try:
+            with open(picked, "w", encoding="utf-8") as f:
+                json.dump(project, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            return {"error": f"保存失败：{exc}"}
+        return {"path": picked}
+
+    def open_project(self) -> dict[str, Any]:
+        import json
+        if self._window is None:
+            return {"error": "窗口未初始化"}
+        try:
+            _fd = getattr(webview, "FileDialog", None)
+            picked = self._window.create_file_dialog(
+                _fd.OPEN if _fd else webview.OPEN_DIALOG,
+                file_types=("SeedBoxes 项目 (*.json)", "All files (*.*)"),
+            )
+        except Exception as exc:
+            return {"error": f"打开对话框失败: {exc}"}
+        if not picked:
+            return {"cancelled": True}
+        if isinstance(picked, (list, tuple)):
+            picked = picked[0]
+        try:
+            with open(picked, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as exc:
+            return {"error": f"无法读取项目文件：{exc}"}
+        if not isinstance(data, dict) or data.get("app") != "SeedBoxes":
+            return {"error": "这不是 SeedBoxes 项目文件"}
+        _init_generators()
+        if data.get("generator") not in _GENERATORS:
+            return {"error": f"项目使用的生成器「{data.get('generator')}」不存在"}
+        return {"project": data, "path": picked}
+
+    def save(self, name: str, params: dict[str, Any], fmt: str,
+             project: dict[str, Any] | None = None) -> dict[str, Any]:
         if self._window is None:
             return {"error": "窗口未初始化"}
         ext_map = {
@@ -572,10 +658,10 @@ class Api:
             return {"cancelled": True}
         if isinstance(picked, (list, tuple)):
             picked = picked[0]
-        result = self._render(name, params, fmt=fmt, to_file=picked)
+        result = self._render(name, params, fmt=fmt, to_file=picked, project=project)
         if "error" in result:
             return result
-        return {"path": picked}
+        return {"path": picked, "notes": result.get("notes", [])}
 
     def open_folder(self, path: str) -> dict[str, Any]:
         if not path or not os.path.exists(path):
@@ -598,7 +684,8 @@ class Api:
 
     # --------------------------------------------------------- helper
 
-    def _render(self, name: str, params: dict[str, Any], fmt: str, to_file: str | None) -> dict[str, Any]:
+    def _render(self, name: str, params: dict[str, Any], fmt: str, to_file: str | None,
+                project: dict[str, Any] | None = None, model: bool = False) -> dict[str, Any]:
         _init_generators()
         cls = _GENERATORS.get(name)
         if cls is None:
@@ -607,6 +694,9 @@ class Api:
             instance = None
             try:
                 instance = _new_instance(cls)
+                if model:
+                    # 3D 用精确名义尺寸，不加激光补偿
+                    params = dict(params or {}, burn="0")
                 args = self._params_to_args(instance, params, fmt)
                 _captured: list[str] = []
                 _orig_error = instance.argparser.error
@@ -625,7 +715,20 @@ class Api:
                 instance.metadata["url_short"] = ""
                 instance.qr_code = False
                 instance.open()
+                need_rec = model or _project_has_content(project)
+                rec = model3d.Recorder(instance) if need_rec else None
                 instance.render()
+                notes: list[str] = []
+                if model and rec is not None:
+                    parts = rec.extract()
+                    summary = model3d.assemble(name, instance, parts)
+                    rec.detach()
+                    for p in parts:
+                        p.pop("index", None)
+                    return {**summary, "parts": parts}
+                if rec is not None:
+                    notes = model3d.apply_project(name, instance, rec, project)
+                    rec.detach()
                 data = instance.close()
                 instance = None  # close 已成功，关闭善后
                 if data is None:
@@ -634,10 +737,10 @@ class Api:
                 if to_file:
                     with open(to_file, "wb") as f:
                         f.write(raw)
-                    return {"ok": True, "bytes": len(raw)}
+                    return {"ok": True, "bytes": len(raw), "notes": notes}
                 if fmt in ("svg", "svg_Ponoko"):
-                    return {"svg": raw.decode("utf-8")}
-                return {"ok": True, "bytes": len(raw)}
+                    return {"svg": raw.decode("utf-8"), "notes": notes}
+                return {"ok": True, "bytes": len(raw), "notes": notes}
             except Exception as exc:
                 # 用户友好错误，不向前端透露 trace
                 return {"error": f"渲染失败：{exc}"}
@@ -650,12 +753,17 @@ class Api:
     def _params_to_args(instance: boxes.Boxes, params: dict[str, Any], fmt: str) -> list[str]:
         args: list[str] = []
         skip = {"format", "output"}
-        valid_dests = {a.dest for a in instance.argparser._actions}
+        # dest → 命令行选项：大多数同名，但也有例外（TypeTray 的 gh → --gripheight）
+        option_of = {}
+        for a in instance.argparser._actions:
+            longs = [o for o in a.option_strings if o.startswith("--")]
+            if longs:
+                option_of[a.dest] = longs[0]
         for key, value in (params or {}).items():
-            if key in skip or key not in valid_dests:
+            if key in skip or key not in option_of:
                 continue
             if value is None or value == "":
                 continue
-            args.extend([f"--{key}", _coerce(value)])
+            args.extend([option_of[key], _coerce(value)])
         args.extend(["--format", fmt])
         return args
