@@ -544,7 +544,7 @@ class Api:
         try:
             instance = _new_instance(cls)
             HIDDEN = {"help", "format", "output"}
-            only = {"thickness", "burn", "reference"} if name == "FreeDesign" else None
+            only = {"thickness", "burn", "reference", "sheet_w", "sheet_h", "part_gap"} if name == "FreeDesign" else None
             groups: list[dict[str, Any]] = []
             for arg_group in instance.argparser._action_groups:
                 params = []
@@ -553,8 +553,9 @@ class Api:
                         continue
                     params.append(self._describe_action(action))
                 if params:
+                    title = arg_group.title or ""
                     groups.append({
-                        "title": tr(arg_group.title or ""),
+                        "title": "排版（材料尺寸）" if title == "FreeDesign Settings" else tr(title),
                         "description": tr(arg_group.description or ""),
                         "params": params,
                     })
@@ -839,6 +840,7 @@ class Api:
                     instance.design = project or {}
                     instance.open()
                     instance.render()
+                    info = list(instance.notes)
                     data = instance.close()
                     instance = None
                     if data is None:
@@ -847,10 +849,10 @@ class Api:
                     if to_file:
                         with open(to_file, "wb") as f:
                             f.write(raw)
-                        return {"ok": True, "bytes": len(raw), "notes": []}
+                        return {"ok": True, "bytes": len(raw), "notes": [], "info": info}
                     if fmt in ("svg", "svg_Ponoko"):
-                        return {"svg": raw.decode("utf-8"), "notes": []}
-                    return {"ok": True, "bytes": len(raw), "notes": []}
+                        return {"svg": raw.decode("utf-8"), "notes": [], "info": info}
+                    return {"ok": True, "bytes": len(raw), "notes": [], "info": info}
                 instance.open()
                 need_rec = model or _project_has_content(project)
                 rec = model3d.Recorder(instance) if need_rec else None

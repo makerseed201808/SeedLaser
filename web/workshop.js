@@ -338,7 +338,7 @@ class View3D {
     const radius = size.length() / 2 + 10;
     const fovV = THREE.MathUtils.degToRad(this.camera.fov / 2);
     const fovH = Math.atan(Math.tan(fovV) * this.camera.aspect);
-    const dist = radius / Math.sin(Math.min(fovV, fovH)) * 1.05;
+    const dist = radius / Math.sin(Math.min(fovV, fovH)) * 1.2;
     const dir = model.assembled ? new THREE.Vector3(0.75, 0.62, 1.0) : new THREE.Vector3(0.2, 1.4, 0.9);
     dir.normalize();
     this.camera.position.copy(center).addScaledVector(dir, dist);
@@ -689,8 +689,17 @@ function freePartForm() {
   box.innerHTML = `<b>＋ 新建板件</b>
     <label>宽<input type="number" data-k="w" value="${W.freeW || 100}" min="1" step="1"></label>
     <label>高<input type="number" data-k="h" value="${W.freeH || 60}" min="1" step="1"></label>
-    <button class="primary">添加并编辑</button>`;
-  box.querySelector('button').addEventListener('click', () => {
+    <button class="primary" data-k="add">添加并编辑</button>
+    <button data-k="auto" title="按卡榫配对把板自动拼起来">🧩 按卡榫自动拼装</button>
+    <button data-k="flat" title="所有板平放在台面上">平铺</button>`;
+  box.querySelector('[data-k=auto]').addEventListener('click', () => freeAutoAssemble());
+  box.querySelector('[data-k=flat]').addEventListener('click', () => {
+    W.project.poses = {};
+    W.model.parts.forEach((p) => { const o = view && view.objects.get(p.id); if (o) { o.group.matrix.fromArray(p.matrix); o.group.matrixWorldNeedsUpdate = true; } });
+    if (view) view.fit(W.model);
+    projectChanged(); renderPartsPanel(); checkPose();
+  });
+  box.querySelector('[data-k=add]').addEventListener('click', () => {
     const w = Math.max(1, Number(box.querySelector('[data-k=w]').value) || 100);
     const h = Math.max(1, Number(box.querySelector('[data-k=h]').value) || 60);
     W.freeW = w; W.freeH = h;
@@ -1782,8 +1791,86 @@ function sfFlash(text) {
 
 // 一键装配：全部回到生成器的装配位置；拆开平铺：所有板平放在台面上
 async function sfAssembleAll() {
+  if (isFree()) {
+    const msg = await freeAutoAssemble();
+    if (msg) await sfReloadPoses(msg);
+    return;
+  }
   W.project.poses = {};
   await sfReloadPoses('✓ 已一键装配');
+}
+
+// ---- 自由设计：按卡榫配对自动拼装
+// 从卡榫最多的板开始（保持原位），每次挑一对「已放好的板 ↔ 还没放的板」的配对卡榫，
+// 在候选姿态里选不穿透、接触最多、离已拼部分最近（第一块优先往上搭）的那个。
+async function freeAutoAssemble() {
+  if (!W.model || !W.model.token) return null;
+  const t = W.model.thickness || 3;
+  const dis = new Set(W.project.disabled);
+  const ids = W.model.parts.filter((p) => !dis.has(p.id) && jointsOf(p.id).length).map((p) => p.id);
+  if (ids.length < 2) { toast('至少要有两块带卡榫的板才能自动拼装（用草图里的「卡榫」「插槽」工具做）', 'error'); return null; }
+  const links = [];
+  for (let i = 0; i < ids.length; i++) {
+    for (let k = i + 1; k < ids.length; k++) {
+      jointsOf(ids[i]).forEach((ja) => jointsOf(ids[k]).forEach((jb) => {
+        if (mateOptions(ja, jb, t).length || mateOptions(jb, ja, t).length) links.push({ a: ids[i], b: ids[k], ja, jb });
+      }));
+    }
+  }
+  if (!links.length) { toast('没找到能配对的卡榫：两条边的长度和齿的设置要一样（A 配 B、A 配凹槽、A 配插槽）', 'error'); return null; }
+  const degree = (id) => links.filter((l) => l.a === id || l.b === id).length;
+  const root = ids.slice().sort((x, y) => degree(y) - degree(x))[0];
+  const poses = {};                               // 只记录拼装后的姿态；root 用平铺位置
+  const placed = new Set([root]);
+  const used = new Set();
+  const M = (id) => new THREE.Matrix4().fromArray(poses[id] || partById(id).matrix);
+  const centerW = (id, m) => partCenter(partById(id)).applyMatrix4(m || M(id));
+  setNote('正在按卡榫自动拼装…', 'info');
+  for (;;) {
+    const cands = [];
+    links.forEach((l) => {
+      if (used.has(l.ja.id) || used.has(l.jb.id)) return;
+      const aIn = placed.has(l.a); const bIn = placed.has(l.b);
+      if (aIn === bIn) return;
+      const q = aIn ? l.b : l.a; const pp = aIn ? l.a : l.b;
+      const jq = aIn ? l.jb : l.ja; const jp = aIn ? l.ja : l.jb;
+      mateOptions(jq, jp, t).forEach((F) => cands.push({ q, pp, jq, jp, T: M(pp).multiply(F) }));
+    });
+    if (!cands.length) break;
+    const centroid = new THREE.Vector3();
+    placed.forEach((id) => centroid.add(centerW(id)));
+    centroid.divideScalar(placed.size);
+    let best = null;
+    for (const c of cands) {
+      const tryPoses = {};
+      placed.forEach((id) => { tryPoses[id] = M(id).toArray(); });
+      tryPoses[c.q] = c.T.toArray();
+      const r = await api().check_pose(W.model.token, tryPoses, [...placed, c.q], W.project.sketches || {});
+      if (r.error) continue;
+      const rep = r.report[c.q] || { collide: [], touch: [] };
+      if (rep.collide.length) continue;
+      const cw = centerW(c.q, c.T);
+      const score = rep.touch.length * 1000 - cw.distanceTo(centroid) + (placed.size === 1 ? cw.z * 0.5 : 0);
+      if (!best || score > best.score) best = { ...c, score };
+    }
+    if (!best) break;
+    poses[best.q] = best.T.toArray().map((x) => Math.round(x * 1e4) / 1e4);
+    placed.add(best.q);
+    used.add(best.jq.id); used.add(best.jp.id);
+  }
+  W.project.poses = poses;
+  W.model.parts.forEach((p) => {
+    const o = view && view.objects.get(p.id);
+    if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
+  });
+  if (view) view.fit({ ...W.model, assembled: true });
+  projectChanged();
+  renderPartsPanel();
+  checkPose();
+  const left = ids.filter((id) => !placed.has(id));
+  const msg = `🧩 已按卡榫拼好 ${placed.size} 块板` + (left.length ? `；${left.map(nameOf).join('、')} 没找到能配上的卡榫` : '');
+  toast(msg, left.length ? '' : 'success');
+  return msg;
 }
 
 async function sfExplode() {
@@ -1920,9 +2007,9 @@ async function openSketchForge() {
       msg.id = 'sf-msg';
       msg.className = 'sf-msg hidden';
       $('#sf-host').append(bar, msg);
-      bar.querySelector('[data-sf=assemble]').disabled = !W.model.assembled;
+      bar.querySelector('[data-sf=assemble]').disabled = !W.model.assembled && !isFree();
       bar.querySelector('[data-sf=snap]').disabled = !W.model.assembled && !isFree();
-      if (!W.model.assembled) bar.querySelector('[data-sf=assemble]').title = isFree() ? '自由设计没有预设的装配位置，用磁吸拼' : '这个生成器没有装配信息';
+      if (!W.model.assembled) bar.querySelector('[data-sf=assemble]').title = isFree() ? '按卡榫配对把板自动拼起来' : '这个生成器没有装配信息';
     }
   } catch (err) {
     loading.textContent = String(err.message || err);
@@ -2041,7 +2128,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
+    SF, sfCommand, sfSync, freeAutoAssemble, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);

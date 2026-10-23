@@ -453,7 +453,7 @@ async function doPreview() {
       state.zoom = 1.0;
       mountSvg(result.svg);
       state.hasPreview = true;
-      $('#preview-info').textContent = `SVG · ${formatBytes(result.svg.length)}`;
+      $('#preview-info').textContent = `SVG · ${formatBytes(result.svg.length)}` + (result.info && result.info.length ? ` · ${result.info.join('；')}` : '');
       if (result.notes && result.notes.length) toast(result.notes.join('；'), 'error');
       setStatus('就绪');
     }

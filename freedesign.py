@@ -69,6 +69,85 @@ def layout(items: list[tuple[dict, dict]], gap: float = GAP) -> list[tuple[dict,
     return out
 
 
+def _part_area(sk: dict) -> float:
+    try:
+        return float(sketch2d.cut_solid(sk).area)
+    except Exception:
+        return 0.0
+
+
+def nest(items: list[tuple[dict, dict]], sheet_w: float, sheet_h: float, gap: float):
+    """把板件（按包围盒）排进若干张 sheet_w × sheet_h 的材料，允许旋转 90°。
+    返回 (放置列表 [(part, sketch, 第几张, x, y, 是否旋转, 包围盒)], 张数, 放不下的板)。
+    用「天际线左下角」法：每张材料维护一条天际线，挑能放下且最低、最靠左的位置。"""
+    boxes_ = []
+    for p, sk in items:
+        b = _bounds(sk)
+        boxes_.append((p, sk, b, b[2] - b[0], b[3] - b[1]))
+    boxes_.sort(key=lambda q: max(q[3], q[4]) * min(q[3], q[4]), reverse=True)
+    sheets: list[list[list[float]]] = []      # 每张：天际线段 [x, y, 宽]
+    placed, too_big = [], []
+
+    def fit(sky, w, h):
+        best = None
+        for i, (sx, _sy, _sw) in enumerate(sky):
+            if sx + w > sheet_w + 1e-6:
+                continue
+            # 从第 i 段开始覆盖 w 宽，高度取覆盖段的最大值
+            top, x_end, j = 0.0, sx + w, i
+            while j < len(sky) and sky[j][0] < x_end - 1e-9:
+                top = max(top, sky[j][1])
+                j += 1
+            if top + h > sheet_h + 1e-6:
+                continue
+            if best is None or (top, sx) < (best[0], best[1]):
+                best = (top, sx)
+        return best
+
+    def put(sky, x, y, w, h):
+        x_end = x + w
+        new = []
+        for sx, sy, sw in sky:
+            ex = sx + sw
+            if ex <= x or sx >= x_end:
+                new.append([sx, sy, sw])
+                continue
+            if sx < x:
+                new.append([sx, sy, x - sx])
+            if ex > x_end:
+                new.append([x_end, sy, ex - x_end])
+        new.append([x, y + h, w])
+        new.sort(key=lambda q: q[0])
+        sky[:] = new
+
+    for p, sk, b, w, h in boxes_:
+        gw, gh = w + gap, h + gap
+        done = False
+        for si, sky in enumerate(sheets + [None]):
+            if sky is None:
+                sky = [[0.0, 0.0, sheet_w + gap]]
+            options = []
+            for rot, ww, hh in ((False, gw, gh), (True, gh, gw)):
+                if ww - gap > sheet_w + 1e-6 or hh - gap > sheet_h + 1e-6:
+                    continue
+                f = fit(sky, ww, hh)
+                if f is not None:
+                    options.append((f[0] + hh, f[1], rot, ww, hh, f))
+            if not options:
+                continue
+            options.sort(key=lambda q: (q[0], q[1]))
+            _top, _x, rot, ww, hh, (y, x) = options[0]
+            if si == len(sheets):
+                sheets.append(sky)
+            put(sky, x, y, ww, hh)
+            placed.append((p, sk, si, x, y, rot, b))
+            done = True
+            break
+        if not done:
+            too_big.append(p)
+    return placed, len(sheets), too_big
+
+
 class FreeDesign(boxes.Boxes):
     """自由设计：自己画板件（二维草图），再到 3D 里拼装并检查干涉"""
 
@@ -77,14 +156,59 @@ class FreeDesign(boxes.Boxes):
 
     def __init__(self) -> None:
         boxes.Boxes.__init__(self)
+        self.argparser.add_argument(
+            "--sheet_w", action="store", type=float, default=0.0,
+            help="材料（激光机台面）宽度 mm；0 = 不排版，按行简单摆放")
+        self.argparser.add_argument(
+            "--sheet_h", action="store", type=float, default=0.0,
+            help="材料（激光机台面）高度 mm")
+        self.argparser.add_argument(
+            "--part_gap", action="store", type=float, default=3.0,
+            help="板件之间的间距 mm")
         self.design: dict | None = None
+        self.notes: list[str] = []
 
     def render(self) -> None:
+        from boxes.Color import Color
+
         burn = float(getattr(self, "burn", 0) or 0)
-        for _p, sk, dx, dy, _b in layout(part_sketches(self.design)):
+        items = part_sketches(self.design)
+        sw, sh = float(self.sheet_w or 0), float(self.sheet_h or 0)
+        gap = max(0.0, float(self.part_gap or 0)) + 2 * burn
+        if sw <= 0 or sh <= 0:
+            for _p, sk, dx, dy, _b in layout(items, gap=max(gap, 1.0)):
+                with self.saved_context():
+                    self.moveTo(dx + self.spacing, dy + self.spacing)
+                    sketch2d.draw(self, sk, burn)
+            return
+        placed, n_sheets, too_big = nest(items, sw, sh, gap)
+        sheet_gap = 20.0
+        used = [0.0] * n_sheets
+        for p, sk, si, x, y, rot, b in placed:
+            ox = self.spacing + si * (sw + sheet_gap)
+            oy = self.spacing
+            x0, y0, x1, y1 = b
             with self.saved_context():
-                self.moveTo(dx + self.spacing, dy + self.spacing)
+                if rot:   # 逆时针 90°：(x, y) → (−y, x)
+                    self.moveTo(ox + x + y1, oy + y - x0, 90)
+                else:
+                    self.moveTo(ox + x - x0, oy + y - y0)
                 sketch2d.draw(self, sk, burn)
+            used[si] += _part_area(sk)
+        for si in range(n_sheets):
+            ox = self.spacing + si * (sw + sheet_gap)
+            with self.saved_context():
+                self.set_source_color(Color.ANNOTATIONS)
+                self.ctx.rectangle(ox, self.spacing, sw, sh)
+                self.ctx.stroke()
+                self.text(f"材料 {si + 1}/{n_sheets} · {sw:g}×{sh:g} mm · 利用率 {used[si] / (sw * sh) * 100:.0f}%",
+                          ox, self.spacing + sh + 3, fontsize=6, color=Color.ANNOTATIONS)
+                self.set_source_color(Color.BLACK)
+        total = sum(used) / (sw * sh * max(1, n_sheets)) * 100
+        self.notes.append(f"需要 {n_sheets} 张 {sw:g}×{sh:g} mm 的材料，平均利用率 {total:.0f}%")
+        if too_big:
+            names = "、".join(str(p.get("name") or p.get("id")) for p in too_big)
+            self.notes.append(f"放不下（比材料还大）：{names}")
 
 
 def model_parts(design: dict | None) -> list[dict]:
