@@ -165,6 +165,9 @@ class FreeDesign(boxes.Boxes):
         self.argparser.add_argument(
             "--part_gap", action="store", type=float, default=3.0,
             help="板件之间的间距 mm")
+        self.argparser.add_argument(
+            "--common_line", action="store", type=boxes.boolarg, default=False,
+            help="共边切割：排版时板件紧挨着，相邻的边只切一次（省时间，边缘不易烧焦）")
         self.design: dict | None = None
         self.notes: list[str] = []
 
@@ -181,20 +184,47 @@ class FreeDesign(boxes.Boxes):
                     self.moveTo(dx + self.spacing, dy + self.spacing)
                     sketch2d.draw(self, sk, burn)
             return
+        common = bool(getattr(self, "common_line", False))
+        if common:
+            gap = 2 * burn          # 补偿后相邻的边正好重合
         placed, n_sheets, too_big = nest(items, sw, sh, gap)
         sheet_gap = 20.0
         used = [0.0] * n_sheets
+        shared: list[list] = [[] for _ in range(n_sheets)]
         for p, sk, si, x, y, rot, b in placed:
             ox = self.spacing + si * (sw + sheet_gap)
             oy = self.spacing
             x0, y0, x1, y1 = b
+            if rot:   # 逆时针 90°：(x, y) → (−y, x)
+                tx, ty, ang = ox + x + y1, oy + y - x0, 90
+            else:
+                tx, ty, ang = ox + x - x0, oy + y - y0, 0
             with self.saved_context():
-                if rot:   # 逆时针 90°：(x, y) → (−y, x)
-                    self.moveTo(ox + x + y1, oy + y - x0, 90)
-                else:
-                    self.moveTo(ox + x - x0, oy + y - y0)
-                sketch2d.draw(self, sk, burn)
+                self.moveTo(tx, ty, ang)
+                sketch2d.draw(self, sk, burn, cut=not common)
+            if common:
+                for pts, closed, outer in sketch2d.cut_polylines(sk, burn):
+                    if ang:
+                        pts = [(tx - py, ty + px) for px, py in pts]
+                    else:
+                        pts = [(tx + px, ty + py) for px, py in pts]
+                    shared[si].append((pts, closed, outer))
             used[si] += _part_area(sk)
+        if common:
+            saved_total = 0.0
+            for lines in shared:
+                lines, saved = sketch2d.dedupe_lines(lines)
+                saved_total += saved
+                for pts, closed, outer in lines:
+                    self.set_source_color(Color.OUTER_CUT if outer else Color.INNER_CUT)
+                    self.ctx.move_to(*pts[0])
+                    for pt in pts[1:]:
+                        self.ctx.line_to(*pt)
+                    if closed:
+                        self.ctx.line_to(*pts[0])
+                    self.ctx.stroke()
+            self.set_source_color(Color.BLACK)
+            self.notes.append(f"共边切割：重叠的切割线省掉 {saved_total:.0f} mm")
         for si in range(n_sheets):
             ox = self.spacing + si * (sw + sheet_gap)
             with self.saved_context():

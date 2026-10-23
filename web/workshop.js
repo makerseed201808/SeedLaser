@@ -655,7 +655,8 @@ function attachView(el) {
 function saveSketch(id, sk) {
   W.project.sketches = W.project.sketches || {};
   if (sk.modified || isFree()) {
-    W.project.sketches[id] = { base: sk.base, items: sk.items };
+    const { modified, ...keep } = sk;
+    W.project.sketches[id] = keep;
     delete W.project.edits[id];          // 旧版开孔 / 刻字已迁移进草图
   } else {
     delete W.project.sketches[id];

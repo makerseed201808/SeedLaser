@@ -25,6 +25,7 @@ const TOOLS = [
   { id: 'text', key: 't', icon: 'T', name: '文字', tip: '单击放置文字，右侧修改内容、字体、字号（T）' },
   { id: 'joint', key: 'j', icon: '⊓', name: '卡榫', tip: '单击板的一条直边，把它做成指接卡榫 / 凹槽（深度 = 板厚）（J）' },
   { id: 'mortise', key: 'k', icon: '▤', name: '插槽', tip: '在板面上开一排插槽孔，让另一块板的指接 A 边插进来（T 型连接）；拖出插槽中线，或先在右侧选配对边再单击（K）' },
+  { id: 'bridge', key: 'b', icon: '⫶', name: '连接点', tip: '在切割线上点一下加连接点（留一小段不切），镂空的部分切完不会掉下来；再点一次删除（B）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '拖动测量距离和角度（M）' },
 ];
@@ -42,6 +43,8 @@ const ALIGN_ICONS = {
 };
 const ALIGN_NAMES = { l: '左对齐', hc: '水平居中', r: '右对齐', t: '顶对齐', vc: '垂直居中', b: '底对齐', dh: '水平等距分布', dv: '垂直等距分布' };
 const alignIcon = (k) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3">${ALIGN_ICONS[k]}</svg>`;
+
+import { parseDXF, loadImage, grayOf, otsu, binarize, readFile } from './sketch-import.js';
 
 let uid = 0;
 const newId = () => 's' + Date.now().toString(36) + (uid++).toString(36);
@@ -62,7 +65,7 @@ export class SketchEditor {
     this.opts = { mode: 'cut', radius: 0, sides: 6, star: false, starRatio: 0.5, text: '文字', font: '', size: 12,
                   offset: 2, offsetJoin: 'round', arrRows: 2, arrCols: 3, arrDx: 20, arrDy: 20,
                   arrType: 'line', arrCount: 5, arrDist: 15, arrAngle: 0, arrCenter: 'board', arrCx: 0, arrCy: 0,
-                  arrSweep: 360, arrRotate: true, arrPreview: true, alignTo: 'sel',
+                  arrSweep: 360, arrRotate: true, arrPreview: true, alignTo: 'sel', cornerR: 3, bridgeW: 1, bridgeN: 2,
                   jointCount: 0, jointType: 'a', jointDepth: 0, jointMode: 'count', jointTab: 0, jointGap: 0, jointPlay: 0 };
     this.undoStack = [];
     this.redoStack = [];
@@ -87,6 +90,9 @@ export class SketchEditor {
           <button data-act="paste" title="粘贴（Ctrl+V）">粘贴</button>
           <button data-act="dup" title="原位复制一份（Ctrl+D）">复制一份</button>
           <button data-act="delete" title="删除（Delete）">删除</button>
+        </div>
+        <div class="sk-group">
+          <button data-act="import" title="导入 SVG / DXF 矢量图，或把图片描摹成矢量（Ctrl+I）">📥 导入</button>
         </div>
         <div class="sk-group">
           <button data-act="fit" title="显示整块板（F）">适合窗口</button>
@@ -116,6 +122,10 @@ export class SketchEditor {
       <div class="sk-main">
         <div class="sk-tools">${TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}"><span class="i">${t.icon}</span>${t.name}</button>`).join('')}</div>
         <div class="sk-canvas-wrap"><canvas class="sk-canvas" resize></canvas>
+          <canvas class="sk-ruler-x" title="从标尺往画布上拖，拉出参考线"></canvas><canvas class="sk-ruler-y" title="从标尺往画布上拖，拉出参考线"></canvas>
+          <div class="sk-ruler-corner" title="清除所有参考线">✕</div>
+          <div class="sk-dims"></div>
+          <div class="sk-snaptag hidden"></div>
           <div class="sk-banner hidden"></div>
           <div class="sk-measure hidden"></div>
           <div class="sk-3d">
@@ -161,11 +171,17 @@ export class SketchEditor {
           </section>
           <section class="sk-card">
             <h4>变换</h4>
+            <div class="sk-row"><label>圆角 / 倒角<input data-opt="cornerR" type="number" min="0.1" step="0.5" value="3"> mm</label>
+              <button data-act="fillet" title="把选中图形的尖角变圆（节点工具下只改当前节点）">圆角</button>
+              <button data-act="chamfer" title="把尖角切成斜角">倒角</button></div>
             <div class="sk-btns">
               <button data-act="flipH">水平镜像</button><button data-act="flipV">垂直镜像</button>
               <button data-act="rotL">左转 90°</button><button data-act="rotR">右转 90°</button>
               <button data-act="close" data-close="path" title="把开放路径首尾相连">闭合路径</button>
               <button data-act="breakApart" title="把组合路径拆成独立图形">拆分</button>
+              <button data-act="group" title="选中的图形编成一组，一起选中、移动（Ctrl+G）">编组</button>
+              <button data-act="ungroup" title="取消编组（Ctrl+Shift+G）">取消编组</button>
+              <button data-act="dedupe" title="删除完全重合的重复图形（重复的线会被激光切两遍，边缘容易烧焦）">删除重复图形</button>
             </div>
           </section>
           <section class="sk-card sk-boardinfo"></section>
@@ -208,17 +224,22 @@ export class SketchEditor {
     this.gridLayer = L('grid');
     this.boardLayer = L('board');
     this.content = L('content');
+    this.marks = L('marks');
+    this.guideLayer = L('guides');
     this.overlay = L('overlay');
     this.content.activate();
     this.zoom = 4;
 
+    this.$('.sk-ruler-x').addEventListener('pointerdown', (ev) => this.rulerDown(ev, 'y'));
+    this.$('.sk-ruler-y').addEventListener('pointerdown', (ev) => this.rulerDown(ev, 'x'));
+    this.$('.sk-ruler-corner').addEventListener('click', () => { if (this.guides.length) { this.guides = []; this.drawGuides(); this.emitChange(); this.status('已清除参考线'); } });
     const tool = new this.ps.Tool();
     tool.minDistance = 0;
     tool.onMouseDown = (e) => this.onDown(e);
     tool.onMouseDrag = (e) => this.onDrag(e);
     tool.onMouseUp = (e) => this.onUp(e);
     tool.onMouseMove = (e) => this.onMove(e);
-    this.ps.view.onResize = () => this.redrawGrid();
+    this.ps.view.onResize = () => { this.redrawGrid(); this.drawGuides(); this.drawRulers(); this.drawSelection(); };
 
     this.canvas.addEventListener('wheel', (ev) => {
       ev.preventDefault();
@@ -267,6 +288,8 @@ export class SketchEditor {
     this.sel.clear();
     const banner = this.$('.sk-banner');
     banner.classList.add('hidden');
+    this.opts.bridgeW = sketch && sketch.bridge_w != null ? Number(sketch.bridge_w) : 1;
+    this.guides = sketch && sketch.guides ? sketch.guides.map((g) => ({ ...g })) : [];
     if (sketch && sketch.items && sketch.items.length) {
       this.load(sketch);
       if (sketch.base && part.base && sketch.base !== part.base) {
@@ -337,7 +360,8 @@ export class SketchEditor {
     if (it.paths.length === 1) item = mk(it.paths[0]);
     else { item = new ps.CompoundPath({ insert: false }); item.addChildren(it.paths.map(mk)); }
     item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked,
-                  text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null };
+                  text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null,
+                  group: it.group || null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
     this.content.addChild(item);
     this.style(item);
     return item;
@@ -356,6 +380,8 @@ export class SketchEditor {
     if (item.data.role) out.role = item.data.role;
     if (item.data.locked) out.locked = true;
     if (item.data.text) out.text = { ...item.data.text };
+    if (item.data.group) out.group = item.data.group;
+    if (item.data.bridges && item.data.bridges.length) out.bridges = item.data.bridges.map((b) => b.map(r3));
     if (item.data.joints && item.data.joints.length) {
       out.joints = item.data.joints.map((j) => ({ ...j, a: j.a.map(r3), b: j.b.map(r3), c: j.c.map(r3) }));
     }
@@ -363,8 +389,11 @@ export class SketchEditor {
   }
 
   serialize() {
-    return { base: this.part.base, items: this.content.children.filter((c) => c.data && c.data.mode)
+    const out = { base: this.part.base, items: this.content.children.filter((c) => c.data && c.data.mode)
       .map((c) => this.serializeItem(c)).filter((it) => it.paths.length) };
+    if (this.opts.bridgeW !== 1) out.bridge_w = this.opts.bridgeW;
+    if (this.guides && this.guides.length) out.guides = this.guides.map((g) => ({ ...g }));
+    return out;
   }
 
   serializeForSave() {
@@ -408,10 +437,11 @@ export class SketchEditor {
     const orig = item.transform;
     const ps = this.ps;
     item.transform = function (m, ...rest) {
+      const tp = (q) => { const r = m.transform(new ps.Point(q[0], q[1])); return [r.x, r.y]; };
       if (m && this.data && this.data.joints) {
-        const tp = (q) => { const r = m.transform(new ps.Point(q[0], q[1])); return [r.x, r.y]; };
         this.data.joints = this.data.joints.map((j) => ({ ...j, a: tp(j.a), b: tp(j.b), c: tp(j.c) }));
       }
+      if (m && this.data && this.data.bridges) this.data.bridges = this.data.bridges.map(tp);
       return orig.call(this, m, ...rest);
     };
   }
@@ -503,6 +533,71 @@ export class SketchEditor {
     cp.fillColor = WOOD;
     cp.strokeColor = null;
     this.boardLayer.insertChild(0, cp);
+    this.drawMarks();
+  }
+
+  // 连接点标记（橙色小横杠，跨在切割线上）
+  drawMarks() {
+    this.marks.removeChildren();
+    const w = Math.max(0.3, Number(this.opts.bridgeW) || 1);
+    this.content.children.forEach((it) => {
+      (it.data && it.data.bridges || []).forEach(([x, y]) => {
+        const pt = new this.ps.Point(x, y);
+        const p = this.itemPaths(it).reduce((best, q) => {
+          const d = q.getNearestPoint(pt).getDistance(pt);
+          return !best || d < best.d ? { q, d } : best;
+        }, null);
+        if (!p) return;
+        const loc = p.q.getNearestLocation(pt);
+        const tan = loc.tangent.normalize(w / 2);
+        const nrm = loc.normal.normalize(6 / this.zoom);
+        const c = loc.point;
+        const mark = new this.ps.Path({ parent: this.marks, closed: true, fillColor: '#f97316',
+          segments: [c.subtract(tan).subtract(nrm), c.add(tan).subtract(nrm), c.add(tan).add(nrm), c.subtract(tan).add(nrm)] });
+        mark.opacity = 0.9;
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------- 连接点
+
+  bridgeAt(pt) {
+    const tol = 7 / this.zoom;
+    // 点在已有连接点上：删除
+    for (const it of this.content.children) {
+      const list = it.data && it.data.bridges;
+      if (!list) continue;
+      const i = list.findIndex(([x, y]) => Math.hypot(x - pt.x, y - pt.y) < tol);
+      if (i >= 0) {
+        it.data.bridges = list.filter((_, k) => k !== i);
+        this.commit('已删除连接点');
+        return;
+      }
+    }
+    const res = this.content.hitTest(pt, { stroke: true, tolerance: tol,
+      match: (h) => { const it = this.topItem(h.item); return it && it.data.mode === 'cut' && it.data.role !== 'outline-locked'; } });
+    if (!res || !res.location) { this.status('请点在切割线上'); return; }
+    const it = this.topItem(res.item);
+    const p = res.location.point;
+    it.data.bridges = [...(it.data.bridges || []), [p.x, p.y]];
+    this.commit(`已加连接点（宽 ${fmt(this.opts.bridgeW)} mm）`);
+  }
+
+  autoBridges() {
+    const n = Math.max(1, Math.round(Number(this.opts.bridgeN) || 2));
+    const targets = this.sel.size ? [...this.sel] : this.content.children.filter((c) => c.data && c.data.mode === 'cut' && c.data.role !== 'outline');
+    let count = 0;
+    targets.forEach((it) => {
+      if (!it.data || it.data.mode !== 'cut') return;
+      const list = [];
+      this.itemPaths(it).forEach((p) => {
+        if (!p.closed || p.length < 4) return;
+        for (let k = 0; k < n; k++) { const q = p.getPointAt(p.length * (k + 0.5) / n); list.push([q.x, q.y]); }
+      });
+      if (list.length) { it.data.bridges = list; count += list.length; }
+    });
+    if (!count) { this.toast('没有可以加连接点的闭合切割图形（先选中镂空图形）', 'error'); return; }
+    this.commit(`已自动加 ${count} 个连接点`);
   }
 
   // 生成器原始轮廓（虚线参考）
@@ -525,7 +620,10 @@ export class SketchEditor {
     const h = v.viewSize.height;
     v.matrix = new this.ps.Matrix(this.zoom, 0, 0, -this.zoom, w / 2 - cx * this.zoom, h / 2 + cy * this.zoom);
     this.redrawGrid();
+    this.drawGuides();
+    this.drawRulers();
     this.drawSelection();
+    if (this.marks) this.drawMarks();
   }
 
   center() {
@@ -594,32 +692,229 @@ export class SketchEditor {
 
   // ================================================================ 吸附
 
+  // 智能吸附：端点 > 交点 > 中点 > 圆心 / 中心 > 参考线 > 网格
   snap(pt, opts = {}) {
     const tol = 7 / this.zoom;
     if (this.snapPoints && !opts.noPoints) {
-      let best = null;
-      let bd = tol;
-      const consider = (q) => { const d = q.getDistance(pt); if (d < bd) { bd = d; best = q; } };
-      this.content.children.forEach((it) => {
-        if (!it.data || (opts.exclude && opts.exclude.has(it))) return;
-        if (!it.bounds.expand(tol * 2).contains(pt)) return;
-        this.itemPaths(it).forEach((p) => p.segments.forEach((s) => consider(s.point)));
-      });
-      (opts.extra || []).forEach(consider);
-      if (best) { this.showSnap(best); return best.clone(); }
+      const near = this.content.children.filter((it) => it.data && it.data.mode && !it.data.drawing
+        && !(opts.exclude && opts.exclude.has(it)) && it.bounds.expand(tol * 2).contains(pt));
+      const cands = [];
+      const add = (q, kind, prio) => { const d = q.getDistance(pt); if (d < tol) cands.push({ q, kind, prio, d }); };
+      near.forEach((it) => this.itemPaths(it).forEach((p) => {
+        p.segments.forEach((sg) => add(sg.point, '端点', 0));
+        p.curves.forEach((c) => add(c.getPointAtTime(0.5), '中点', 2));
+      }));
+      (opts.extra || []).forEach((q) => add(q, '端点', 0));
+      near.forEach((it) => add(it.bounds.center, it.className === 'Path' && it.segments.length === 4 && !it.segments[0].handleIn.isZero() ? '圆心' : '中心', 3));
+      if (near.length >= 1 && near.length <= 8) {
+        const paths = near.flatMap((it) => this.itemPaths(it));
+        for (let i = 0; i < paths.length; i++) {
+          for (let k = i; k < paths.length; k++) {
+            const ints = k === i ? paths[i].getIntersections() : paths[i].getIntersections(paths[k]);
+            ints.forEach((loc) => add(loc.point, '交点', 1));
+          }
+        }
+      }
+      if (cands.length) {
+        cands.sort((u, v) => u.prio - v.prio || u.d - v.d);
+        const best = cands[0];
+        this.showSnap(best.q, best.kind);
+        return best.q.clone();
+      }
     }
-    this.showSnap(null);
+    // 参考线：x、y 分别吸附
+    let x = null; let y = null;
+    (this.guides || []).forEach((g) => {
+      if (g.axis === 'x' && Math.abs(pt.x - g.v) < tol && (x === null || Math.abs(pt.x - g.v) < Math.abs(pt.x - x))) x = g.v;
+      if (g.axis === 'y' && Math.abs(pt.y - g.v) < tol && (y === null || Math.abs(pt.y - g.v) < Math.abs(pt.y - y))) y = g.v;
+    });
     const st = this.snapStep;
-    if (!st || opts.noGrid) return pt.clone();
-    return new this.ps.Point(Math.round(pt.x / st) * st, Math.round(pt.y / st) * st);
+    const gx = (v) => (!st || opts.noGrid ? v : Math.round(v / st) * st);
+    const q = new this.ps.Point(x !== null ? x : gx(pt.x), y !== null ? y : gx(pt.y));
+    if (x !== null || y !== null) this.showSnap(q, '参考线'); else this.showSnap(null);
+    return q;
   }
 
-  showSnap(p) {
+  showSnap(p, kind) {
     if (this.snapMark) { this.snapMark.remove(); this.snapMark = null; }
-    if (!p) return;
+    const tag = this.$('.sk-snaptag');
+    if (!p) { if (tag) tag.classList.add('hidden'); return; }
     const r = 5 / this.zoom;
-    this.snapMark = new this.ps.Path.Rectangle({ point: [p.x - r, p.y - r], size: [2 * r, 2 * r], parent: this.overlay,
-      strokeColor: '#f97316', strokeWidth: 1.5, strokeScaling: false });
+    const shape = kind === '中点' ? new this.ps.Path.RegularPolygon({ center: p, sides: 3, radius: r * 1.3, insert: false })
+      : kind === '交点' ? new this.ps.Path({ segments: [[p.x - r, p.y - r], [p.x + r, p.y + r], [p.x, p.y], [p.x - r, p.y + r], [p.x + r, p.y - r]], insert: false })
+        : kind === '圆心' || kind === '中心' ? new this.ps.Path.Circle({ center: p, radius: r, insert: false })
+          : new this.ps.Path.Rectangle({ point: [p.x - r, p.y - r], size: [2 * r, 2 * r], insert: false });
+    shape.strokeColor = '#f97316';
+    shape.strokeWidth = 1.5;
+    shape.strokeScaling = false;
+    this.overlay.addChild(shape);
+    this.snapMark = shape;
+    if (tag && kind) {
+      const v = this.ps.view.projectToView(p);
+      tag.textContent = kind;
+      tag.style.left = `${v.x + 10}px`;
+      tag.style.top = `${v.y - 22}px`;
+      tag.classList.remove('hidden');
+    }
+  }
+
+  // ================================================================ 标尺 / 参考线
+
+  drawRulers() {
+    const wrap = this.$('.sk-canvas-wrap');
+    const top = this.$('.sk-ruler-x');
+    const left = this.$('.sk-ruler-y');
+    if (!top || !wrap.clientWidth) return;
+    const W = wrap.clientWidth; const H = wrap.clientHeight; const R = 20;
+    const dpr = window.devicePixelRatio || 1;
+    const prep = (cv, w, h) => { cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + 'px'; cv.style.height = h + 'px'; const g = cv.getContext('2d'); g.scale(dpr, dpr); return g; };
+    const steps = [1, 2, 5, 10, 20, 50, 100, 200];
+    const minor = steps.find((st) => st * this.zoom >= 6) || 200;
+    const major = steps.find((st) => st * this.zoom >= 50) || 200;
+    const v = this.ps.view;
+    const p0 = v.viewToProject(new this.ps.Point(0, 0));
+    const p1 = v.viewToProject(new this.ps.Point(W, H));
+    const gx = prep(top, W, R);
+    gx.fillStyle = '#f7f8fa'; gx.fillRect(0, 0, W, R);
+    gx.strokeStyle = '#9aa5b1'; gx.fillStyle = '#5b6672'; gx.font = '10px sans-serif';
+    gx.beginPath();
+    for (let x = Math.floor(p0.x / minor) * minor; x <= p1.x; x += minor) {
+      const sx = v.projectToView(new this.ps.Point(x, 0)).x + 0.5;
+      const isMajor = Math.abs(x / major - Math.round(x / major)) < 1e-6;
+      gx.moveTo(sx, R); gx.lineTo(sx, isMajor ? 6 : 14);
+      if (isMajor) gx.fillText(String(Math.round(x)), sx + 2, 10);
+    }
+    gx.stroke();
+    const gy = prep(left, R, H);
+    gy.fillStyle = '#f7f8fa'; gy.fillRect(0, 0, R, H);
+    gy.strokeStyle = '#9aa5b1'; gy.fillStyle = '#5b6672'; gy.font = '10px sans-serif';
+    gy.beginPath();
+    for (let y = Math.floor(p1.y / minor) * minor; y <= p0.y; y += minor) {
+      const sy = v.projectToView(new this.ps.Point(0, y)).y + 0.5;
+      const isMajor = Math.abs(y / major - Math.round(y / major)) < 1e-6;
+      gy.moveTo(R, sy); gy.lineTo(isMajor ? 6 : 14, sy);
+      if (isMajor) { gy.save(); gy.translate(9, sy - 2); gy.rotate(-Math.PI / 2); gy.fillText(String(Math.round(y)), 0, 0); gy.restore(); }
+    }
+    gy.stroke();
+  }
+
+  drawGuides() {
+    if (!this.guideLayer) return;
+    this.guideLayer.removeChildren();
+    const b = this.ps.view.bounds;
+    (this.guides || []).forEach((g) => {
+      const line = g.axis === 'x'
+        ? new this.ps.Path.Line({ from: [g.v, b.top], to: [g.v, b.bottom], parent: this.guideLayer })
+        : new this.ps.Path.Line({ from: [b.left, g.v], to: [b.right, g.v], parent: this.guideLayer });
+      line.strokeColor = '#06b6d4';
+      line.strokeWidth = 1;
+      line.dashArray = [6, 4];
+      line.strokeScaling = false;
+    });
+  }
+
+  hitGuide(pt) {
+    const tol = 5 / this.zoom;
+    return (this.guides || []).find((g) => Math.abs((g.axis === 'x' ? pt.x : pt.y) - g.v) < tol) || null;
+  }
+
+  // 从标尺上按下：拖出新参考线
+  rulerDown(ev, axis) {
+    ev.preventDefault();
+    const g = { axis, v: 0 };
+    this.guides.push(g);
+    this.dragGuide(g, ev);
+  }
+
+  dragGuide(g, ev0) {
+    const wrap = this.$('.sk-canvas-wrap');
+    const move = (ev) => {
+      const r = wrap.getBoundingClientRect();
+      const p = this.ps.view.viewToProject(new this.ps.Point(ev.clientX - r.left, ev.clientY - r.top));
+      let v = g.axis === 'x' ? p.x : p.y;
+      const st = this.snapStep || 0;
+      if (st && !ev.altKey) v = Math.round(v / st) * st;
+      g.v = v;
+      this.drawGuides();
+      this.status(`参考线 ${g.axis === 'x' ? 'X' : 'Y'} = ${fmt(v)} mm（拖回标尺上删除）`);
+    };
+    const up = (ev) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const r = wrap.getBoundingClientRect();
+      const out = ev.clientX < r.left + 20 || ev.clientY < r.top + 20 || ev.clientX > r.right || ev.clientY > r.bottom;
+      if (out) { this.guides = this.guides.filter((q) => q !== g); this.status('已删除参考线'); }
+      this.drawGuides();
+      this.emitChange();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    if (ev0) move(ev0);
+  }
+
+  // ================================================================ 尺寸标注（选中图形的直线段长度，点一下可改）
+
+  drawDims() {
+    const box = this.$('.sk-dims');
+    if (!box) return;
+    box.innerHTML = '';
+    if (this.sel.size !== 1 || !['select', 'node'].includes(this.tool) || (this.drag && this.drag.kind !== 'node')) return;
+    const it = [...this.sel][0];
+    const paths = this.itemPaths(it);
+    const segCount = paths.reduce((n, p) => n + p.curves.length, 0);
+    if (segCount > 60 || it.data.text) return;
+    const v = this.ps.view;
+    paths.forEach((p) => p.curves.forEach((c) => {
+      if (!c.isStraight() || c.length * this.zoom < 28) return;
+      const mid = c.getPointAtTime(0.5);
+      let n = c.getNormalAtTime(0.5).normalize(10 / this.zoom);
+      if (p.closed && p.contains(mid.add(n))) n = n.negate();
+      const at = v.projectToView(mid.add(n));
+      const lab = document.createElement('button');
+      lab.className = 'sk-dim';
+      lab.textContent = fmt(c.length);
+      lab.title = '点一下改这条边的长度（终点沿原方向移动）';
+      lab.style.left = `${at.x}px`;
+      lab.style.top = `${at.y}px`;
+      lab.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+      lab.addEventListener('click', () => this.editDim(c, lab));
+      box.appendChild(lab);
+    }));
+  }
+
+  editDim(curve, lab) {
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.step = '0.1';
+    inp.value = fmt(curve.length);
+    inp.className = 'sk-dim-input';
+    inp.style.left = lab.style.left;
+    inp.style.top = lab.style.top;
+    lab.replaceWith(inp);
+    inp.focus();
+    inp.select();
+    const done = (ok) => {
+      const L = Number(inp.value);
+      if (ok && L > 0 && Math.abs(L - curve.length) > 1e-6) {
+        const p1 = curve.point1.clone();
+        const dir = curve.point2.subtract(p1).normalize();
+        const it = this.topItem(curve.path);
+        if (it && it.data.text) this.convertText(it);
+        const delta = p1.add(dir.multiply(L)).subtract(curve.point2);
+        // 矩形的一条边：对边一起挪，保持直角
+        const nx = curve.next;
+        const nn = nx && nx.next;
+        const perp = nx && nx.isStraight() && Math.abs(nx.point2.subtract(nx.point1).normalize().dot(dir)) < 1e-3;
+        const para = nn && nn.isStraight() && Math.abs(Math.abs(nn.point2.subtract(nn.point1).normalize().dot(dir)) - 1) < 1e-3;
+        if (perp && para && nx.segment2 !== curve.segment1) {
+          nx.segment2.point = nx.segment2.point.add(delta);
+        }
+        curve.segment2.point = curve.segment2.point.add(delta);
+        this.commit(`边长改为 ${fmt(L)} mm`);
+      } else this.drawDims();
+    };
+    inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); done(true); } if (ev.key === 'Escape') done(false); });
+    inp.addEventListener('blur', () => done(true));
   }
 
   // ================================================================ 命中
@@ -645,6 +940,42 @@ export class SketchEditor {
     return it && it.parent === this.content ? it : null;
   }
 
+  // 编组：同一组的图形一起选中
+  groupOf(it) {
+    const g = it && it.data && it.data.group;
+    return g ? this.content.children.filter((c) => c.data && c.data.group === g && this.selectable(c)) : [it];
+  }
+
+  expandGroups() {
+    [...this.sel].forEach((it) => this.groupOf(it).forEach((c) => this.sel.add(c)));
+  }
+
+  // 一批复制品：组号换成新的（同一批里原来同组的仍然同组）
+  regroup(items) {
+    const map = new Map();
+    items.forEach((it) => {
+      const g = it.data.group;
+      if (!g) return;
+      if (!map.has(g)) map.set(g, newId());
+      it.data.group = map.get(g);
+    });
+    return items;
+  }
+
+  groupSel() {
+    if (this.sel.size < 2) { this.toast('选中 2 个以上图形再编组', 'error'); return; }
+    const g = newId();
+    this.sel.forEach((it) => { it.data.group = g; });
+    this.commit(`已编组（${this.sel.size} 个图形）`);
+  }
+
+  ungroupSel() {
+    let n = 0;
+    this.sel.forEach((it) => { if (it.data.group) { it.data.group = null; n++; } });
+    if (!n) { this.toast('选中的图形没有编组', 'error'); return; }
+    this.commit('已取消编组');
+  }
+
   selBounds() {
     let b = null;
     this.sel.forEach((it) => { b = b ? b.unite(it.bounds) : it.bounds.clone(); });
@@ -657,6 +988,7 @@ export class SketchEditor {
     this.overlay.removeChildren();
     this.snapMark = null;
     this.handles = [];
+    this.drawDims();
     if (!this.sel.size || this.tool !== 'select') return;
     const ps = this.ps;
     const b = this.selBounds();
@@ -720,6 +1052,10 @@ export class SketchEditor {
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
     if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView }; return; }
     const pt = e.point;
+    if (this.tool === 'select' && !this.hitHandle(pt) && !this.hitItem(pt)) {
+      const g = this.hitGuide(pt);
+      if (g) { this.dragGuide(g, null); return; }
+    }
     if (this.pickCenter) {
       this.pickCenter = false;
       const c = this.snap(pt);
@@ -740,6 +1076,7 @@ export class SketchEditor {
     if (t === 'text') return this.placeText(this.snap(pt));
     if (t === 'trim') { this.drag = { kind: 'trim', changed: false }; this.trimAt(pt); return; }
     if (t === 'joint') { this.jointAt(pt); return; }
+    if (t === 'bridge') { this.bridgeAt(pt); return; }
     if (t === 'mortise') {
       const ex = this.existingJoint(pt, ['mortise']);
       if (ex && !this.editJoint) { this.startEditJoint(ex); return; }
@@ -802,6 +1139,7 @@ export class SketchEditor {
         const picked = this.content.children.filter((it) => this.selectable(it) && r.contains(it.bounds));
         if (!e.event.shiftKey) this.sel.clear();
         picked.forEach((it) => this.sel.add(it));
+        this.expandGroups();
       } else if (!e.event.shiftKey) this.sel.clear();
       this.refresh();
     } else if (d.kind === 'shape') this.shapeFinish(d);
@@ -846,14 +1184,14 @@ export class SketchEditor {
     const it = this.hitItem(pt);
     if (it) {
       if (e.event.shiftKey) {
-        if (this.sel.has(it)) this.sel.delete(it); else { this.sel.add(it); this.keyItem = it; }
+        if (this.sel.has(it)) this.groupOf(it).forEach((c) => this.sel.delete(c)); else { this.groupOf(it).forEach((c) => this.sel.add(c)); this.keyItem = it; }
         this.refresh();
         return;
       }
-      if (!this.sel.has(it)) { this.sel.clear(); this.sel.add(it); this.refresh(); }
+      if (!this.sel.has(it)) { this.sel.clear(); this.groupOf(it).forEach((c) => this.sel.add(c)); this.refresh(); }
       this.keyItem = it;
       if (e.event.altKey) {   // Alt 拖动 = 复制
-        const copies = [...this.sel].map((s) => this.cloneItem(s));
+        const copies = this.regroup([...this.sel].map((s) => this.cloneItem(s)));
         this.sel = new Set(copies);
       }
       const b = this.selBounds();
@@ -1564,6 +1902,10 @@ export class SketchEditor {
       rotL: () => this.transformSel((it, c) => it.rotate(90, c), '已旋转'),
       rotR: () => this.transformSel((it, c) => it.rotate(-90, c), '已旋转'),
       breakApart: () => this.breakApart(),
+      import: () => this.startImport(),
+      group: () => this.groupSel(), ungroup: () => this.ungroupSel(),
+      fillet: () => this.cornerSel(false), chamfer: () => this.cornerSel(true),
+      dedupe: () => this.dedupeItems(),
       toggle3d: () => {
         const box = this.$('.sk-3d');
         box.classList.toggle('min');
@@ -1610,13 +1952,13 @@ export class SketchEditor {
     this.sel.clear();
     const off = 5;
     this.clip = this.clip.map((it) => ({ ...it, paths: it.paths.map((p) => ({ ...p, segs: p.segs.map((s) => [s[0] + off, s[1] - off, ...s.slice(2)]) })) }));
-    this.clip.forEach((it) => this.sel.add(this.addItem({ ...it, id: newId(), role: null, locked: false })));
+    this.regroup(this.clip.map((it) => this.addItem({ ...it, id: newId(), role: null, locked: false }))).forEach((it) => this.sel.add(it));
     this.commit('已粘贴');
   }
 
   duplicate() {
     if (!this.need(1)) return;
-    const copies = [...this.sel].map((it) => this.cloneItem(it));
+    const copies = this.regroup([...this.sel].map((it) => this.cloneItem(it)));
     copies.forEach((c) => c.translate(new this.ps.Point(5, -5)));
     this.sel = new Set(copies);
     this.commit('已复制一份');
@@ -1832,7 +2174,7 @@ export class SketchEditor {
     if (mats.length * this.sel.size > 2000) { this.toast('复制太多了（超过 2000 份）', 'error'); return; }
     const src = [...this.sel];
     let n = 0;
-    mats.forEach((m) => src.forEach((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); n++; }));
+    mats.forEach((m) => this.regroup(src.map((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); n++; return k; })));
     // 只保留原来选中的对象（复制品不选中），并且不再显示同样的预览
     this.sel = new Set(src);
     this.arrDoneKey = this.arrayKey();
@@ -1894,6 +2236,282 @@ export class SketchEditor {
       x += size(b) + gap;
     });
     this.commit(`已${ALIGN_NAMES[how]}（间隙 ${fmt(gap)} mm）`);
+  }
+
+  // ================================================================ 导入（SVG / DXF / 图片描摹）
+
+  startImport() {
+    let inp = this.$('.sk-file');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file';
+      inp.className = 'sk-file';
+      inp.accept = '.svg,.dxf,.png,.jpg,.jpeg,.gif,.webp,.bmp,image/*';
+      inp.style.display = 'none';
+      inp.addEventListener('change', () => { const f = inp.files && inp.files[0]; inp.value = ''; if (f) this.importFile(f); });
+      this.host.appendChild(inp);
+    }
+    inp.click();
+  }
+
+  async importFile(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    try {
+      if (ext === 'svg') {
+        const paths = this.svgToPaths(await readFile(file, true));
+        if (!paths.length) throw new Error('SVG 里没有找到图形');
+        this.vectorDialog(file.name, paths);
+      } else if (ext === 'dxf') {
+        const r = parseDXF(await readFile(file, true));
+        if (!r.paths.length) throw new Error('DXF 里没有找到可识别的图形（支持直线、多段线、圆、圆弧、椭圆、样条）');
+        this.vectorDialog(file.name, r.paths);
+      } else {
+        const url = await readFile(file, false);
+        this.imageDialog(file.name, await loadImage(url));
+      }
+    } catch (err) {
+      this.toast(String(err.message || err), 'error');
+    }
+  }
+
+  // SVG → [{ closed, segs }]（单位 mm、y 向上）
+  svgToPaths(text) {
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const svg = doc.documentElement;
+    const toMM = (v) => {
+      const m = /^([\d.]+)\s*(mm|cm|in|pt|px)?$/.exec((v || '').trim());
+      if (!m) return null;
+      return parseFloat(m[1]) * ({ mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, px: 25.4 / 96 }[m[2] || 'px']);
+    };
+    const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    const wmm = toMM(svg.getAttribute('width'));
+    let unit = 25.4 / 96;                                      // 没写单位：按 96 dpi 的像素
+    if (wmm && vb.length === 4 && vb[2] > 0) unit = wmm / vb[2];
+    else if (wmm && !vb.length) unit = 1 * (wmm / parseFloat(svg.getAttribute('width')));
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    const ps = this.ps;
+    ps.activate();
+    const g = ps.project.importSVG(new XMLSerializer().serializeToString(svg), { insert: false, expandShapes: true });
+    const out = [];
+    const chain = (it) => {
+      const m = new ps.Matrix();
+      let p = it.parent;
+      while (p) { m.prepend(p.matrix); p = p.parent; }
+      return m;
+    };
+    g.getItems({ match: (it) => (it.className === 'Path' || it.className === 'CompoundPath') && !(it.parent && it.parent.className === 'CompoundPath') })
+      .forEach((it) => {
+        const c = it.clone({ insert: false });
+        c.transform(chain(it));
+        c.scale(unit, -unit, new ps.Point(0, 0));
+        (c.className === 'CompoundPath' ? c.children : [c]).forEach((p) => {
+          if (p.segments.length < 2) return;
+          out.push({ closed: p.closed, segs: p.segments.map((sg) => [sg.point.x, sg.point.y, sg.handleIn.x, sg.handleIn.y, sg.handleOut.x, sg.handleOut.y]) });
+        });
+      });
+    return out;
+  }
+
+  modal(html) {
+    let m = this.$('.sk-modal');
+    if (!m) { m = document.createElement('div'); m.className = 'sk-modal'; this.host.appendChild(m); }
+    m.innerHTML = `<div class="sk-modal-box">${html}</div>`;
+    m.classList.remove('hidden');
+    const close = () => m.classList.add('hidden');
+    m.querySelectorAll('[data-m=cancel]').forEach((b) => b.addEventListener('click', close));
+    return { el: m, close };
+  }
+
+  boardBounds() {
+    const outline = this.content.children.find((c) => c.data && c.data.role === 'outline');
+    return outline ? outline.bounds : new this.ps.Rectangle(0, 0, 100, 100);
+  }
+
+  // 矢量导入：缩放、放到板中心、选加工方式
+  vectorDialog(name, rawPaths) {
+    const paths = rawPaths.map((p) => (p.segs ? p : { closed: p.closed, segs: p.pts.map(([x, y]) => [x, y, 0, 0, 0, 0]) }));
+    let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+    paths.forEach((p) => p.segs.forEach((s) => { x0 = Math.min(x0, s[0]); x1 = Math.max(x1, s[0]); y0 = Math.min(y0, s[1]); y1 = Math.max(y1, s[1]); }));
+    const w = Math.max(0.01, x1 - x0); const h = Math.max(0.01, y1 - y0);
+    const bb = this.boardBounds();
+    const fitW = Math.min(w, (w / h > bb.width / bb.height ? bb.width : bb.height * w / h) * 0.8);
+    const closedN = paths.filter((p) => p.closed).length;
+    const { el, close } = this.modal(`
+      <h3>导入 ${escAttr(name)}</h3>
+      <p class="sk-small">${paths.length} 条路径（${closedN} 条闭合）· 原始尺寸 ${fmt(w)} × ${fmt(h)} mm</p>
+      <div class="sk-row"><label>宽度<input data-v="w" type="number" min="0.1" step="1" value="${fmt(fitW)}"> mm</label>
+        <span class="sk-small">高 <b data-v="h">${fmt(fitW * h / w)}</b> mm（等比）</span>
+        <button data-v="orig">原始尺寸</button></div>
+      <div class="sk-row"><label>加工方式<select data-v="mode">
+        ${Object.entries(MODES).map(([k, m]) => `<option value="${k}" ${k === (closedN ? 'cut' : 'score') ? 'selected' : ''}>${m.name}</option>`).join('')}</select></label>
+        <label class="sk-check"><input data-v="center" type="checkbox" checked>放到板中心</label></div>
+      <div class="sk-btns sk-right"><button data-m="cancel">取消</button><button data-m="ok" class="sk-primary">导入</button></div>`);
+    const wIn = el.querySelector('[data-v=w]');
+    const upd = () => { el.querySelector('b[data-v=h]').textContent = fmt((Number(wIn.value) || w) * h / w); };
+    wIn.addEventListener('input', upd);
+    el.querySelector('[data-v=orig]').addEventListener('click', () => { wIn.value = fmt(w); upd(); });
+    el.querySelector('[data-m=ok]').addEventListener('click', () => {
+      const k = (Number(wIn.value) || w) / w;
+      const mode = el.querySelector('[data-v=mode]').value;
+      const center = el.querySelector('[data-v=center]').checked;
+      const c = bb.center;
+      const ox = center ? c.x - (x0 + w / 2) * k : 0;
+      const oy = center ? c.y - (y0 + h / 2) * k : 0;
+      const gid = newId();
+      const made = paths.map((p) => this.addItem({ mode, group: paths.length > 1 ? gid : undefined,
+        paths: [{ closed: p.closed, segs: p.segs.map((s) => [s[0] * k + ox, s[1] * k + oy, s[2] * k, s[3] * k, s[4] * k, s[5] * k]) }] }));
+      close();
+      this.setTool('select');
+      this.sel = new Set(made);
+      this.commit(`已导入 ${made.length} 个图形`);
+    });
+  }
+
+  // 图片描摹：阈值 → 黑白预览 → 后端合并成多边形
+  imageDialog(name, img) {
+    const g = grayOf(img, 500);
+    const auto = otsu(g.gray);
+    const bb = this.boardBounds();
+    const defW = Math.round(Math.min(bb.width, bb.height * g.w / g.h) * 0.6);
+    const { el, close } = this.modal(`
+      <h3>描摹图片 ${escAttr(name)}</h3>
+      <div class="sk-trace">
+        <canvas class="sk-trace-cv"></canvas>
+        <div class="sk-trace-opts">
+          <div class="sk-row"><label>阈值<input data-v="thr" type="range" min="1" max="254" value="${auto}"></label><b data-v="thrv">${auto}</b>
+            <button data-v="auto">自动</button></div>
+          <div class="sk-row"><label class="sk-check"><input data-v="inv" type="checkbox">反色（描浅色部分）</label></div>
+          <div class="sk-row"><label>平滑<input data-v="smooth" type="range" min="0" max="4" step="0.25" value="1"></label></div>
+          <div class="sk-row"><label>忽略小斑点<input data-v="minA" type="range" min="0" max="300" step="5" value="20"></label></div>
+          <div class="sk-row"><label>宽度<input data-v="w" type="number" min="1" step="1" value="${defW}"> mm</label></div>
+          <div class="sk-row"><label>加工方式<select data-v="mode">
+            ${Object.entries(MODES).map(([k, m]) => `<option value="${k}" ${k === 'engrave' ? 'selected' : ''}>${m.name}</option>`).join('')}</select></label></div>
+          <p class="sk-small">黑色部分会变成图形。线稿、剪影、图标效果最好；照片先调高对比度。</p>
+        </div>
+      </div>
+      <div class="sk-btns sk-right"><button data-m="cancel">取消</button><button data-m="ok" class="sk-primary">描摹并导入</button></div>`);
+    const cv = el.querySelector('.sk-trace-cv');
+    const thr = el.querySelector('[data-v=thr]');
+    const inv = el.querySelector('[data-v=inv]');
+    let rects = [];
+    const redraw = () => { el.querySelector('[data-v=thrv]').textContent = thr.value; rects = binarize(g, Number(thr.value), inv.checked, cv); };
+    thr.addEventListener('input', redraw);
+    inv.addEventListener('change', redraw);
+    el.querySelector('[data-v=auto]').addEventListener('click', () => { thr.value = auto; redraw(); });
+    redraw();
+    el.querySelector('[data-m=ok]').addEventListener('click', async () => {
+      const btn = el.querySelector('[data-m=ok]');
+      btn.disabled = true;
+      btn.textContent = '描摹中…';
+      const wmm = Number(el.querySelector('[data-v=w]').value) || defW;
+      const r = await this.api.trace_rects(rects, g.w, g.h, Number(el.querySelector('[data-v=smooth]').value),
+        Number(el.querySelector('[data-v=minA]').value), wmm);
+      btn.disabled = false;
+      btn.textContent = '描摹并导入';
+      if (r.error) { this.toast(r.error, 'error'); return; }
+      if (!r.polys.length) { this.toast('没有描出图形：调一下阈值或反色', 'error'); return; }
+      const c = bb.center;
+      const paths = [];
+      r.polys.forEach((p) => { paths.push(this.polyPath(p.outer, true)); p.holes.forEach((hh) => paths.push(this.polyPath(hh, true))); });
+      paths.forEach((p) => p.segs.forEach((s) => { s[0] += c.x; s[1] += c.y; }));
+      const it = this.addItem({ mode: el.querySelector('[data-v=mode]').value, paths });
+      close();
+      this.setTool('select');
+      this.sel = new Set([it]);
+      this.commit(`已描摹导入（${r.polys.length} 块，${fmt(r.size[0])} × ${fmt(r.size[1])} mm）`);
+    });
+  }
+
+  // 删除完全重合的图形（起点不同、方向相反的也算重合）
+  dedupeItems() {
+    const keyOf = (it) => {
+      const paths = this.serializeItem(it).paths.map((p) => {
+        const pts = p.segs.map((sg) => sg.map((v) => Math.round(v * 50) / 50).join(','));
+        if (!p.closed) { const f = pts.join(';'); const r = pts.slice().reverse().join(';'); return 'o' + (f < r ? f : r); }
+        let best = null;
+        [pts, pts.slice().reverse()].forEach((arr) => {
+          for (let i = 0; i < arr.length; i++) {
+            const k = arr.slice(i).concat(arr.slice(0, i)).join(';');
+            if (best === null || k < best) best = k;
+          }
+        });
+        return 'c' + best;
+      }).sort();
+      return it.data.mode + '|' + paths.join('|');
+    };
+    const seen = new Map();
+    let n = 0;
+    this.content.children.slice().forEach((it) => {
+      if (!it.data || !it.data.mode) return;
+      const k = keyOf(it);
+      if (seen.has(k)) {
+        if (it.data.role === 'outline') { seen.get(k).remove(); seen.set(k, it); } else it.remove();
+        this.sel.delete(it);
+        n++;
+      } else seen.set(k, it);
+    });
+    if (!n) { this.toast('没有重复的图形', ''); return; }
+    this.commit(`已删除 ${n} 个重复图形`);
+  }
+
+  // ================================================================ 圆角 / 倒角
+
+  // 把一个尖角节点（两边都是直线）改成圆角或斜角；返回是否改了
+  roundCorner(seg, r, chamfer) {
+    const path = seg.path;
+    if (!path) return false;
+    const n = path.segments.length;
+    const i = seg.index;
+    if (!path.closed && (i === 0 || i === n - 1)) return false;
+    const prev = path.segments[(i - 1 + n) % n];
+    const next = path.segments[(i + 1) % n];
+    if (!seg.handleIn.isZero() || !seg.handleOut.isZero() || !prev.handleOut.isZero() || !next.handleIn.isZero()) return false;
+    const P = seg.point.clone();          // 注意：seg.point 是活引用，改了 seg.point 会跟着变
+    const la = prev.point.getDistance(P);
+    const lb = next.point.getDistance(P);
+    if (la < 1e-6 || lb < 1e-6) return false;
+    const u1 = prev.point.subtract(P).divide(la);
+    const u2 = next.point.subtract(P).divide(lb);
+    const theta = Math.acos(Math.max(-1, Math.min(1, u1.dot(u2))));
+    if (theta > Math.PI * 179 / 180 || theta < 1e-3) return false;
+    let d = chamfer ? r : r / Math.tan(theta / 2);
+    d = Math.min(d, la * 0.49, lb * 0.49);
+    const T1 = P.add(u1.multiply(d));
+    const T2 = P.add(u2.multiply(d));
+    seg.point = T1;
+    if (chamfer) {
+      path.insert(i + 1, new this.ps.Segment(T2));
+    } else {
+      const reff = d * Math.tan(theta / 2);
+      const k = (4 / 3) * Math.tan((Math.PI - theta) / 4) * reff;
+      seg.handleOut = P.subtract(T1).normalize(k);
+      path.insert(i + 1, new this.ps.Segment(T2, P.subtract(T2).normalize(k), null));
+    }
+    return true;
+  }
+
+  cornerSel(chamfer) {
+    const r = Number(this.opts.cornerR) || 0;
+    if (r <= 0) { this.toast('半径要大于 0', 'error'); return; }
+    let n = 0;
+    if (this.tool === 'node' && this.activeSeg && this.activeSeg.path) {
+      const it = this.topItem(this.activeSeg.path);
+      if (it && it.data.text) this.convertText(it);
+      if (this.roundCorner(this.activeSeg, r, chamfer)) n = 1;
+      this.activeSeg = null;
+    } else {
+      if (!this.need(1, '先选中图形（或用节点工具点一个角）')) return;
+      this.sel.forEach((it) => {
+        let touched = false;
+        this.itemPaths(it).forEach((p) => {
+          p.segments.slice().forEach((sg) => { if (this.roundCorner(sg, r, chamfer)) { n++; touched = true; } });
+        });
+        if (touched && it.data.text) this.convertText(it);
+      });
+    }
+    if (!n) { this.toast('没有可以处理的尖角（只处理两边都是直线的角）', 'error'); return; }
+    this.commit(`已${chamfer ? '倒角' : '圆角'} ${n} 个角（${fmt(r)} mm）`);
   }
 
   // ================================================================ 数值栏
@@ -2001,10 +2619,25 @@ export class SketchEditor {
           : '<p class="sk-small">另一块板的边做成「指接 A」，设置和长度一样就能插进这排孔。孔太紧时加一点间隙。<b>单击已有的插槽可以修改。</b></p>';
         html += this.peerHtml(t);
       }
+    } else if (t === 'bridge') {
+      html = `<h4>连接点（搭桥）</h4>
+        <div class="sk-row"><label>宽度<input data-o="bridgeW" type="number" min="0.2" step="0.1" value="${this.opts.bridgeW}"> mm</label></div>
+        <div class="sk-row"><label>每个图形<input data-o="bridgeN" type="number" min="1" step="1" value="${this.opts.bridgeN || 2}"> 个</label>
+          <button data-bridge="auto">自动加</button><button data-bridge="clear">清除</button></div>
+        <p class="sk-small">在切割线上单击加一个；点橙色标记删除。「自动加」作用于选中的图形（没选时作用于所有镂空）。切完用刀片划断连接点即可取下。</p>`;
     } else if (t === 'trim') html = '<h4>修剪</h4><p class="sk-small">鼠标移到线上会标红将被删掉的一段（到最近的交点为止），单击或拖过即删除。没有交点的整条路径会被整个删掉。</p>';
     box.innerHTML = html;
     box.classList.toggle('hidden', !html);
     box.querySelectorAll('[data-peer]').forEach((b) => b.addEventListener('click', () => this.pickPeer(Number(b.dataset.peer))));
+    box.querySelectorAll('[data-bridge]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.bridge === 'auto') this.autoBridges();
+      else {
+        const targets = this.sel.size ? [...this.sel] : this.content.children;
+        let n = 0;
+        targets.forEach((it) => { if (it.data && it.data.bridges && it.data.bridges.length) { n += it.data.bridges.length; it.data.bridges = null; } });
+        if (n) this.commit(`已清除 ${n} 个连接点`);
+      }
+    }));
     box.querySelectorAll('[data-je]').forEach((b) => b.addEventListener('click', () => {
       const a = b.dataset.je;
       if (a === 'cancel') { this.editJoint = null; this.renderToolOpts(); this.status(''); return; }
@@ -2022,6 +2655,7 @@ export class SketchEditor {
         }
         this.opts[k] = v;
         if (k === 'star') this.renderToolOpts();
+        if (k === 'bridgeW') { this.drawMarks(); this.emitChange(); }
         if (['jointType', 'jointCount', 'jointMode', 'jointTab', 'jointGap'].includes(k)) {
           this.opts.jointPeer = null;
           if (k === 'jointTab' && !this.opts.jointGap) this.opts.jointGap = v;
@@ -2084,6 +2718,8 @@ export class SketchEditor {
     else if (mod && k === 'c') this.copy();
     else if (mod && k === 'v') this.paste();
     else if (mod && k === 'd') this.duplicate();
+    else if (mod && k === 'g') { if (ev.shiftKey) this.ungroupSel(); else this.groupSel(); }
+    else if (mod && k === 'i') this.startImport();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
     else if (ev.key === 'Escape') { if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }

@@ -927,3 +927,24 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-align-grid button svg { flex: none; }
 .sk-align-grid { gap: 3px; }
 .sk-align-grid button { white-space: nowrap; font-size: 11px; padding: 4px 4px !important; gap: 3px; justify-content: center; }
+.sk-modal { position: absolute; inset: 0; z-index: 20; background: rgba(20,30,45,.35); display: flex; align-items: center; justify-content: center; }
+.sk-modal.hidden { display: none; }
+.sk-modal-box { background: #fff; border-radius: 12px; padding: 16px 18px; min-width: 380px; max-width: 760px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+.sk-modal-box h3 { margin: 0 0 8px; font-size: 15px; }
+.sk-right { justify-content: flex-end; margin-top: 12px; }
+.sk-trace { display: flex; gap: 14px; }
+.sk-trace-cv { max-width: 380px; max-height: 340px; border: 1px solid #d3dae3; image-rendering: pixelated; background: #fff; }
+.sk-trace-opts { width: 280px; }
+.sk-trace-opts input[type=range] { width: 130px; }
+.sk-ruler-x { position: absolute; left: 0; top: 0; height: 20px; z-index: 2; cursor: s-resize; border-bottom: 1px solid #d3dae3; }
+.sk-ruler-y { position: absolute; left: 0; top: 0; width: 20px; z-index: 2; cursor: e-resize; border-right: 1px solid #d3dae3; }
+.sk-ruler-corner { position: absolute; left: 0; top: 0; width: 20px; height: 20px; z-index: 3; background: #eef1f4; color: #8a95a3;
+  font-size: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; border-right: 1px solid #d3dae3; border-bottom: 1px solid #d3dae3; }
+.sk-ruler-corner:hover { color: #dc2626; }
+.sk-dims { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.sk-dim { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; font-size: 11px !important; padding: 1px 5px !important;
+  border: 1px solid #c7d2df !important; background: rgba(255,255,255,.92) !important; color: #1f3550 !important; border-radius: 4px !important; line-height: 16px; }
+.sk-dim:hover { border-color: #1f6feb !important; color: #1f6feb !important; }
+.sk-dim-input { position: absolute; transform: translate(-50%, -50%); width: 64px; z-index: 3; font-size: 11px; }
+.sk-snaptag { position: absolute; z-index: 3; pointer-events: none; background: #f97316; color: #fff; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; }
+.sk-snaptag.hidden { display: none; }

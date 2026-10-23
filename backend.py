@@ -544,7 +544,7 @@ class Api:
         try:
             instance = _new_instance(cls)
             HIDDEN = {"help", "format", "output"}
-            only = {"thickness", "burn", "reference", "sheet_w", "sheet_h", "part_gap"} if name == "FreeDesign" else None
+            only = {"thickness", "burn", "reference", "sheet_w", "sheet_h", "part_gap", "common_line"} if name == "FreeDesign" else None
             groups: list[dict[str, Any]] = []
             for arg_group in instance.argparser._action_groups:
                 params = []
@@ -671,6 +671,15 @@ class Api:
             return {"rings": sketch2d.offset(paths, float(distance), join)}
         except Exception as exc:
             return {"error": f"偏移失败：{exc}"}
+
+    def trace_rects(self, rects: list, w: int, h: int, smooth: float = 1.0, min_area: float = 4.0,
+                    width_mm: float = 50.0) -> dict[str, Any]:
+        """二维草图：位图描摹（前端已二值化成矩形）→ 矢量多边形."""
+        try:
+            import sketch2d
+            return sketch2d.trace_rects(rects, int(w), int(h), float(smooth), float(min_area), float(width_mm))
+        except Exception as exc:
+            return {"error": f"描摹失败：{exc}"}
 
     def text_outline(self, text: str, font: str, size: float) -> dict[str, Any]:
         """二维草图：文字转轮廓（以文字中心为原点，y 向上）."""
