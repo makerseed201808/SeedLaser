@@ -29,6 +29,20 @@ const TOOLS = [
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '拖动测量距离和角度（M）' },
 ];
 
+// 对齐 / 分布图标（16×16 线框）
+const ALIGN_ICONS = {
+  l: '<path d="M2 1v14"/><rect x="4" y="3" width="9" height="3"/><rect x="4" y="9" width="5" height="3"/>',
+  hc: '<path d="M8 1v14"/><rect x="2.5" y="3" width="11" height="3"/><rect x="5" y="9" width="6" height="3"/>',
+  r: '<path d="M14 1v14"/><rect x="3" y="3" width="9" height="3"/><rect x="7" y="9" width="5" height="3"/>',
+  t: '<path d="M1 2h14"/><rect x="3" y="4" width="3" height="9"/><rect x="9" y="4" width="3" height="5"/>',
+  vc: '<path d="M1 8h14"/><rect x="3" y="2.5" width="3" height="11"/><rect x="9" y="5" width="3" height="6"/>',
+  b: '<path d="M1 14h14"/><rect x="3" y="3" width="3" height="9"/><rect x="9" y="7" width="3" height="5"/>',
+  dh: '<path d="M1 2v12M15 2v12"/><rect x="3.5" y="4" width="3" height="8"/><rect x="9.5" y="4" width="3" height="8"/>',
+  dv: '<path d="M2 1h12M2 15h12"/><rect x="4" y="3.5" width="8" height="3"/><rect x="4" y="9.5" width="8" height="3"/>',
+};
+const ALIGN_NAMES = { l: '左对齐', hc: '水平居中', r: '右对齐', t: '顶对齐', vc: '垂直居中', b: '底对齐', dh: '水平等距分布', dv: '垂直等距分布' };
+const alignIcon = (k) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3">${ALIGN_ICONS[k]}</svg>`;
+
 let uid = 0;
 const newId = () => 's' + Date.now().toString(36) + (uid++).toString(36);
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -48,7 +62,7 @@ export class SketchEditor {
     this.opts = { mode: 'cut', radius: 0, sides: 6, star: false, starRatio: 0.5, text: '文字', font: '', size: 12,
                   offset: 2, offsetJoin: 'round', arrRows: 2, arrCols: 3, arrDx: 20, arrDy: 20,
                   arrType: 'line', arrCount: 5, arrDist: 15, arrAngle: 0, arrCenter: 'board', arrCx: 0, arrCy: 0,
-                  arrSweep: 360, arrRotate: true, arrPreview: true,
+                  arrSweep: 360, arrRotate: true, arrPreview: true, alignTo: 'sel',
                   jointCount: 0, jointType: 'a', jointDepth: 0, jointMode: 'count', jointTab: 0, jointGap: 0, jointPlay: 0 };
     this.undoStack = [];
     this.redoStack = [];
@@ -93,7 +107,11 @@ export class SketchEditor {
         <label>高<input data-num="h" type="number" step="0.1" min="0.1"></label>
         <button class="sk-ratio on" data-act="ratio" title="锁定宽高比">🔗</button>
         <label>旋转<input data-num="rot" type="number" step="1" value="0"></label><span class="sk-unit">°</span>
-        <span class="sk-num-hint">选中图形后输入数值，回车生效（X / Y 为左下角）</span>
+        <span class="sk-num-hint">回车生效（X / Y 为左下角）</span>
+        <span class="sk-spacer"></span>
+        <span class="sk-num-label">对齐</span>
+        <span class="sk-aligns">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}">${alignIcon(k)}</button>`).join('')}
+          <i class="sk-sep"></i>${['dh', 'dv'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}（选 3 个以上）">${alignIcon(k)}</button>`).join('')}</span>
       </div>
       <div class="sk-main">
         <div class="sk-tools">${TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}"><span class="i">${t.icon}</span>${t.name}</button>`).join('')}</div>
@@ -114,6 +132,16 @@ export class SketchEditor {
             </div>
             <p class="sk-small">选中图形后点图层（或下方色块）即可改加工方式；新画的图形使用当前图层。</p>
           </section>
+          <section class="sk-card">
+            <h4>对齐与分布</h4>
+            <div class="sk-row"><label>对齐到<select data-opt="alignTo">
+              <option value="sel">选区（所有选中图形的外框）</option>
+              <option value="key">关键对象（最后点选的那个）</option>
+              <option value="board">整块板</option></select></label></div>
+            <div class="sk-align-grid">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}">${alignIcon(k)}<span>${ALIGN_NAMES[k]}</span></button>`).join('')}</div>
+            <div class="sk-align-grid two">${['dh', 'dv'].map((k) => `<button data-align="${k}">${alignIcon(k)}<span>${ALIGN_NAMES[k]}</span></button>`).join('')}</div>
+            <p class="sk-small sk-align-hint">按住 Shift 点选多个图形（或框选），再点对齐方式。只选一个时对齐到整块板。</p>
+          </section>
           <section class="sk-card sk-toolopts"></section>
           <section class="sk-card">
             <h4>形状运算</h4>
@@ -132,13 +160,7 @@ export class SketchEditor {
             <div class="sk-array"></div>
           </section>
           <section class="sk-card">
-            <h4>排列</h4>
-            <div class="sk-btns sk-align">
-              <button data-act="alignL" title="左对齐">⇤</button><button data-act="alignHC" title="水平居中">↔</button>
-              <button data-act="alignR" title="右对齐">⇥</button><button data-act="alignT" title="顶对齐">⤒</button>
-              <button data-act="alignVC" title="垂直居中">↕</button><button data-act="alignB" title="底对齐">⤓</button>
-            </div>
-            <p class="sk-small">选一个图形时对齐到整块板，选多个时对齐到选区。</p>
+            <h4>变换</h4>
             <div class="sk-btns">
               <button data-act="flipH">水平镜像</button><button data-act="flipV">垂直镜像</button>
               <button data-act="rotL">左转 90°</button><button data-act="rotR">右转 90°</button>
@@ -159,8 +181,15 @@ export class SketchEditor {
     this.$ = (s) => h.querySelector(s);
     this.$$ = (s) => h.querySelectorAll(s);
     this.renderArray();
+    const arrCard = this.$('.sk-array').closest('.sk-card');
+    const setArr = (on) => { if (this.arrActive !== on) { this.arrActive = on; if (this.opened) this.drawSelection(); } };
+    arrCard.addEventListener('mouseenter', () => setArr(true));
+    arrCard.addEventListener('mouseleave', () => { if (!arrCard.contains(document.activeElement)) setArr(false); });
+    arrCard.addEventListener('focusin', () => setArr(true));
+    arrCard.addEventListener('focusout', () => setTimeout(() => { if (!arrCard.matches(':hover') && !arrCard.contains(document.activeElement)) setArr(false); }, 0));
 
     h.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => this.setTool(b.dataset.tool)));
+    h.querySelectorAll('[data-align]').forEach((b) => b.addEventListener('click', () => this.align(b.dataset.align)));
     h.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => this.applyMode(b.dataset.mode)));
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
     h.querySelectorAll('[data-opt]').forEach((el) => el.addEventListener('change', () => this.optChanged(el)));
@@ -651,6 +680,10 @@ export class SketchEditor {
     stem.data.ui = true;
     const rot = new ps.Path.Circle({ center: top, radius: 5 / this.zoom, parent: this.overlay, fillColor: SELECT });
     this.handles.push({ kind: 'rotate', at: top, item: rot });
+    if (this.opts.alignTo === 'key' && this.sel.size > 1 && this.keyItem && this.sel.has(this.keyItem)) {
+      new ps.Path.Rectangle({ rectangle: this.keyItem.bounds.expand(2 / this.zoom), parent: this.overlay,
+        strokeColor: '#1f6feb', strokeWidth: 2.5, strokeScaling: false });
+    }
     this.drawArrayPreview();
   }
 
@@ -813,11 +846,12 @@ export class SketchEditor {
     const it = this.hitItem(pt);
     if (it) {
       if (e.event.shiftKey) {
-        if (this.sel.has(it)) this.sel.delete(it); else this.sel.add(it);
+        if (this.sel.has(it)) this.sel.delete(it); else { this.sel.add(it); this.keyItem = it; }
         this.refresh();
         return;
       }
       if (!this.sel.has(it)) { this.sel.clear(); this.sel.add(it); this.refresh(); }
+      this.keyItem = it;
       if (e.event.altKey) {   // Alt 拖动 = 复制
         const copies = [...this.sel].map((s) => this.cloneItem(s));
         this.sel = new Set(copies);
@@ -1525,8 +1559,6 @@ export class SketchEditor {
       unite: () => this.boolean('unite'), subtract: () => this.boolean('subtract'),
       intersect: () => this.boolean('intersect'), exclude: () => this.boolean('exclude'),
       offset: () => this.offsetSel(), array: () => this.arraySel(),
-      alignL: () => this.align('l'), alignR: () => this.align('r'), alignHC: () => this.align('hc'),
-      alignT: () => this.align('t'), alignB: () => this.align('b'), alignVC: () => this.align('vc'),
       flipH: () => this.transformSel((it, c) => it.scale(-1, 1, c), '已水平镜像'),
       flipV: () => this.transformSel((it, c) => it.scale(1, -1, c), '已垂直镜像'),
       rotL: () => this.transformSel((it, c) => it.rotate(90, c), '已旋转'),
@@ -1768,7 +1800,8 @@ export class SketchEditor {
   }
 
   drawArrayPreview() {
-    if (!this.opts.arrPreview || !this.sel.size || this.tool !== 'select') return;
+    // 只在鼠标停在「阵列」卡片上（或正在改里面的数值）时预览，免得做别的操作时干扰
+    if (!this.arrActive || !this.opts.arrPreview || !this.sel.size || this.tool !== 'select') return;
     if (this.arrDoneKey && this.arrDoneKey === this.arrayKey()) return;
     const mats = this.arrayMatrices();
     if (mats.length > 400) return;
@@ -1808,14 +1841,23 @@ export class SketchEditor {
   }
 
   align(how) {
-    if (!this.need(1)) return;
+    const items = [...this.sel];
+    if (how === 'dh' || how === 'dv') return this.distribute(how, items);
+    if (!items.length) { this.toast('先选中要对齐的图形（Shift 点选或框选多个）', 'error'); return; }
+    const outline = this.content.children.find((c) => c.data && c.data.role === 'outline');
+    let mode = this.opts.alignTo;
+    if (items.length === 1) mode = 'board';
     let ref;
-    if (this.sel.size === 1) {
-      const outline = this.content.children.find((c) => c.data && c.data.role === 'outline');
+    let fixed = null;
+    if (mode === 'board') {
       ref = outline ? outline.bounds : null;
-      if (!ref) { this.toast('只选一个图形时会对齐到外轮廓，但找不到外轮廓', 'error'); return; }
+      if (!ref) { this.toast('找不到外轮廓，没法对齐到整块板', 'error'); return; }
+    } else if (mode === 'key') {
+      fixed = this.keyItem && this.sel.has(this.keyItem) ? this.keyItem : items[items.length - 1];
+      ref = fixed.bounds;
     } else ref = this.selBounds();
-    this.sel.forEach((it) => {
+    items.forEach((it) => {
+      if (it === fixed) return;
       const b = it.bounds;
       let dx = 0; let dy = 0;
       if (how === 'l') dx = ref.left - b.left;
@@ -1826,12 +1868,48 @@ export class SketchEditor {
       if (how === 'vc') dy = ref.center.y - b.center.y;
       it.translate(new this.ps.Point(dx, dy));
     });
-    this.commit('已对齐');
+    const to = { board: '整块板', key: '关键对象', sel: '选区' }[mode];
+    this.commit(`已${ALIGN_NAMES[how]}（对齐到${to}）`);
+  }
+
+  // 等距分布：最外两个不动，中间的按间隙相等排开
+  distribute(how, items) {
+    if (items.length < 3) { this.toast('等距分布要选中至少 3 个图形', 'error'); return; }
+    const h = how === 'dh';
+    const lo = (b) => (h ? b.left : b.top);
+    const size = (b) => (h ? b.width : b.height);
+    const sorted = items.slice().sort((p, q) => lo(p.bounds) + size(p.bounds) / 2 - (lo(q.bounds) + size(q.bounds) / 2));
+    const first = sorted[0].bounds;
+    const last = sorted[sorted.length - 1].bounds;
+    const span = lo(last) + size(last) - lo(first);
+    const total = sorted.reduce((sum, it) => sum + size(it.bounds), 0);
+    const gap = (span - total) / (sorted.length - 1);
+    let x = lo(first);
+    sorted.forEach((it, i) => {
+      const b = it.bounds;
+      if (i > 0 && i < sorted.length - 1) {
+        const d = x - lo(b);
+        it.translate(h ? new this.ps.Point(d, 0) : new this.ps.Point(0, d));
+      }
+      x += size(b) + gap;
+    });
+    this.commit(`已${ALIGN_NAMES[how]}（间隙 ${fmt(gap)} mm）`);
   }
 
   // ================================================================ 数值栏
 
   updateNumeric() {
+    const n = this.sel.size;
+    this.$$('[data-align]').forEach((btn) => {
+      const k = btn.dataset.align;
+      btn.disabled = k === 'dh' || k === 'dv' ? n < 3 : n < 1;
+    });
+    const hint = this.$('.sk-align-hint');
+    if (hint) {
+      hint.textContent = n === 0 ? '按住 Shift 点选多个图形（或框选），再点对齐方式。'
+        : n === 1 ? '只选了 1 个：会对齐到整块板。Shift 点选更多图形可以互相对齐。'
+        : `已选 ${n} 个图形${this.opts.alignTo === 'key' && this.keyItem && this.sel.has(this.keyItem) ? '（关键对象有蓝色粗框）' : ''}。`;
+    }
     const b = this.sel.size ? this.selBounds() : null;
     const set = (k, v) => { const el = this.$(`[data-num=${k}]`); if (document.activeElement !== el) el.value = v; };
     this.$$('.sk-numeric input').forEach((el) => { el.disabled = !b; });
@@ -1865,6 +1943,7 @@ export class SketchEditor {
     if (k === 'snap') { this.snapStep = Number(el.value); return; }
     if (k === 'snapPoints') { this.snapPoints = el.checked; return; }
     this.opts[k] = el.type === 'number' ? Number(el.value) : el.type === 'checkbox' ? el.checked : el.value;
+    if (k === 'alignTo') this.refresh();
   }
 
   renderToolOpts() {
