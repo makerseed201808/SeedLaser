@@ -948,3 +948,39 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-dim-input { position: absolute; transform: translate(-50%, -50%); width: 64px; z-index: 3; font-size: 11px; }
 .sk-snaptag { position: absolute; z-index: 3; pointer-events: none; background: #f97316; color: #fff; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; }
 .sk-snaptag.hidden { display: none; }
+.sk-host textarea { font: inherit; border: 1px solid #d3dae3; border-radius: 5px; padding: 3px 5px; resize: vertical; box-sizing: border-box; }
+.sk-seg button { white-space: nowrap; padding: 4px 2px !important; font-size: 11.5px; }
+
+/* ---- 加工参数对话框 ---- */
+.app-modal { position: fixed; inset: 0; z-index: 1100; background: rgba(20,30,45,.35); display: flex; align-items: center; justify-content: center; }
+.app-modal.hidden { display: none; }
+.app-modal-box { background: #fff; border-radius: 12px; padding: 18px 20px; width: min(640px, 92vw); max-height: 90vh; overflow: auto; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+.app-modal-box h3 { margin: 0 0 6px; }
+.app-modal-box .muted { color: #6b7785; font-size: 12.5px; line-height: 1.6; margin: 6px 0; }
+.app-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.laser-presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; margin: 8px 0; }
+.laser-presets button { border: 1px solid var(--border); background: #fff; border-radius: 14px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+.laser-presets button.on { background: #e0ecff; border-color: #1f6feb; color: #1f6feb; }
+.laser-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.laser-table th { text-align: left; font-weight: 600; color: #4a5562; padding: 6px 4px; border-bottom: 1px solid #e6eaf0; }
+.laser-table td { padding: 6px 4px; border-bottom: 1px solid #f0f2f5; }
+.laser-table td i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.laser-table td em { display: block; font-style: normal; color: #8a95a3; font-size: 11px; }
+.laser-table input { width: 70px; }
+.np-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 14px; margin-top: 10px; font-size: 13px; }
+.np-grid label { display: flex; align-items: center; gap: 4px; }
+.np-grid input[type=number] { width: 60px; }
+.np-grid select { max-width: 140px; }
+.sk-modal-box.wide { max-width: 860px; }
+.sk-keys { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 28px; }
+.sk-keys h4 { margin: 10px 0 4px; font-size: 13px; }
+.sk-key { display: flex; gap: 10px; align-items: baseline; font-size: 12.5px; padding: 2px 0; }
+.sk-key kbd { min-width: 150px; font-family: inherit; font-size: 11.5px; background: #f3f5f8; border: 1px solid #d3dae3; border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; }
+.sk-tour { position: absolute; inset: 0; z-index: 30; }
+.sk-tour.hidden { display: none; }
+.sk-tour-hole { position: absolute; border-radius: 8px; box-shadow: 0 0 0 9999px rgba(15,25,40,.55); border: 2px solid #f97316; pointer-events: none; transition: all .25s; }
+.sk-tour-tip { position: absolute; background: #fff; border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.sk-tour-tip b { font-size: 14px; }
+.sk-tour-tip p { margin: 6px 0 10px; color: #3d4652; font-size: 13px; line-height: 1.6; }
+.sk-tour-btns { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.sk-tour-btns span { flex: 1; color: #8a95a3; font-size: 12px; }

@@ -513,6 +513,73 @@ function formatBytes(n) {
 }
 
 // ---- 保存 ----
+// ---- 加工参数（每个图层的速度 / 功率 / 遍数）----
+const LASER_LAYERS = [
+  { key: 'cut', name: '切割', color: '黑色 / 蓝色', swatch: '#1f6feb', hint: '外轮廓（黑）和内孔（蓝）' },
+  { key: 'engrave', name: '雕刻', color: '绿色', swatch: '#16a34a', hint: '填充雕刻' },
+  { key: 'score', name: '划线', color: '品红', swatch: '#c026d3', hint: '沿线浅刻' },
+];
+const LASER_PRESETS = {
+  '椴木板 3 mm': { cut: [10, 70, 1], engrave: [200, 22, 1], score: [40, 18, 1] },
+  '椴木板 5 mm': { cut: [6, 85, 1], engrave: [200, 25, 1], score: [40, 20, 1] },
+  '亚克力 3 mm': { cut: [8, 75, 1], engrave: [250, 20, 1], score: [50, 15, 1] },
+  '密度板 3 mm': { cut: [8, 80, 1], engrave: [200, 25, 1], score: [40, 20, 1] },
+  '瓦楞纸板': { cut: [30, 35, 1], engrave: [300, 10, 1], score: [80, 8, 1] },
+};
+
+function loadLaser() {
+  try {
+    const v = JSON.parse(localStorage.getItem('seedboxes.laser') || 'null');
+    if (v && v.cut) return v;
+  } catch (e) { /* 忽略 */ }
+  const p = LASER_PRESETS['椴木板 3 mm'];
+  return { preset: '椴木板 3 mm', cut: { speed: p.cut[0], power: p.cut[1], passes: p.cut[2] },
+    engrave: { speed: p.engrave[0], power: p.engrave[1], passes: p.engrave[2] }, score: { speed: p.score[0], power: p.score[1], passes: p.score[2] } };
+}
+state.laser = loadLaser();
+
+function saveLaser() {
+  try { localStorage.setItem('seedboxes.laser', JSON.stringify(state.laser)); } catch (e) { /* 忽略 */ }
+}
+
+function openLaserDialog() {
+  let m = document.getElementById('laser-modal');
+  if (!m) { m = document.createElement('div'); m.id = 'laser-modal'; m.className = 'app-modal'; document.body.appendChild(m); }
+  const L = state.laser;
+  m.innerHTML = `<div class="app-modal-box">
+    <h3>加工参数</h3>
+    <p class="muted">保存图纸时会在同一个文件夹写一份「加工参数说明」，照着它在激光软件（LaserMaker、LightBurn 等）里按颜色设置图层。</p>
+    <div class="laser-presets">参考值：${Object.keys(LASER_PRESETS).map((k) => `<button data-preset="${k}" class="${L.preset === k ? 'on' : ''}">${k}</button>`).join('')}</div>
+    <table class="laser-table"><thead><tr><th>图层</th><th>颜色</th><th>速度 mm/s</th><th>功率 %</th><th>遍数</th></tr></thead><tbody>
+    ${LASER_LAYERS.map((l) => `<tr><td><i style="background:${l.swatch}"></i>${l.name}<em>${l.hint}</em></td><td>${l.color}</td>
+      <td><input type="number" min="0.1" step="1" data-l="${l.key}.speed" value="${L[l.key].speed}"></td>
+      <td><input type="number" min="1" max="100" step="1" data-l="${l.key}.power" value="${L[l.key].power}"></td>
+      <td><input type="number" min="1" max="20" step="1" data-l="${l.key}.passes" value="${L[l.key].passes}"></td></tr>`).join('')}
+    </tbody></table>
+    <p class="muted">参考值按 40～60W CO₂ 激光机估计，不同机器差别很大：第一次请先在边角料上试切，再微调。红色是标注，不要加工。</p>
+    <div class="app-modal-actions"><button data-m="close">取消</button><button data-m="ok" class="primary">保存</button></div></div>`;
+  m.classList.remove('hidden');
+  const fill = (name) => {
+    const p = LASER_PRESETS[name];
+    LASER_LAYERS.forEach((l) => ['speed', 'power', 'passes'].forEach((f, i) => { m.querySelector(`[data-l="${l.key}.${f}"]`).value = p[l.key][i]; }));
+    m.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === name));
+    m.dataset.preset = name;
+  };
+  m.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => fill(b.dataset.preset)));
+  m.querySelector('[data-m=close]').addEventListener('click', () => m.classList.add('hidden'));
+  m.querySelector('[data-m=ok]').addEventListener('click', () => {
+    const next = { preset: m.dataset.preset || L.preset };
+    LASER_LAYERS.forEach((l) => {
+      next[l.key] = {};
+      ['speed', 'power', 'passes'].forEach((f) => { next[l.key][f] = Number(m.querySelector(`[data-l="${l.key}.${f}"]`).value) || 0; });
+    });
+    state.laser = next;
+    saveLaser();
+    m.classList.add('hidden');
+    toast('加工参数已保存，保存图纸时会一起写出说明', 'success');
+  });
+}
+
 async function doSave() {
   if (!state.current) return;
   const fmt = $('#format-select').value;
@@ -521,12 +588,13 @@ async function doSave() {
   try {
     const params = collectParams();
     const project = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
-    const result = await window.pywebview.api.save(state.current, params, fmt, project);
+    const result = await window.pywebview.api.save(state.current, params, fmt, project, state.laser);
     if (result.cancelled) { setStatus('已取消'); return; }
     if (result.error) { toast(result.error, 'error'); setStatus('保存失败'); return; }
     if (result.path) {
       const extra = result.notes && result.notes.length ? `（注意：${result.notes.join('；')}）` : '';
-      toast(`已保存：${result.path}${extra}`, extra ? 'error' : 'success');
+      const side = result.sidecar ? `，加工参数说明：${result.sidecar.split(/[\\/]/).pop()}` : '';
+      toast(`已保存：${result.path}${side}${extra}`, extra ? 'error' : 'success');
       setStatus('已保存');
     }
   } catch (err) {
@@ -547,6 +615,7 @@ async function doSaveProject() {
     generator: state.current,
     params: collectParams(),
     format: $('#format-select').value,
+    laser: state.laser,
     disabled: ws ? ws.disabled : [],
     edits: ws ? ws.edits : {},
     poses: ws ? ws.poses : {},
@@ -582,6 +651,7 @@ async function doOpenProject() {
     if (el.type === 'checkbox') el.checked = String(v) === '1' || v === true || String(v).toLowerCase() === 'true';
     else el.value = v;
   });
+  if (p.laser && p.laser.cut) { state.laser = p.laser; saveLaser(); }
   if (p.format) {
     const opt = $('#format-select').querySelector(`option[value="${CSS.escape(p.format)}"]`);
     if (opt) $('#format-select').value = p.format;
@@ -594,6 +664,7 @@ async function doOpenProject() {
 // ---- 事件 ----
 function bindEvents() {
   $('#btn-preview').addEventListener('click', doPreview);
+  $('#btn-laser').addEventListener('click', openLaserDialog);
   $('#free-entry').addEventListener('click', () => selectGenerator('FreeDesign'));
   $('#btn-save').addEventListener('click', doSave);
   $('#btn-save-project').addEventListener('click', doSaveProject);

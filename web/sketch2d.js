@@ -95,6 +95,10 @@ export class SketchEditor {
           <button data-act="import" title="导入 SVG / DXF 矢量图，或把图片描摹成矢量（Ctrl+I）">📥 导入</button>
         </div>
         <div class="sk-group">
+          <button data-act="keys" title="快捷键一览（?）">⌨ 快捷键</button>
+          <button data-act="tour" title="重新看一遍新手引导">新手引导</button>
+        </div>
+        <div class="sk-group">
           <button data-act="fit" title="显示整块板（F）">适合窗口</button>
           <label class="sk-snap">吸附
             <select data-opt="snap"><option value="0">关</option><option value="0.5">0.5 mm</option>
@@ -176,6 +180,8 @@ export class SketchEditor {
               <button data-act="chamfer" title="把尖角切成斜角">倒角</button></div>
             <div class="sk-btns">
               <button data-act="flipH">水平镜像</button><button data-act="flipV">垂直镜像</button>
+              <button data-act="mirCopyH" title="以板的竖直中线为对称轴，复制出左右对称的另一半">左右镜像复制</button>
+              <button data-act="mirCopyV" title="以板的水平中线为对称轴，复制出上下对称的另一半">上下镜像复制</button>
               <button data-act="rotL">左转 90°</button><button data-act="rotR">右转 90°</button>
               <button data-act="close" data-close="path" title="把开放路径首尾相连">闭合路径</button>
               <button data-act="breakApart" title="把组合路径拆成独立图形">拆分</button>
@@ -308,6 +314,9 @@ export class SketchEditor {
     this.setTool('select');
     this.refresh();
     this.renderBoardInfo();
+    let seen = false;
+    try { seen = localStorage.getItem('seedboxes.skTour') === '1'; } catch (e) { seen = true; }
+    if (!seen) setTimeout(() => { if (this.opened) this.startTour(); }, 400);
   }
 
   close() {
@@ -442,6 +451,14 @@ export class SketchEditor {
         this.data.joints = this.data.joints.map((j) => ({ ...j, a: tp(j.a), b: tp(j.b), c: tp(j.c) }));
       }
       if (m && this.data && this.data.bridges) this.data.bridges = this.data.bridges.map(tp);
+      if (m && this.data && this.data.text) {
+        // 只平移时保留可编辑的文字；旋转 / 缩放 / 镜像后转成路径
+        const pure = Math.abs(m.a - 1) < 1e-9 && Math.abs(m.d - 1) < 1e-9 && Math.abs(m.b) < 1e-9 && Math.abs(m.c) < 1e-9;
+        if (pure) {
+          const t = this.data.text;
+          this.data.text = { ...t, x: t.x + m.tx, y: t.y + m.ty, path: t.path ? t.path.map(tp) : t.path };
+        } else this.data.text = null;
+      }
       return orig.call(this, m, ...rest);
     };
   }
@@ -1028,6 +1045,7 @@ export class SketchEditor {
 
   setTool(id) {
     this.finishDrawing();
+    if (id === 'text' && this.tool !== 'text') this.sel.clear();     // 文字工具：放新文字（不是改选中的）
     if (id !== this.tool) this.editJoint = null;
     this.tool = id;
     this.$$('.sk-tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === id));
@@ -1055,6 +1073,33 @@ export class SketchEditor {
     if (this.tool === 'select' && !this.hitHandle(pt) && !this.hitItem(pt)) {
       const g = this.hitGuide(pt);
       if (g) { this.dragGuide(g, null); return; }
+    }
+    if (this.pickArrayPath) {
+      this.pickArrayPath = false;
+      const res = this.content.hitTest(pt, { stroke: true, fill: false, segments: true, tolerance: 7 / this.zoom, match: () => true });
+      const path = res && (res.item.className === 'Path' ? res.item : res.location && res.location.path);
+      if (!path) { this.status('没点到线，已取消'); return; }
+      this.arrPath = path.clone({ insert: false });
+      this.arrPathItem = this.topItem(path);
+      this.opts.arrType = 'path';
+      this.renderArray();
+      this.drawSelection();
+      this.status(`阵列路径：长 ${fmt(this.arrPath.length)} mm`);
+      return;
+    }
+    if (this.pickPathFor) {
+      const tid = this.pickPathFor;
+      this.pickPathFor = null;
+      const tx = this.content.children.find((c) => c.data && c.data.id === tid);
+      const res = this.content.hitTest(pt, { stroke: true, fill: false, segments: true, tolerance: 7 / this.zoom, match: (h) => this.topItem(h.item) !== tx });
+      const path = res && (res.item.className === 'Path' ? res.item : res.location && res.location.path);
+      if (!tx || !tx.data.text || !path) { this.status('没点到线，已取消'); return; }
+      const pts = [];
+      const L = path.length;
+      const n = Math.max(2, Math.min(400, Math.ceil(L / 0.5)));
+      for (let i = 0; i <= n; i++) { const q = path.getPointAt(L * i / n); pts.push([q.x, q.y]); }
+      this.buildText({ ...tx.data.text, path: pts, arc: 0 }, tx).then((it) => { if (it) { this.sel = new Set([it]); this.commit('文字已沿路径排列'); } });
+      return;
     }
     if (this.pickCenter) {
       this.pickCenter = false;
@@ -1430,8 +1475,14 @@ export class SketchEditor {
 
   // ---------------------------------------------------------------- 文字
 
+  textParams(base) {
+    const o = this.opts;
+    return { text: o.text || '文字', font: o.font, size: o.size, spacing: o.textSpacing || 0, lineHeight: o.lineHeight || 1.25,
+      align: o.textAlign || 'center', arc: o.textLayout === 'arc' ? (Number(o.textArc) || 50) : 0, weld: !!o.textWeld, ...base };
+  }
+
   async placeText(pt) {
-    const t = { text: this.opts.text || '文字', font: this.opts.font, size: this.opts.size, x: pt.x, y: pt.y };
+    const t = this.textParams({ x: pt.x, y: pt.y });
     const it = await this.buildText(t);
     if (!it) return;
     this.sel.clear();
@@ -1441,15 +1492,17 @@ export class SketchEditor {
   }
 
   async buildText(t, replace) {
-    const r = await this.api.text_outline(t.text, t.font, t.size);
+    const r = await this.api.text_layout({ ...t, path: t.path || null });
     if (r.error) { this.toast(r.error, 'error'); return null; }
     if (r.missing && r.missing.length) this.toast(`字体缺少：${r.missing.join('')}`, 'error');
     if (!r.polys.length) { this.toast('没有可显示的文字', 'error'); return null; }
     const mode = replace ? replace.data.mode : this.opts.mode;
-    const it = this.addItem({ mode, text: t, paths: r.polys.map((p) => this.polyPath(p.map(([x, y]) => [x + t.x, y + t.y]), true)) });
+    const dx = t.path ? 0 : t.x;
+    const dy = t.path ? 0 : t.y;
+    const it = this.addItem({ mode, text: t, paths: r.polys.map((p) => this.polyPath(p.map(([x, y]) => [x + dx, y + dy]), true)),
+      group: replace ? replace.data.group : undefined, bridges: replace && replace.data.bridges });
     if (replace) {
       it.data.id = replace.data.id;
-      if (t.angle) it.rotate(t.angle, new this.ps.Point(t.x, t.y));
       it.insertAbove(replace);
       replace.remove();
     }
@@ -1906,6 +1959,8 @@ export class SketchEditor {
       group: () => this.groupSel(), ungroup: () => this.ungroupSel(),
       fillet: () => this.cornerSel(false), chamfer: () => this.cornerSel(true),
       dedupe: () => this.dedupeItems(),
+      keys: () => this.showKeys(), tour: () => this.startTour(),
+      mirCopyH: () => this.mirrorCopy(true), mirCopyV: () => this.mirrorCopy(false),
       toggle3d: () => {
         const box = this.$('.sk-3d');
         box.classList.toggle('min');
@@ -2055,7 +2110,7 @@ export class SketchEditor {
   renderArray() {
     const o = this.opts;
     const box = this.$('.sk-array');
-    const type = `<div class="sk-seg">${[['line', '直线'], ['circle', '环形'], ['grid', '矩形']].map(([k, n]) =>
+    const type = `<div class="sk-seg">${[['line', '直线'], ['circle', '环形'], ['path', '沿路径'], ['grid', '矩形']].map(([k, n]) =>
       `<button data-at="${k}" class="${o.arrType === k ? 'on' : ''}">${n}</button>`).join('')}</div>`;
     let rows = '';
     if (o.arrType === 'grid') {
@@ -2069,6 +2124,13 @@ export class SketchEditor {
           <label>间距<input data-a="arrDist" type="number" step="0.5" value="${o.arrDist}"> mm</label></div>
         <div class="sk-row"><label>方向<input data-a="arrAngle" type="number" step="15" value="${o.arrAngle}"> °</label>
           <span class="sk-small">0 = 向右，90 = 向上</span></div>`;
+    } else if (o.arrType === 'path') {
+      const L = this.arrPath ? this.arrPath.length : 0;
+      rows = `<div class="sk-row"><button data-ap="pick">${this.arrPath ? '换一条路径' : '选择路径'}</button>
+          <span class="sk-small">${this.arrPath ? `✓ 路径长 ${fmt(L)} mm` : '点按钮后在画布上点一条线'}</span></div>
+        <div class="sk-row"><label>数量<input data-a="arrCount" type="number" min="2" step="1" value="${o.arrCount}"></label>
+          <label class="sk-check"><input data-a="arrRotate" type="checkbox" ${o.arrRotate ? 'checked' : ''}>跟着路径转向</label></div>
+        <p class="sk-small">选中的图形（不含路径本身）沿路径平均排开；闭合路径排一圈，开放路径首尾各放一个。原件会移到第一个位置。</p>`;
     } else {
       const cname = { board: '板中心', sel: '选区中心', pick: `点选（${fmt(o.arrCx)}, ${fmt(o.arrCy)}）` }[o.arrCenter];
       rows = `<div class="sk-row"><label>数量<input data-a="arrCount" type="number" min="2" step="1" value="${o.arrCount}"></label>
@@ -2082,6 +2144,10 @@ export class SketchEditor {
     box.innerHTML = type + rows + `<div class="sk-row"><label class="sk-check"><input data-a="arrPreview" type="checkbox" ${o.arrPreview ? 'checked' : ''}>预览</label>
       <span class="sk-spacer"></span><button data-act2="array" class="sk-primary">阵列</button></div>`;
     box.querySelectorAll('[data-at]').forEach((b) => b.addEventListener('click', () => { o.arrType = b.dataset.at; this.renderArray(); this.drawSelection(); }));
+    box.querySelectorAll('[data-ap=pick]').forEach((b) => b.addEventListener('click', () => {
+      this.pickArrayPath = true;
+      this.status('在画布上点一条线（或图形的边）作为阵列路径');
+    }));
     box.querySelectorAll('[data-ac]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.ac === 'pick') { this.pickCenter = true; this.status('在画布上单击一点作为环形阵列的中心'); this.canvas.style.cursor = 'crosshair'; return; }
       o.arrCenter = b.dataset.ac; this.renderArray(); this.drawSelection();
@@ -2104,10 +2170,38 @@ export class SketchEditor {
   }
 
   // 每一份复制品的变换矩阵（不含原件）
+  // 沿路径：第 i 份的变换（含第 0 份，原件用它移过去）
+  pathMatrices() {
+    const P = this.arrPath;
+    const items = [...this.sel].filter((it) => it !== this.arrPathItem);
+    if (!P || !items.length) return [];
+    const o = this.opts;
+    const n = Math.max(2, Math.round(o.arrCount));
+    const L = P.length;
+    let b = null;
+    items.forEach((it) => { b = b ? b.unite(it.bounds) : it.bounds.clone(); });
+    const c = b.center;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const s = P.closed ? L * i / n : L * i / (n - 1);
+      const pt = P.getPointAt(Math.min(L, s));
+      const tan = P.getTangentAt(Math.min(L, s));
+      const m = new this.ps.Matrix().translate(pt.x, pt.y);
+      if (o.arrRotate && tan) m.rotate(tan.angle);
+      m.translate(-c.x, -c.y);
+      out.push(m);
+    }
+    return out;
+  }
+
   arrayMatrices() {
     const o = this.opts;
     const M = this.ps.Matrix;
     const out = [];
+    if (o.arrType === 'path') {
+      // 预览 / 复制用的「相对原件当前位置」的变换：Mi · M0⁻¹ 不对，原件也要移动，所以直接返回绝对变换
+      return this.pathMatrices();
+    }
     if (o.arrType === 'grid') {
       const rows = Math.max(1, Math.round(o.arrRows));
       const cols = Math.max(1, Math.round(o.arrCols));
@@ -2149,6 +2243,7 @@ export class SketchEditor {
     if (mats.length > 400) return;
     const g = new this.ps.Group({ parent: this.overlay });
     mats.forEach((m) => this.sel.forEach((it) => {
+      if (it === this.arrPathItem && this.opts.arrType === 'path') return;
       const k = it.clone({ insert: false });
       k.transform(m);
       k.fillColor = null;
@@ -2169,6 +2264,18 @@ export class SketchEditor {
 
   arraySel() {
     if (!this.need(1, '先选中要阵列的图形')) return;
+    if (this.opts.arrType === 'path') {
+      if (!this.arrPath) { this.toast('先点「选择路径」，再在画布上点一条线', 'error'); return; }
+      const mats = this.pathMatrices();
+      const src = [...this.sel].filter((it) => it !== this.arrPathItem);
+      if (!src.length || !mats.length) { this.toast('选中要排列的图形（不含路径本身）', 'error'); return; }
+      mats.slice(1).forEach((m) => this.regroup(src.map((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); return k; })));
+      src.forEach((it) => { this.convertTextIfRotated(it); it.transform(mats[0]); });
+      this.sel = new Set(src);
+      this.arrDoneKey = this.arrayKey();
+      this.commit(`已沿路径阵列（共 ${mats.length} 份）`);
+      return;
+    }
     const mats = this.arrayMatrices();
     if (!mats.length) { this.toast('数量至少为 2', 'error'); return; }
     if (mats.length * this.sel.size > 2000) { this.toast('复制太多了（超过 2000 份）', 'error'); return; }
@@ -2178,7 +2285,7 @@ export class SketchEditor {
     // 只保留原来选中的对象（复制品不选中），并且不再显示同样的预览
     this.sel = new Set(src);
     this.arrDoneKey = this.arrayKey();
-    const name = { grid: '矩形', line: '直线', circle: '环形' }[this.opts.arrType];
+    const name = { grid: '矩形', line: '直线', circle: '环形', path: '沿路径' }[this.opts.arrType];
     this.commit(`已${name}阵列（共 ${mats.length + 1} 份）`);
   }
 
@@ -2423,6 +2530,16 @@ export class SketchEditor {
     });
   }
 
+  // 镜像复制：以整块板的中线为对称轴
+  mirrorCopy(horizontal) {
+    if (!this.need(1)) return;
+    const c = this.boardBounds().center;
+    const copies = this.regroup([...this.sel].map((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); return k; }));
+    copies.forEach((k) => k.scale(horizontal ? -1 : 1, horizontal ? 1 : -1, c));
+    this.sel = new Set([...this.sel, ...copies]);
+    this.commit(horizontal ? '已左右镜像复制' : '已上下镜像复制');
+  }
+
   // 删除完全重合的图形（起点不同、方向相反的也算重合）
   dedupeItems() {
     const keyOf = (it) => {
@@ -2514,6 +2631,63 @@ export class SketchEditor {
     this.commit(`已${chamfer ? '倒角' : '圆角'} ${n} 个角（${fmt(r)} mm）`);
   }
 
+  // ================================================================ 快捷键 / 新手引导
+
+  showKeys() {
+    const groups = [
+      ['工具', [['V', '选择'], ['A', '节点编辑'], ['L', '直线'], ['P', '曲线（钢笔）'], ['R', '矩形'], ['E', '椭圆'], ['G', '多边形 / 星形'],
+        ['T', '文字'], ['J', '卡榫'], ['K', '插槽'], ['B', '连接点'], ['X', '修剪'], ['M', '测量']]],
+      ['编辑', [['Ctrl/⌘ + Z', '撤销'], ['Ctrl/⌘ + Shift + Z', '重做'], ['Ctrl/⌘ + C / V', '复制 / 粘贴'], ['Ctrl/⌘ + D', '原位复制一份'],
+        ['Delete', '删除（节点工具下删节点）'], ['Ctrl/⌘ + A', '全选'], ['Ctrl/⌘ + G', '编组'], ['Ctrl/⌘ + Shift + G', '取消编组'], ['Ctrl/⌘ + I', '导入']]],
+      ['移动与视图', [['方向键', '移动（按吸附步长）'], ['Shift + 方向键', '移动 10 mm'], ['F', '适合窗口'], ['滚轮', '缩放'],
+        ['空格 + 拖动 / 中键 / 右键', '平移画布'], ['从标尺拖出', '参考线（拖回标尺删除）']]],
+      ['绘制时', [['Shift', '锁 45° / 正方形 / 正圆 / 等比缩放'], ['Alt', '从中心画 / 拖动复制'], ['回车 / 双击', '结束路径'], ['Esc', '取消 / 取消选择']]],
+    ];
+    const { el } = this.modal(`<h3>快捷键</h3><div class="sk-keys">${groups.map(([t, rows]) => `<div><h4>${t}</h4>${rows.map(([k, d]) =>
+      `<div class="sk-key"><kbd>${k}</kbd><span>${d}</span></div>`).join('')}</div>`).join('')}</div>
+      <div class="sk-btns sk-right"><button data-m="cancel" class="sk-primary">知道了</button></div>`);
+    el.querySelector('.sk-modal-box').classList.add('wide');
+  }
+
+  startTour() {
+    const steps = [
+      { sel: '.sk-tools', title: '① 画图工具', text: '直线、曲线、矩形、圆、文字……点一下就能用，鼠标停在按钮上会显示用法和快捷键。' },
+      { sel: '.sk-palette', title: '② 加工方式', text: '蓝色 = 切穿，绿色 = 雕刻，紫色 = 划线。先选中图形，再点颜色就能改。' },
+      { sel: '.sk-numeric', title: '③ 精确尺寸', text: '选中图形后在这里输入位置、宽高、角度；右边一排是对齐按钮。也可以直接点图上的长度数字修改。' },
+      { sel: '.sk-side', title: '④ 更多操作', text: '形状运算（并集 / 差集…）、阵列、对齐、圆角、镜像复制都在右侧。卡榫、插槽工具让板子能拼起来。' },
+      { sel: '.sk-3d', title: '⑤ 3D 实时预览', text: '每改一次，3D 都会更新，并检查和相邻的板会不会撞在一起（红色 = 穿透）。' },
+      { sel: '.sk-back', title: '⑥ 完成', text: '画好了点这里回到主界面；修改会自动保存到项目里。' },
+    ];
+    let i = 0;
+    let tour = this.$('.sk-tour');
+    if (!tour) { tour = document.createElement('div'); tour.className = 'sk-tour'; this.host.appendChild(tour); }
+    const end = () => {
+      tour.classList.add('hidden');
+      try { localStorage.setItem('seedboxes.skTour', '1'); } catch (e) { /* 忽略 */ }
+    };
+    const show = () => {
+      const st = steps[i];
+      const target = this.$(st.sel);
+      const hr = this.host.getBoundingClientRect();
+      const r = target ? target.getBoundingClientRect() : { left: hr.left + 100, top: hr.top + 100, width: 10, height: 10, right: hr.left + 110, bottom: hr.top + 110 };
+      const pad = 4;
+      const box = { x: r.left - hr.left - pad, y: r.top - hr.top - pad, w: r.width + pad * 2, h: r.height + pad * 2 };
+      const tipW = 300;
+      let tx = box.x + box.w + 12; let ty = box.y;
+      if (tx + tipW > hr.width - 10) { tx = Math.max(10, box.x - tipW - 12); }
+      if (tx < 10 || box.w > hr.width * 0.5) { tx = Math.min(hr.width - tipW - 10, Math.max(10, box.x)); ty = box.y + box.h + 10; }
+      if (ty + 150 > hr.height) ty = Math.max(10, box.y - 160);
+      tour.innerHTML = `<div class="sk-tour-hole" style="left:${box.x}px;top:${box.y}px;width:${box.w}px;height:${box.h}px"></div>
+        <div class="sk-tour-tip" style="left:${tx}px;top:${ty}px;width:${tipW}px"><b>${st.title}</b><p>${st.text}</p>
+          <div class="sk-tour-btns"><span>${i + 1} / ${steps.length}</span><button data-t="skip">跳过</button>
+          <button data-t="next" class="sk-primary">${i === steps.length - 1 ? '开始画图' : '下一步'}</button></div></div>`;
+      tour.classList.remove('hidden');
+      tour.querySelector('[data-t=skip]').onclick = end;
+      tour.querySelector('[data-t=next]').onclick = () => { i++; if (i >= steps.length) end(); else show(); };
+    };
+    show();
+  }
+
   // ================================================================ 数值栏
 
   updateNumeric() {
@@ -2575,13 +2749,27 @@ export class SketchEditor {
         <label class="sk-check"><input data-o="star" type="checkbox" ${this.opts.star ? 'checked' : ''}>星形</label></div>` +
         (this.opts.star ? `<div class="sk-row"><label>内外径比<input data-o="starRatio" type="number" min="0.1" max="0.95" step="0.05" value="${this.opts.starRatio}"></label></div>` : '');
     } else if (t === 'text' || textSel) {
-      const src = textSel ? textSel.data.text : this.opts;
+      const o = this.opts;
+      const src = textSel ? textSel.data.text : this.textParams({});
+      const layout = src.path ? 'path' : src.arc ? 'arc' : 'line';
       const fonts = (this.fonts || []).map((f) => `<option value="${f.id}" ${f.id === src.font ? 'selected' : ''}>${f.name}</option>`).join('');
       html = `<h4>${textSel ? '修改文字' : '文字'}</h4>
-        <div class="sk-row"><input class="sk-wide" data-o="text" value="${escAttr(src.text)}"></div>
+        <div class="sk-row"><textarea class="sk-wide" rows="2" data-o="text" placeholder="可以换行">${escAttr(src.text)}</textarea></div>
         <div class="sk-row"><label>字体<select data-o="font">${fonts}</select></label></div>
-        <div class="sk-row"><label>字高<input data-o="size" type="number" min="1" step="0.5" value="${src.size}"> mm</label></div>
-        <p class="sk-small">${textSel ? '修改后回车生效。旋转、节点编辑、形状运算后文字会转成路径。' : '在板上单击放置。'}</p>`;
+        <div class="sk-row"><label>字高<input data-o="size" type="number" min="1" step="0.5" value="${src.size}"> mm</label>
+          <label>字距<input data-o="spacing" type="number" step="0.2" value="${src.spacing || 0}"> mm</label></div>
+        <div class="sk-row"><label>行距<input data-o="lineHeight" type="number" min="0.5" step="0.05" value="${src.lineHeight || 1.25}"> 倍</label>
+          <label>对齐<select data-o="align">${[['left', '左'], ['center', '中'], ['right', '右']].map(([k, n]) => `<option value="${k}" ${src.align === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+        <div class="sk-row"><label>排列<select data-o="layout">
+          <option value="line" ${layout === 'line' ? 'selected' : ''}>直排</option>
+          <option value="arc" ${layout === 'arc' ? 'selected' : ''}>圆弧</option>
+          <option value="path" ${layout === 'path' ? 'selected' : ''} ${textSel ? '' : 'disabled'}>沿路径（先放文字再选）</option></select></label></div>` +
+        (layout === 'arc' ? `<div class="sk-row"><label>半径<input data-o="arc" type="number" step="5" value="${src.arc || o.textArc || 50}"> mm</label>
+          <span class="sk-small">正数：沿圆弧上方；负数：下方</span></div>` : '') +
+        (textSel && layout === 'path' ? `<div class="sk-row"><button data-o-btn="pickpath">${src.path ? '换一条路径' : '选择路径'}</button>
+          <span class="sk-small">${src.path ? '✓ 已沿路径排列' : '点按钮后在画布上点一条线'}</span></div>` : '') + `
+        <div class="sk-row"><label class="sk-check"><input data-o="weld" type="checkbox" ${src.weld ? 'checked' : ''}>焊接（笔画连成一体，镂空切割用）</label></div>
+        <p class="sk-small">${textSel ? '修改后点别处（或回车）生效；只移动时文字保持可改，旋转 / 缩放 / 节点编辑后会转成路径。' : '在板上单击放置。'}</p>`;
     } else if (t === 'node') html = '<h4>节点编辑</h4><p class="sk-small">拖节点移动；拖线段把直线拉成曲线；拖控制柄调弧度（Alt 单独调一侧）。双击线段加节点，双击节点切换尖角 / 平滑，Alt+单击或 Delete 删节点。</p>';
     else if (t === 'joint' || t === 'mortise') {
       const o = this.opts;
@@ -2629,6 +2817,11 @@ export class SketchEditor {
     box.innerHTML = html;
     box.classList.toggle('hidden', !html);
     box.querySelectorAll('[data-peer]').forEach((b) => b.addEventListener('click', () => this.pickPeer(Number(b.dataset.peer))));
+    box.querySelectorAll('[data-o-btn=pickpath]').forEach((b) => b.addEventListener('click', () => {
+      if (!textSel) return;
+      this.pickPathFor = textSel.data.id;
+      this.status('在画布上点一条线（或图形的边），文字会沿着它排列');
+    }));
     box.querySelectorAll('[data-bridge]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.bridge === 'auto') this.autoBridges();
       else {
@@ -2647,12 +2840,22 @@ export class SketchEditor {
       const handler = async () => {
         const k = el.dataset.o;
         const v = el.type === 'number' ? Number(el.value) : el.type === 'checkbox' ? el.checked : el.value;
-        if (textSel) {
-          const t2 = { ...textSel.data.text, [k]: v };
+        const live = textSel && this.content.children.find((c) => c.data && c.data.id === textSel.data.id && c.data.text);
+        if (textSel && !live) return;
+        if (live) {
+          const textSel = live;      // 用最新的对象（之前的可能已被重建替换）
+          const t2 = { ...textSel.data.text };
+          if (k === 'layout') {
+            if (v === 'line') { t2.arc = 0; t2.path = null; }
+            if (v === 'arc') { t2.path = null; t2.arc = t2.arc || this.opts.textArc || 50; }
+            if (v === 'path') { this.pickPathFor = textSel.data.id; this.status('在画布上点一条线（或图形的边），文字会沿着它排列'); this.renderToolOpts(); return; }
+          } else t2[k] = v;
           const it = await this.buildText(t2, textSel);
           if (it) { this.sel = new Set([it]); this.commit('已修改文字'); }
           return;
         }
+        const tk = { spacing: 'textSpacing', align: 'textAlign', arc: 'textArc', weld: 'textWeld', layout: 'textLayout' }[k];
+        if (tk) { this.opts[tk] = v; this.renderToolOpts(); return; }
         this.opts[k] = v;
         if (k === 'star') this.renderToolOpts();
         if (k === 'bridgeW') { this.drawMarks(); this.emitChange(); }
@@ -2664,6 +2867,7 @@ export class SketchEditor {
       };
       el.addEventListener('change', handler);
       if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') el.blur(); });
+      if (el.tagName === 'TEXTAREA') el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) el.blur(); });
     });
   }
 
@@ -2720,6 +2924,7 @@ export class SketchEditor {
     else if (mod && k === 'd') this.duplicate();
     else if (mod && k === 'g') { if (ev.shiftKey) this.ungroupSel(); else this.groupSel(); }
     else if (mod && k === 'i') this.startImport();
+    else if (ev.key === '?' || (ev.shiftKey && ev.key === '/')) this.showKeys();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
     else if (ev.key === 'Escape') { if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }

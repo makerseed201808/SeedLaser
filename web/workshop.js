@@ -692,7 +692,9 @@ function freePartForm() {
     <label>高<input type="number" data-k="h" value="${W.freeH || 60}" min="1" step="1"></label>
     <button class="primary" data-k="add">添加并编辑</button>
     <button data-k="auto" title="按卡榫配对把板自动拼起来">🧩 按卡榫自动拼装</button>
-    <button data-k="flat" title="所有板平放在台面上">平铺</button>`;
+    <button data-k="flat" title="所有板平放在台面上">平铺</button>
+    <button data-k="names" title="粘贴一列名字，自动生成一排名牌">📛 批量名牌</button>`;
+  box.querySelector('[data-k=names]').addEventListener('click', () => nameplateDialog());
   box.querySelector('[data-k=auto]').addEventListener('click', () => freeAutoAssemble());
   box.querySelector('[data-k=flat]').addEventListener('click', () => {
     W.project.poses = {};
@@ -1799,6 +1801,96 @@ async function sfAssembleAll() {
   }
   W.project.poses = {};
   await sfReloadPoses('✓ 已一键装配');
+}
+
+// ---- 自由设计：批量名牌（每个名字一块板：圆角外框 + 挂孔 + 文字）
+
+function roundRectSegs(w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  if (r < 1e-6) return [[0, 0, 0, 0, 0, 0], [w, 0, 0, 0, 0, 0], [w, h, 0, 0, 0, 0], [0, h, 0, 0, 0, 0]];
+  const k = 0.5523 * r;
+  return [
+    [r, 0, -k, 0, 0, 0], [w - r, 0, 0, 0, k, 0], [w, r, 0, -k, 0, 0], [w, h - r, 0, 0, 0, k],
+    [w - r, h, k, 0, 0, 0], [r, h, 0, 0, -k, 0], [0, h - r, 0, k, 0, 0], [0, r, 0, 0, 0, -k],
+  ];
+}
+
+function circleSegs(cx, cy, r) {
+  const k = 0.5523 * r;
+  return [[cx + r, cy, 0, -k, 0, k], [cx, cy + r, k, 0, -k, 0], [cx - r, cy, 0, k, 0, -k], [cx, cy - r, -k, 0, k, 0]];
+}
+
+async function nameplateDialog() {
+  if (!W.fonts) W.fonts = await api().list_fonts();
+  let m = document.getElementById('names-modal');
+  if (!m) { m = document.createElement('div'); m.id = 'names-modal'; m.className = 'app-modal'; document.body.appendChild(m); }
+  const o = W.namesOpts || { w: 80, h: 28, r: 5, hole: true, holeD: 4, size: 12, font: (W.fonts[0] || {}).id || '', mode: 'engrave', border: false };
+  m.innerHTML = `<div class="app-modal-box">
+    <h3>📛 批量名牌</h3>
+    <p class="muted">每行一个名字，每个名字生成一块名牌板（会加到板件清单里）。文字太长会自动缩小。</p>
+    <textarea data-n="names" rows="6" style="width:100%;box-sizing:border-box" placeholder="张三&#10;李四&#10;王五">${W.namesText || ''}</textarea>
+    <div class="np-grid">
+      <label>宽<input data-n="w" type="number" min="10" step="1" value="${o.w}"> mm</label>
+      <label>高<input data-n="h" type="number" min="8" step="1" value="${o.h}"> mm</label>
+      <label>圆角<input data-n="r" type="number" min="0" step="0.5" value="${o.r}"> mm</label>
+      <label><input data-n="hole" type="checkbox" ${o.hole ? 'checked' : ''}>左边打挂孔</label>
+      <label>孔径<input data-n="holeD" type="number" min="1" step="0.5" value="${o.holeD}"> mm</label>
+      <label>字高<input data-n="size" type="number" min="3" step="0.5" value="${o.size}"> mm</label>
+      <label>字体<select data-n="font">${W.fonts.map((f) => `<option value="${f.id}" ${f.id === o.font ? 'selected' : ''}>${f.name}</option>`).join('')}</select></label>
+      <label>文字<select data-n="mode"><option value="engrave" ${o.mode === 'engrave' ? 'selected' : ''}>雕刻</option>
+        <option value="cut" ${o.mode === 'cut' ? 'selected' : ''}>镂空切割（自动焊接笔画）</option><option value="score" ${o.mode === 'score' ? 'selected' : ''}>划线</option></select></label>
+      <label><input data-n="border" type="checkbox" ${o.border ? 'checked' : ''}>内圈装饰边框（划线）</label>
+    </div>
+    <div class="app-modal-actions"><button data-m="close">取消</button><button data-m="ok" class="primary">生成名牌</button></div></div>`;
+  m.classList.remove('hidden');
+  m.querySelector('[data-m=close]').addEventListener('click', () => m.classList.add('hidden'));
+  m.querySelector('[data-m=ok]').addEventListener('click', async () => {
+    const v = (k) => m.querySelector(`[data-n=${k}]`);
+    const names = v('names').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    if (!names.length) { toast('先输入名字（每行一个）', 'error'); return; }
+    const opt = { w: Number(v('w').value) || 80, h: Number(v('h').value) || 28, r: Number(v('r').value) || 0, hole: v('hole').checked,
+      holeD: Number(v('holeD').value) || 4, size: Number(v('size').value) || 12, font: v('font').value, mode: v('mode').value, border: v('border').checked };
+    W.namesOpts = opt;
+    W.namesText = v('names').value;
+    const btn = m.querySelector('[data-m=ok]');
+    btn.disabled = true;
+    btn.textContent = `生成中… 0/${names.length}`;
+    const parts = freeParts();
+    const holeR = opt.holeD / 2;
+    const left = opt.hole ? holeR * 2 + 4 + 2 : 4;          // 挂孔占掉的宽度
+    const avail = opt.w - left - 4;
+    let done = 0;
+    for (const name of names) {
+      let size = opt.size;
+      const params = { text: name, font: opt.font, size, weld: opt.mode === 'cut' };
+      let r = await api().text_layout(params);
+      if (r.error) { toast(r.error, 'error'); break; }
+      const maxH = opt.h - 8;
+      const k = Math.min(1, avail / Math.max(1e-6, r.size[0]), maxH / Math.max(1e-6, r.size[1]));
+      if (k < 0.999) { size = Math.max(2, size * k * 0.98); r = await api().text_layout({ ...params, size }); }
+      const cx = left + avail / 2;
+      const cy = opt.h / 2;
+      const items = [{ id: 'outline', mode: 'cut', role: 'outline', paths: [{ closed: true, segs: roundRectSegs(opt.w, opt.h, opt.r) }] }];
+      if (opt.hole) items.push({ id: 'hole', mode: 'cut', paths: [{ closed: true, segs: circleSegs(holeR + 3, opt.h / 2, holeR) }] });
+      if (opt.border) {
+        const segs = roundRectSegs(opt.w - 4, opt.h - 4, Math.max(0, opt.r - 2)).map((sg) => [sg[0] + 2, sg[1] + 2, sg[2], sg[3], sg[4], sg[5]]);
+        items.push({ id: 'border', mode: 'score', paths: [{ closed: true, segs }] });
+      }
+      items.push({ id: 'text', mode: opt.mode, text: { ...params, size, x: cx, y: cy, spacing: 0, lineHeight: 1.25, align: 'center', arc: 0 },
+        paths: r.polys.map((p) => ({ closed: true, segs: p.map(([x, y]) => [x + cx, y + cy, 0, 0, 0, 0]) })) });
+      const id = 'p' + Date.now().toString(36) + (uidCounter++).toString(36);
+      parts.push({ id, name, w: opt.w, h: opt.h });
+      W.project.sketches[id] = { items };
+      done++;
+      btn.textContent = `生成中… ${done}/${names.length}`;
+    }
+    btn.disabled = false;
+    btn.textContent = '生成名牌';
+    m.classList.add('hidden');
+    projectChanged();
+    await loadModel();
+    toast(`已生成 ${done} 块名牌。在左侧「排版」里填材料尺寸，预览 / 保存时会自动排好`, 'success');
+  });
 }
 
 // ---- 自由设计：按卡榫配对自动拼装

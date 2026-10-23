@@ -395,3 +395,137 @@ def dedupe_lines(polylines: list[tuple[list, bool, bool]], tol: float = 0.02) ->
             pieces.append(cur)
         out.extend((pc, False, outer) for pc in pieces if len(pc) >= 2)
     return out, saved
+
+
+# ------------------------------------------------------------------ 文字排版（多行 / 字距 / 圆弧 / 沿路径 / 焊接）
+
+def _glyph_cache():
+    if not hasattr(_glyph_cache, "c"):
+        _glyph_cache.c = {}
+    return _glyph_cache.c
+
+
+def _glyph(font_id: str, ch: str, size: float):
+    """单个字：(轮廓列表（以基线左端为原点，mm）, 前进宽度 mm, 是否缺字)."""
+    import model3d
+    key = (font_id, ch, round(size, 3))
+    cache = _glyph_cache()
+    if key in cache:
+        return cache[key]
+    font = model3d._load_font(font_id)
+    cmap = font.getBestCmap() or {}
+    gs = font.getGlyphSet()
+    scale = size / font["head"].unitsPerEm
+    gname = cmap.get(ord(ch))
+    if gname is None:
+        res = ([], font["head"].unitsPerEm * 0.5 * scale, not ch.isspace())
+    else:
+        g = gs[gname]
+        pen = model3d._FlattenPen(gs)
+        g.draw(pen.pen)
+        pen._finish()
+        polys = [[(x * scale, y * scale) for x, y in p] for p in pen.polys]
+        res = (polys, g.width * scale, False)
+    cache[key] = res
+    return res
+
+
+def _path_at(pts, cum, s):
+    """折线上弧长 s 处的点和切线角."""
+    s = max(0.0, min(cum[-1], s))
+    for i in range(1, len(pts)):
+        if cum[i] >= s or i == len(pts) - 1:
+            seg = cum[i] - cum[i - 1] or 1e-9
+            t = (s - cum[i - 1]) / seg
+            (x0, y0), (x1, y1) = pts[i - 1], pts[i]
+            return (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t), math.atan2(y1 - y0, x1 - x0)
+    return pts[0], 0.0
+
+
+def text_layout(text: str, font_id: str, size: float, spacing: float = 0.0, line_height: float = 1.25,
+                align: str = "center", arc: float = 0.0, path: list | None = None, weld: bool = False) -> dict:
+    """返回 {"polys": [环...], "missing": [...], "size": [w, h]}。
+    普通 / 圆弧：以文字块中心为原点；沿路径：直接是路径所在的坐标。"""
+    import model3d
+    font = model3d._load_font(font_id or "")
+    hhea = font["hhea"]
+    scale = size / font["head"].unitsPerEm
+    mid_y = (hhea.ascent + hhea.descent) / 2 * scale
+    lines = (text or "").split("\n")
+    missing: list[str] = []
+    glyph_lines = []   # 每行：[(轮廓, 字左端 x, 前进宽度)]
+    for line in lines:
+        x = 0.0
+        row = []
+        for ch in line:
+            polys, adv, miss = _glyph(font_id or "", ch, size)
+            if miss:
+                missing.append(ch)
+            row.append((polys, x, adv))
+            x += adv + spacing
+        width = x - spacing if row else 0.0
+        glyph_lines.append((row, width))
+    max_w = max((w for _r, w in glyph_lines), default=0.0)
+    lh = size * line_height
+    n = len(glyph_lines)
+    out: list[list[tuple[float, float]]] = []
+
+    def rot(pts, ang, ox, oy, tx, ty):
+        c, s_ = math.cos(ang), math.sin(ang)
+        return [(tx + (x - ox) * c - (y - oy) * s_, ty + (x - ox) * s_ + (y - oy) * c) for x, y in pts]
+
+    if path and len(path) >= 2:
+        pts = [(float(p[0]), float(p[1])) for p in path]
+        cum = [0.0]
+        for i in range(1, len(pts)):
+            cum.append(cum[-1] + math.dist(pts[i - 1], pts[i]))
+        for li, (row, w) in enumerate(glyph_lines):
+            s0 = (cum[-1] - w) / 2
+            for polys, gx, adv in row:
+                (px, py), ang = _path_at(pts, cum, s0 + gx + adv / 2)
+                nx, ny = -math.sin(ang), math.cos(ang)
+                off = -li * lh
+                for p in polys:
+                    out.append(rot(p, ang, adv / 2, 0.0, px + nx * off, py + ny * off))
+    else:
+        for li, (row, w) in enumerate(glyph_lines):
+            ox = {"left": -max_w / 2, "right": max_w / 2 - w}.get(align, -w / 2)
+            base_y = (n - 1) / 2 * lh - li * lh - mid_y
+            for polys, gx, adv in row:
+                if abs(arc) < 1e-6:
+                    for p in polys:
+                        out.append([(x + ox + gx, y + base_y) for x, y in p])
+                    continue
+                # 先按直排算出字的参考点（字中心、基线），再映射到圆弧上并旋转
+                u = ox + gx + adv / 2
+                v = base_y
+                R = abs(arc)
+                if arc > 0:   # 文字在圆弧外侧上方（圆心在下面）
+                    phi = u / R
+                    rad = R + v
+                    tx, ty, ang = rad * math.sin(phi), rad * math.cos(phi) - R, -phi
+                else:         # 文字在圆弧下方（圆心在上面），字头朝圆心
+                    phi = u / R
+                    rad = R - v
+                    tx, ty, ang = rad * math.sin(phi), R - rad * math.cos(phi), phi
+                for p in polys:
+                    out.append(rot(p, ang, adv / 2, 0.0, tx, ty))
+    if weld and out:
+        geom = None
+        for p in out:
+            if len(p) < 3:
+                continue
+            g = _valid(Polygon(p))
+            geom = g if geom is None else geom.symmetric_difference(g)
+        geom = geom.buffer(0) if geom is not None else Polygon()
+        rings = []
+        for pg in _polygons(geom):
+            rings.append(_ring(pg.exterior.coords))
+            rings.extend(_ring(r.coords) for r in pg.interiors)
+        out = rings
+    else:
+        out = [[(round(x, 3), round(y, 3)) for x, y in p] for p in out]
+    xs = [x for p in out for x, _ in p]
+    ys = [y for p in out for _, y in p]
+    size_wh = [round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3)] if xs else [0, 0]
+    return {"polys": out, "missing": sorted(set(missing)), "size": size_wh}

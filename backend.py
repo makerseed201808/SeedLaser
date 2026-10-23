@@ -467,6 +467,30 @@ def _render_fallback_svg(name: str) -> str | None:
 
 # --------------------------------------------------------------------- API
 
+def _write_laser_sheet(path: str, name: str, params: dict[str, Any], laser: dict[str, Any], info: list[str]) -> str:
+    """在图纸旁边写一份加工参数说明（纯文本，UTF-8）."""
+    import datetime
+    stem, _ext = os.path.splitext(path)
+    out = stem + "_加工参数.txt"
+    rows = [("切割（外轮廓）", "黑色 #000000", laser["cut"]), ("切割（内孔）", "蓝色 #0000FF", laser["cut"]),
+            ("雕刻（填充）", "绿色 #00FF00", laser.get("engrave") or {}), ("划线", "品红 #FF00FF", laser.get("score") or {})]
+    lines = [f"SeedBoxes 加工参数 — {'自由设计' if name == 'FreeDesign' else name}",
+             f"图纸：{os.path.basename(path)}    生成时间：{datetime.datetime.now():%Y-%m-%d %H:%M}",
+             f"材料厚度：{params.get('thickness', '3')} mm    激光补偿 burn：{params.get('burn', '0.1')} mm"
+             + (f"    参考：{laser.get('preset')}" if laser.get("preset") else ""), ""]
+    lines.append(f"{'图层':<12}{'颜色':<16}{'速度 mm/s':>10}{'功率 %':>8}{'遍数':>6}")
+    for title, color, v in rows:
+        lines.append(f"{title:<12}{color:<16}{v.get('speed', ''):>10}{v.get('power', ''):>8}{v.get('passes', ''):>6}")
+    lines += ["", "红色 #FF0000 是标注（尺寸、说明），不要加工。",
+              "建议加工顺序：雕刻 → 划线 → 内孔切割 → 外轮廓切割（外轮廓最后切，零件不会提前掉落移位）。",
+              "参考值按 40～60W CO₂ 激光机估计；第一次请先在边角料上试切再调整。"]
+    if info:
+        lines += [""] + [f"· {x}" for x in info]
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return out
+
+
 class Api:
     def __init__(self) -> None:
         self._window: webview.Window | None = None
@@ -681,6 +705,18 @@ class Api:
         except Exception as exc:
             return {"error": f"描摹失败：{exc}"}
 
+    def text_layout(self, opts: dict[str, Any]) -> dict[str, Any]:
+        """二维草图：文字排版（多行、字距、圆弧、沿路径、焊接）→ 轮廓."""
+        try:
+            import sketch2d
+            o = opts or {}
+            return sketch2d.text_layout(str(o.get("text", "")), o.get("font") or "", float(o.get("size", 10)),
+                                        float(o.get("spacing", 0) or 0), float(o.get("lineHeight", 1.25) or 1.25),
+                                        o.get("align") or "center", float(o.get("arc", 0) or 0), o.get("path"),
+                                        bool(o.get("weld")))
+        except Exception as exc:
+            return {"error": f"文字排版失败：{exc}"}
+
     def text_outline(self, text: str, font: str, size: float) -> dict[str, Any]:
         """二维草图：文字转轮廓（以文字中心为原点，y 向上）."""
         try:
@@ -760,7 +796,7 @@ class Api:
         return {"project": data, "path": picked}
 
     def save(self, name: str, params: dict[str, Any], fmt: str,
-             project: dict[str, Any] | None = None) -> dict[str, Any]:
+             project: dict[str, Any] | None = None, laser: dict[str, Any] | None = None) -> dict[str, Any]:
         if self._window is None:
             return {"error": "窗口未初始化"}
         ext_map = {
@@ -788,7 +824,13 @@ class Api:
         result = self._render(name, params, fmt=fmt, to_file=picked, project=project)
         if "error" in result:
             return result
-        return {"path": picked, "notes": result.get("notes", [])}
+        out = {"path": picked, "notes": result.get("notes", []), "info": result.get("info", [])}
+        if laser and laser.get("cut"):
+            try:
+                out["sidecar"] = _write_laser_sheet(picked, name, params, laser, result.get("info") or [])
+            except Exception as exc:
+                out["notes"] = out["notes"] + [f"加工参数说明没写成：{exc}"]
+        return out
 
     def open_folder(self, path: str) -> dict[str, Any]:
         if not path or not os.path.exists(path):
