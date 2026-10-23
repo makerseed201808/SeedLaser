@@ -273,6 +273,7 @@ async function selectGenerator(name) {
     state.currentInfo = info.value;
     $('#gen-desc').textContent = info.value.description || '';
     renderForm(info.value);
+    if (window.SeedWorkshop) window.SeedWorkshop.formReady();
   } else {
     let err = '';
     if (info.status === 'fulfilled') {

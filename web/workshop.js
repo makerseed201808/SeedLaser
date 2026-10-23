@@ -266,7 +266,10 @@ class View3D {
   fit(model) {
     const box = new THREE.Box3();
     this.root.updateMatrixWorld(true);   // 先应用 z 向上 → y 向上的旋转
-    this.objects.forEach((o) => box.expandByObject(o.mesh));
+    // 拼装模式只对准拼好的部分（旁边散放的零件、校准尺不参与取景）
+    const core = model.assembled ? new Set(model.parts.filter((p) => p.face || (p.id || '').startsWith('inner')).map((p) => p.id)) : null;
+    this.objects.forEach((o, id) => { if (!core || core.has(id)) box.expandByObject(o.mesh); });
+    if (box.isEmpty()) this.objects.forEach((o) => box.expandByObject(o.mesh));
     if (box.isEmpty()) return;
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -284,7 +287,10 @@ class View3D {
     this.controls.update();
     // 地面网格
     if (this.grid) { this.scene.remove(this.grid); disposeTree(this.grid); }
-    const span = Math.ceil(Math.max(size.x, size.z) * 2.2 / 10) * 10;
+    const all = new THREE.Box3();
+    this.objects.forEach((o) => all.expandByObject(o.mesh));
+    const allSize = all.getSize(new THREE.Vector3());
+    const span = Math.ceil(Math.max(size.x, size.z, allSize.x, allSize.z) * 1.6 / 10) * 10;
     this.grid = new THREE.GridHelper(span, Math.max(4, span / 10), 0xd8d3c6, 0xe7e3d8);
     this.grid.position.set(center.x, box.min.y - 0.5, center.z);
     this.scene.add(this.grid);
@@ -404,7 +410,10 @@ async function loadModel() {
   view.setModel(m);
   renderPartsPanel();
   if (!m.parts.length) setNote('这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
-  else setNote(m.assembled ? '' : '这个生成器暂不支持拼装预览，下面是所有板件平铺的样子（仍可开孔、刻字、禁用）。',
+  else if (m.auto) {
+    setNote(`自动装配（试验）：已拼上 ${m.placed} 块板${m.floating ? `，另有 ${m.floating} 块（隔板、盖子等）放在旁边` : ''}。` +
+            '形状仅供参考，以图纸为准。', 'info');
+  } else setNote(m.assembled ? '' : '这个生成器暂不支持拼装预览，下面是所有板件平铺的样子（仍可开孔、刻字、禁用）。',
                m.assembled ? '' : 'info');
 }
 
@@ -738,6 +747,10 @@ window.SeedWorkshop = {
     if (view) view.clear();
     $('#parts-panel').innerHTML = '';
     setNote('');
+    // 不在这里加载：此时左侧表单还是上一个生成器的参数，等 formReady()
+  },
+  formReady() {
+    W.stale = true;
     if (W.mode === '3d') loadModel();
   },
   getProject() {

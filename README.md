@@ -35,7 +35,7 @@ SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光�
 - **多种输出** — SVG / SVG_Ponoko / PostScript / Lightburn (lbrn2) 直接生成；DXF / GCode / PDF 需系统装 `pstoedit` / `ps2pdf`
 - **单文件 .exe** — PyInstaller 打包约 100 MB，复制即用，依赖 Windows 10/11 默认的 WebView2 Runtime
 - **macOS 支持** — 使用系统自带的 WKWebView，可打包为 `SeedBoxes.app`
-- **3D 模型预览** — 预览区切到「3D 模型」：ABox / ClosedBox / UniversalBox / BasedBox / TypeTray 显示拼好的盒子（卡榫真实咬合），其余生成器显示所有板件平铺
+- **3D 模型预览** — 预览区切到「3D 模型」：36 个盒、柜、机箱类生成器显示拼好的样子（其中 31 个为自动装配，经碰撞校验确认卡榫咬合），其余显示所有板件平铺
 - **局部修改** — 板件清单里可禁用某块板；「编辑」进入单块板编辑器，开圆孔 / 方孔 / 圆角矩形孔、刻中文字（系统中文字体转轮廓），导出的 SVG / PDF / DXF 等都会带上
 - **项目文件** — 参数 + 局部修改保存为 `.seedbox.json`，随时打开继续改
 

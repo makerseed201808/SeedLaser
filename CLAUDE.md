@@ -114,6 +114,9 @@ SeedBoxes/
 - **前端是 ES 模块** → 必须走 pywebview 内置 HTTP 服务器（`http_server=True`），file:// 会拦截模块
 - **调试**：`scripts/dev_server.py` + `web/dev-bridge.js`（`?dev=1`）在浏览器里跑整个前端
 - 新增生成器的 3D 拼装：在 `SUPPORTED_3D` 加名字，确认 `_box_dims` 和标签映射；用 dev_server 截图检查卡榫是否咬合
+- **自动装配（试验）**：没写配方的生成器走 `auto_assemble`——按 rect 板尺寸推断 X/Y/H（取前 8 个候选），多轮逐板试放到 6 个面（含旋转 90°、翻面），`_Solid.hits` 在板边缘带取样做穿透 / 接触检测，要求零穿透、≥4 块、全部连通；选放上板最多、体积最大的方案；四面墙只缺一面时整体转向让开口朝前。目前 31 个通过（另 5 个配方，共 36 个拼装）
+- `AUTO_DENY`：能通过校验但人工看过形状不对的（HingeBox、OrganPipe、Rotary、PirateChest、Arcade、CanStorage、CoinDisplay、DiceBox、WallRack），继续平铺
+- 校验器自检：5 个配方方盒全部 0 穿透；把前板上移 1.5mm 能检出 84 个穿透点
 
 ---
 

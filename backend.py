@@ -755,15 +755,27 @@ class Api:
         skip = {"format", "output"}
         # dest → 命令行选项：大多数同名，但也有例外（TypeTray 的 gh → --gripheight）
         option_of = {}
+        int_dests = set()
         for a in instance.argparser._actions:
             longs = [o for o in a.option_strings if o.startswith("--")]
             if longs:
                 option_of[a.dest] = longs[0]
+            if a.type is int:
+                int_dests.add(a.dest)
         for key, value in (params or {}).items():
             if key in skip or key not in option_of:
                 continue
             if value is None or value == "":
                 continue
-            args.extend([option_of[key], _coerce(value)])
+            text = _coerce(value)
+            if key in int_dests:
+                # 表单里整数默认值可能显示成 "100.0"（Keypad 的 h），argparse 的 int 不接受
+                try:
+                    f = float(text)
+                    if f.is_integer():
+                        text = str(int(f))
+                except ValueError:
+                    pass
+            args.extend([option_of[key], text])
         args.extend(["--format", fmt])
         return args

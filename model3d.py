@@ -337,6 +337,10 @@ _LABEL_FACE = {
 
 SUPPORTED_3D = {"ABox", "ClosedBox", "UniversalBox", "BasedBox", "TypeTray"}
 
+# 自动装配能通过碰撞校验、但人工看过结果不对的生成器（继续平铺显示）
+AUTO_DENY = {"HingeBox", "OrganPipe", "Rotary", "PirateChest",
+             "Arcade", "CanStorage", "CoinDisplay", "DiceBox", "WallRack"}
+
 
 def _box_dims(name: str, box: Any) -> tuple[float, float, float] | None:
     t = box.thickness
@@ -415,9 +419,20 @@ def assemble(name: str, box: Any, parts: list[dict]) -> dict:
                          matrix=_face_matrix(face, X, Y, H))
             else:
                 floating.append(p)
-        _layout_flat(floating, start_x=X + 30 + t, z=-t - 0.5, prefix="extra")
+        _layout_flat(floating, start_x=X + 30 + t, z=-t - 0.5, prefix="extra", grid=True)
         bounds = [-t, -t, -t, X + t, Y + t, H + t]
     else:
+        auto = None
+        if name not in AUTO_DENY:
+            try:
+                auto = auto_assemble(parts, t)
+            except Exception:
+                auto = None
+        if auto is not None:
+            return auto
+        for p in parts:
+            for k in ("id", "name", "face", "mirror", "matrix"):
+                p.pop(k, None)
         _layout_flat(parts, start_x=0, z=0, prefix="part", grid=True)
         X = Y = H = 0.0
         bounds = None
@@ -774,3 +789,252 @@ def apply_project(name: str, box: Any, rec: Recorder, project: dict | None) -> l
     for part in to_remove:
         surface.parts.remove(part)
     return notes
+
+
+# ================================================================== 自动装配（试验）
+#
+# 没写配方的生成器：按 rectangularWall 板的尺寸推断盒子内部尺寸 X/Y/H，
+# 逐块板尝试放到 6 个面（含旋转 90° / 翻面），在每块板的卡榫区域密集取样，
+# 检查与已放置的板「不穿透、有接触」。全部通过且连通才认为装配成功。
+
+_FACE_DIMS = {"front": ("X", "H"), "back": ("X", "H"), "left": ("Y", "H"),
+              "right": ("Y", "H"), "bottom": ("X", "Y"), "top": ("X", "Y")}
+
+
+def _np_matrix(cols16):
+    import numpy as np
+    return np.array(cols16, dtype=float).reshape(4, 4).T   # 列主序 → 行主序
+
+
+def _variants(pw, ph, fu, fv):
+    """板（宽 pw、高 ph）放到面（u 长 fu、v 长 fv）上的局部变换候选：(4×4, flip)."""
+    import numpy as np
+    out = []
+    if _close(pw, fu) and _close(ph, fv):
+        out.append((np.eye(4), False))
+        # 翻面：绕 v 轴转 180°（u → W-u, w → t-w）在调用处补 t
+        out.append((np.array([[-1, 0, 0, pw], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], float), True))
+    if _close(pw, fv) and _close(ph, fu):
+        out.append((np.array([[0, 1, 0, 0], [-1, 0, 0, pw], [0, 0, 1, 0], [0, 0, 0, 1]], float), False))
+        out.append((np.array([[0, -1, 0, ph], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], float), False))
+    return out
+
+
+class _Solid:
+    """一块板的碰撞检测数据."""
+
+    def __init__(self, p: dict, t: float):
+        import numpy as np
+        import shapely
+        from shapely.geometry import Polygon
+        self.p = p
+        self.t = t
+        poly = Polygon(p["outer"], [h for h in p["holes"] if len(h) >= 3])
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        self.poly = poly
+        self.shrunk = poly.buffer(-0.08)
+        self.grown = poly.buffer(0.6)
+        # 只在卡榫可能出现的边缘带取样
+        band = poly.difference(poly.buffer(-1.6 * t))
+        x0, y0, x1, y1 = poly.bounds
+        step = max(0.5, min(1.0, t / 3))
+        xs = np.arange(x0 + step / 2, x1, step)
+        ys = np.arange(y0 + step / 2, y1, step)
+        gx, gy = np.meshgrid(xs, ys)
+        gx, gy = gx.ravel(), gy.ravel()
+        keep = shapely.contains_xy(band, gx, gy)
+        gx, gy = gx[keep], gy[keep]
+        if len(gx) > 8000:
+            idx = np.random.default_rng(0).choice(len(gx), 8000, replace=False)
+            gx, gy = gx[idx], gy[idx]
+        self.local = np.stack([gx, gy, np.full_like(gx, t / 2), np.ones_like(gx)])
+        self.M = None
+        self.Minv = None
+        self.world = None
+
+    def place(self, M):
+        import numpy as np
+        self.M = M
+        self.Minv = np.linalg.inv(M)
+        self.world = M @ self.local
+
+    def hits(self, other: "_Solid"):
+        """(穿透点数, 接触点数)：self 的取样点落在 other 实体里 / 贴着 other."""
+        import shapely
+        q = other.Minv @ self.world
+        u, v, w = q[0], q[1], q[2]
+        t = other.t
+        inside_w = (w > 0.03 * t) & (w < 0.97 * t)
+        near_w = (w > -0.6) & (w < t + 0.6)
+        if not near_w.any():
+            return 0, 0
+        sel = near_w
+        col = 0
+        if (inside_w & sel).any():
+            m = inside_w
+            col = int(shapely.contains_xy(other.shrunk, u[m], v[m]).sum())
+        con = int(shapely.contains_xy(other.grown, u[sel], v[sel]).sum())
+        return col, con
+
+
+def _infer_dims(rect_parts):
+    import itertools
+    vals = sorted({round(v, 3) for p in rect_parts for v in (p["w"], p["h"])})
+    if len(vals) > 18:
+        return []
+    cands = []
+    for X, Y, H in itertools.product(vals, repeat=3):
+        n = {"xh": 0, "yh": 0, "xy": 0}
+        for p in rect_parts:
+            dims = {(round(p["w"], 3), round(p["h"], 3)), (round(p["h"], 3), round(p["w"], 3))}
+            if (X, H) in dims:
+                n["xh"] += 1
+            elif (Y, H) in dims:
+                n["yh"] += 1
+            elif (X, Y) in dims:
+                n["xy"] += 1
+        if n["xh"] and n["yh"] and n["xh"] + n["yh"] + n["xy"] >= 4:
+            score = min(n["xh"], 2) + min(n["yh"], 2) + min(n["xy"], 2)
+            cands.append((score, X * Y * H, (X, Y, H)))
+    cands.sort(reverse=True)
+    return [c[2] for c in cands[:8]]
+
+
+def self_place(p, placed, used, contacts, solids, sub, X, Y, H, t) -> bool:
+    """把一块板放到最合适的面上；成功返回 True."""
+    import numpy as np
+    s = solids[id(p)]
+    best = None
+    for face, (a, b) in _FACE_DIMS.items():
+        if face in used:
+            continue
+        fu, fv = sub[a], sub[b]
+        F = _np_matrix(_face_matrix(face, X, Y, H))
+        for L, flip in _variants(p["w"], p["h"], fu, fv):
+            if flip:
+                L = L.copy()
+                L[2, 3] = t
+            s.place(F @ L)
+            col = con = 0
+            touching = set()
+            for q, _f, qs, _m in placed:
+                c1, n1 = s.hits(qs)
+                c2, n2 = qs.hits(s)
+                col += c1 + c2
+                if n1 + n2 > 8:
+                    touching.add(id(q))
+                con += n1 + n2
+            if col > 0:
+                continue
+            if placed and not touching:
+                continue
+            key = (len(touching), con)
+            if best is None or key > best[0]:
+                best = (key, face, F @ L, flip, touching)
+        if best is not None and not placed:
+            break   # 第一块板：任意一个合法面即可
+    if best is None:
+        return False
+    _k, face, M, flip, touching = best
+    s.place(M)
+    used.add(face)
+    placed.append((p, face, s, flip))
+    contacts[id(p)] = set(touching)
+    for q in touching:
+        contacts.setdefault(q, set()).add(id(p))
+    return True
+
+
+def auto_assemble(parts: list[dict], t: float) -> dict | None:
+    """尝试自动装配；成功时给 parts 写入 id/name/face/mirror/matrix 并返回汇总，失败返回 None."""
+    import numpy as np
+    rect = [p for p in parts if p["kind"] == "rect" and p.get("label") != "校准尺"
+            and p["w"] > t and p["h"] > t]
+    if len(rect) < 4 or len(rect) > 40:
+        return None
+    solids = {id(p): _Solid(p, t) for p in rect}
+    best_result = None
+    for X, Y, H in _infer_dims(rect):
+        sub = {"X": X, "Y": Y, "H": H}
+        placed: list[tuple[dict, str, _Solid, bool]] = []
+        used: set[str] = set()
+        contacts: dict[int, set[int]] = {}
+        # 大板先放（底板 / 侧板作为基准）；放不上的（如还没有相邻板）下一轮再试
+        pending = sorted(rect, key=lambda q: -q["w"] * q["h"])
+        progress = True
+        while progress and pending:
+            progress = False
+            for p in list(pending):
+                if self_place(p, placed, used, contacts, solids, sub, X, Y, H, t):
+                    pending.remove(p)
+                    progress = True
+        if len(placed) < 4 or len({f for _p, f, _s, _m in placed} & {"front", "back", "left", "right"}) < 2:
+            continue
+        # 连通性
+        start = id(placed[0][0])
+        seen, stack = {start}, [start]
+        while stack:
+            for nb in contacts.get(stack.pop(), ()):
+                if nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+        if len(seen) != len(placed):
+            continue
+        score = (len(placed), X * Y * H)
+        if best_result is None or score > best_result[0]:
+            best_result = (score, (X, Y, H), [(p, f, s.M.copy(), m) for p, f, s, m in placed])
+    if best_result is None:
+        return None
+    _score, (X, Y, H), placed_list = best_result
+    # 四面墙只缺一面时，整体绕 z 轴转，让开口朝前（面向观察者）
+    walls = ["front", "right", "back", "left"]          # 绕 z 轴 +90° 时 front→right→back→left
+    used_walls = {f for _p, f, _M, _m in placed_list if f in walls}
+    missing = [w for w in walls if w not in used_walls]
+    if len(missing) == 1 and missing[0] != "front":
+        k = (4 - walls.index(missing[0])) % 4             # 转 k 次后缺的那面变成 front
+        ang = math.pi / 2 * k
+        c, sn = round(math.cos(ang)), round(math.sin(ang))
+        Rz = np.array([[c, -sn, 0, 0], [sn, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], float)
+        corners = np.array([[0, 0, 0, 1], [X, 0, 0, 1], [0, Y, 0, 1], [X, Y, 0, 1]], float).T
+        rc = Rz @ corners
+        Rz[0, 3], Rz[1, 3] = -rc[0].min(), -rc[1].min()
+        rename = {w: walls[(i + k) % 4] for i, w in enumerate(walls)}
+        placed_list = [(p, rename.get(f, f), Rz @ M, m) for p, f, M, m in placed_list]
+        if k % 2:
+            X, Y = Y, X
+    for p, face, M, flip in placed_list:
+        solids[id(p)].place(M)
+    placed = [(p, f, solids[id(p)], m) for p, f, M, m in placed_list]
+    if True:
+        floating = []
+        placed_ids = {id(p) for p, *_ in placed}
+        for p, face, s, flip in placed:
+            m = s.M
+            p.update(id=face, name=FACE_NAMES[face], face=face,
+                     mirror=_FACES[face][4] != flip,
+                     matrix=[float(x) for x in m.T.ravel()])
+        for p in parts:
+            if id(p) not in placed_ids:
+                floating.append(p)
+        _layout_flat(floating, start_x=X + 30 + t, z=-t - 0.5, prefix="extra", grid=True)
+        return {"assembled": True, "auto": True, "dims": [X, Y, H], "thickness": t,
+                "bounds": [-t, -t, -t, X + t, Y + t, H + t],
+                "placed": len(placed), "floating": len(floating)}
+
+
+def check_collisions(parts: list[dict], t: float) -> int:
+    """（调试用）已摆好的板两两穿透点数总和."""
+    import numpy as np
+    sol = []
+    for p in parts:
+        if p.get("face") or p.get("id", "").startswith("inner"):
+            s = _Solid(p, t)
+            s.place(np.array(p["matrix"], float).reshape(4, 4).T)
+            sol.append(s)
+    total = 0
+    for i in range(len(sol)):
+        for j in range(len(sol)):
+            if i != j:
+                total += sol[i].hits(sol[j])[0]
+    return total
