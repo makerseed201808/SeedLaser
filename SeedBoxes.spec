@@ -66,6 +66,7 @@ gen_modules = collect_submodules('boxes.generators')
 extra_datas = [
     ('web', 'web'),
     ('logo.ico', '.'),
+    ('i18n', 'i18n'),   # 较新的 zh_CN.po（backend._load_translation 优先使用）
 ]
 # 查找顺序与 backend._find_asset_dir 一致：
 #   boxes_assets/（scripts/fetch_boxes_assets.py 下载）→ BOXES_ROOT → <venv>/share/locale

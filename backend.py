@@ -79,14 +79,94 @@ def _find_asset_dir(kind: str) -> str:
 
 # --------------------------------------------------------------------- i18n
 
+def _parse_po(path: str) -> dict[str, str]:
+    """极简 .po 解析器：返回 {msgid: msgstr}，跳过 fuzzy、空翻译、带 msgctxt 和复数条目。
+    只用标准库，不依赖 msgfmt / babel。"""
+    import ast
+
+    entries: dict[str, str] = {}
+    cur: dict[str, str] = {}
+    key: str | None = None
+    fuzzy = False
+
+    def flush() -> None:
+        nonlocal cur, fuzzy
+        msgid, msgstr = cur.get("msgid"), cur.get("msgstr")
+        if msgid and msgstr and not fuzzy and "msgctxt" not in cur and "msgid_plural" not in cur:
+            entries[msgid] = msgstr
+        cur, fuzzy = {}, False
+
+    with open(path, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                if cur:
+                    flush()
+                continue
+            if line.startswith("#,") and "fuzzy" in line:
+                if cur:
+                    flush()
+                fuzzy = True
+                continue
+            if line.startswith("#"):
+                continue
+            m = re.match(r'(msgctxt|msgid_plural|msgid|msgstr(?:\[\d+\])?)\s+(".*")$', line)
+            if m:
+                kw = m.group(1)
+                if kw == "msgid" and "msgstr" in cur:
+                    flush()
+                key = "msgstr" if kw.startswith("msgstr") else kw
+                if key == "msgstr" and kw != "msgstr" and "msgstr" in cur:
+                    key = None  # 只取复数的第一种形式（反正复数条目会被跳过）
+                    continue
+                cur[key] = ast.literal_eval(m.group(2))
+            elif line.startswith('"') and key:
+                cur[key] = cur.get(key, "") + ast.literal_eval(line)
+    if cur:
+        flush()
+    return entries
+
+
+class _PoTranslations(gettext.NullTranslations):
+    """用 .po 字典做主翻译，查不到时回退到 fallback（boxes 自带 .mo）."""
+
+    def __init__(self, catalog: dict[str, str]) -> None:
+        super().__init__()
+        self._catalog = catalog
+
+    def gettext(self, message: str) -> str:
+        out = self._catalog.get(message)
+        if out:
+            return out
+        return self._fallback.gettext(message) if self._fallback else message
+
+
+def _i18n_dir() -> str:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, "i18n")
+    return os.path.join(_PROJECT_DIR, "i18n")
+
+
 def _load_translation(lang: str = "zh_CN") -> gettext.NullTranslations:
+    """翻译来源（优先级从高到低）：
+    ① 本仓库 i18n/<lang>.po（上游 master 较新的翻译，见 i18n/README.md）
+    ② boxes 自带的 locale/<lang>/LC_MESSAGES/boxes.py.mo"""
+    mo: gettext.NullTranslations = gettext.NullTranslations()
     locale_dir = _find_asset_dir("locale")
-    if not locale_dir:
-        return gettext.NullTranslations()
-    try:
-        return gettext.translation("boxes.py", localedir=locale_dir, languages=[lang])
-    except FileNotFoundError:
-        return gettext.NullTranslations()
+    if locale_dir:
+        try:
+            mo = gettext.translation("boxes.py", localedir=locale_dir, languages=[lang])
+        except FileNotFoundError:
+            pass
+    po_path = os.path.join(_i18n_dir(), f"{lang}.po")
+    if os.path.isfile(po_path):
+        try:
+            primary = _PoTranslations(_parse_po(po_path))
+            primary.add_fallback(mo)
+            return primary
+        except Exception:
+            pass  # .po 损坏时不影响启动，退回 .mo
+    return mo
 
 
 _TRANS = _load_translation("zh_CN")
