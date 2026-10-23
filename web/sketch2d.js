@@ -47,6 +47,8 @@ export class SketchEditor {
     this.lockRatio = true;
     this.opts = { mode: 'cut', radius: 0, sides: 6, star: false, starRatio: 0.5, text: '文字', font: '', size: 12,
                   offset: 2, offsetJoin: 'round', arrRows: 2, arrCols: 3, arrDx: 20, arrDy: 20,
+                  arrType: 'line', arrCount: 5, arrDist: 15, arrAngle: 0, arrCenter: 'board', arrCx: 0, arrCy: 0,
+                  arrSweep: 360, arrRotate: true, arrPreview: true,
                   jointCount: 0, jointType: 'a', jointDepth: 0, jointMode: 'count', jointTab: 0, jointGap: 0, jointPlay: 0 };
     this.undoStack = [];
     this.redoStack = [];
@@ -124,11 +126,10 @@ export class SketchEditor {
             <div class="sk-row"><label>偏移<input data-opt="offset" type="number" step="0.5" value="2"> mm</label>
               <select data-opt="offsetJoin"><option value="round">圆角</option><option value="miter">尖角</option></select>
               <button data-act="offset" title="生成外扩（正数）/ 内缩（负数）的新轮廓">偏移</button></div>
-            <div class="sk-row"><label>阵列<input data-opt="arrRows" type="number" min="1" value="2">行</label>
-              <label><input data-opt="arrCols" type="number" min="1" value="3">列</label></div>
-            <div class="sk-row"><label>间距 X<input data-opt="arrDx" type="number" step="1" value="20"></label>
-              <label>Y<input data-opt="arrDy" type="number" step="1" value="20"></label>
-              <button data-act="array">阵列</button></div>
+          </section>
+          <section class="sk-card">
+            <h4>阵列</h4>
+            <div class="sk-array"></div>
           </section>
           <section class="sk-card">
             <h4>排列</h4>
@@ -157,6 +158,7 @@ export class SketchEditor {
     this.previewHost = h.querySelector('.sk-3d-body');
     this.$ = (s) => h.querySelector(s);
     this.$$ = (s) => h.querySelectorAll(s);
+    this.renderArray();
 
     h.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => this.setTool(b.dataset.tool)));
     h.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => this.applyMode(b.dataset.mode)));
@@ -649,6 +651,7 @@ export class SketchEditor {
     stem.data.ui = true;
     const rot = new ps.Path.Circle({ center: top, radius: 5 / this.zoom, parent: this.overlay, fillColor: SELECT });
     this.handles.push({ kind: 'rotate', at: top, item: rot });
+    this.drawArrayPreview();
   }
 
   hitHandle(pt) {
@@ -684,6 +687,15 @@ export class SketchEditor {
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
     if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView }; return; }
     const pt = e.point;
+    if (this.pickCenter) {
+      this.pickCenter = false;
+      const c = this.snap(pt);
+      Object.assign(this.opts, { arrCenter: 'pick', arrCx: c.x, arrCy: c.y, arrType: 'circle' });
+      this.renderArray();
+      this.setTool(this.tool);
+      this.status(`环形阵列中心：(${fmt(c.x)}, ${fmt(c.y)})`);
+      return;
+    }
     const t = this.tool;
     if (t === 'select') return this.selectDown(e, pt);
     if (t === 'node') return this.nodeDown(e, pt);
@@ -857,7 +869,8 @@ export class SketchEditor {
 
   cloneItem(it) {
     const c = it.clone();
-    c.data = { ...it.data, id: newId(), role: null, locked: false, text: it.data.text ? { ...it.data.text } : null };
+    c.data = { ...it.data, id: newId(), role: null, locked: false, text: it.data.text ? { ...it.data.text } : null,
+               joints: it.data.joints ? it.data.joints.map((j) => ({ ...j, id: newId() })) : null };
     this.style(c);
     return c;
   }
@@ -1663,22 +1676,125 @@ export class SketchEditor {
     this.commit(`已偏移 ${dist} mm`);
   }
 
-  arraySel() {
-    if (!this.need(1)) return;
-    const rows = Math.max(1, Math.round(this.opts.arrRows));
-    const cols = Math.max(1, Math.round(this.opts.arrCols));
-    const dx = Number(this.opts.arrDx) || 0;
-    const dy = Number(this.opts.arrDy) || 0;
-    const src = [...this.sel];
-    const all = [...src];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (!r && !c) continue;
-        src.forEach((it) => { const k = this.cloneItem(it); k.translate(new this.ps.Point(c * dx, -r * dy)); all.push(k); });
+  // ---------------------------------------------------------------- 阵列（矩形 / 直线 / 环形）
+
+  renderArray() {
+    const o = this.opts;
+    const box = this.$('.sk-array');
+    const type = `<div class="sk-seg">${[['line', '直线'], ['circle', '环形'], ['grid', '矩形']].map(([k, n]) =>
+      `<button data-at="${k}" class="${o.arrType === k ? 'on' : ''}">${n}</button>`).join('')}</div>`;
+    let rows = '';
+    if (o.arrType === 'grid') {
+      rows = `<div class="sk-row"><label>行<input data-a="arrRows" type="number" min="1" step="1" value="${o.arrRows}"></label>
+          <label>列<input data-a="arrCols" type="number" min="1" step="1" value="${o.arrCols}"></label></div>
+        <div class="sk-row"><label>间距 X<input data-a="arrDx" type="number" step="1" value="${o.arrDx}"></label>
+          <label>Y<input data-a="arrDy" type="number" step="1" value="${o.arrDy}"> mm</label></div>
+        <p class="sk-small">间距是相邻两份对应点之间的距离；行往下排。</p>`;
+    } else if (o.arrType === 'line') {
+      rows = `<div class="sk-row"><label>数量<input data-a="arrCount" type="number" min="2" step="1" value="${o.arrCount}"></label>
+          <label>间距<input data-a="arrDist" type="number" step="0.5" value="${o.arrDist}"> mm</label></div>
+        <div class="sk-row"><label>方向<input data-a="arrAngle" type="number" step="15" value="${o.arrAngle}"> °</label>
+          <span class="sk-small">0 = 向右，90 = 向上</span></div>`;
+    } else {
+      const cname = { board: '板中心', sel: '选区中心', pick: `点选（${fmt(o.arrCx)}, ${fmt(o.arrCy)}）` }[o.arrCenter];
+      rows = `<div class="sk-row"><label>数量<input data-a="arrCount" type="number" min="2" step="1" value="${o.arrCount}"></label>
+          <label>总角度<input data-a="arrSweep" type="number" step="15" value="${o.arrSweep}"> °</label></div>
+        <div class="sk-row"><span>中心</span>
+          <button data-ac="board" class="${o.arrCenter === 'board' ? 'on' : ''}">板中心</button>
+          <button data-ac="pick" class="${o.arrCenter === 'pick' ? 'on' : ''}" title="在画布上单击一点作为中心">点选</button></div>
+        <div class="sk-row"><label class="sk-check"><input data-a="arrRotate" type="checkbox" ${o.arrRotate ? 'checked' : ''}>复制品跟着旋转</label></div>
+        <p class="sk-small">当前中心：${cname}。总角度 360° 时平均分布一整圈；小于 360° 时首尾各放一个。</p>`;
+    }
+    box.innerHTML = type + rows + `<div class="sk-row"><label class="sk-check"><input data-a="arrPreview" type="checkbox" ${o.arrPreview ? 'checked' : ''}>预览</label>
+      <span class="sk-spacer"></span><button data-act2="array" class="sk-primary">阵列</button></div>`;
+    box.querySelectorAll('[data-at]').forEach((b) => b.addEventListener('click', () => { o.arrType = b.dataset.at; this.renderArray(); this.drawSelection(); }));
+    box.querySelectorAll('[data-ac]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.ac === 'pick') { this.pickCenter = true; this.status('在画布上单击一点作为环形阵列的中心'); this.canvas.style.cursor = 'crosshair'; return; }
+      o.arrCenter = b.dataset.ac; this.renderArray(); this.drawSelection();
+    }));
+    box.querySelectorAll('[data-a]').forEach((el) => {
+      const upd = () => { o[el.dataset.a] = el.type === 'checkbox' ? el.checked : Number(el.value); this.drawSelection(); };
+      el.addEventListener('input', upd);
+      el.addEventListener('change', upd);
+    });
+    box.querySelector('[data-act2=array]').addEventListener('click', () => this.arraySel());
+  }
+
+  arrayCenter() {
+    const o = this.opts;
+    if (o.arrCenter === 'pick') return new this.ps.Point(o.arrCx, o.arrCy);
+    const outline = this.content.children.find((c) => c.data && c.data.role === 'outline');
+    if (outline) return outline.bounds.center;
+    const b = this.selBounds();
+    return b ? b.center : new this.ps.Point(0, 0);
+  }
+
+  // 每一份复制品的变换矩阵（不含原件）
+  arrayMatrices() {
+    const o = this.opts;
+    const M = this.ps.Matrix;
+    const out = [];
+    if (o.arrType === 'grid') {
+      const rows = Math.max(1, Math.round(o.arrRows));
+      const cols = Math.max(1, Math.round(o.arrCols));
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) if (r || c) out.push(new M().translate(c * (Number(o.arrDx) || 0), -r * (Number(o.arrDy) || 0)));
+      }
+    } else if (o.arrType === 'line') {
+      const n = Math.max(2, Math.round(o.arrCount));
+      const a = (Number(o.arrAngle) || 0) * Math.PI / 180;
+      const d = Number(o.arrDist) || 0;
+      for (let i = 1; i < n; i++) out.push(new M().translate(Math.cos(a) * d * i, Math.sin(a) * d * i));
+    } else {
+      const n = Math.max(2, Math.round(o.arrCount));
+      const sweep = Number(o.arrSweep) || 360;
+      const step = Math.abs(Math.abs(sweep) - 360) < 1e-6 ? sweep / n : sweep / (n - 1);
+      const c = this.arrayCenter();
+      const sc = this.selBounds() ? this.selBounds().center : c;
+      for (let i = 1; i < n; i++) {
+        const R = new M().rotate(step * i, c);
+        if (o.arrRotate) out.push(R);
+        else { const q = R.transform(sc); out.push(new M().translate(q.x - sc.x, q.y - sc.y)); }
       }
     }
+    return out;
+  }
+
+  drawArrayPreview() {
+    if (!this.opts.arrPreview || !this.sel.size || this.tool !== 'select') return;
+    const mats = this.arrayMatrices();
+    if (mats.length > 400) return;
+    const g = new this.ps.Group({ parent: this.overlay });
+    mats.forEach((m) => this.sel.forEach((it) => {
+      const k = it.clone({ insert: false });
+      k.transform(m);
+      k.fillColor = null;
+      k.strokeColor = '#f97316';
+      k.dashArray = [3, 3];
+      k.strokeWidth = 1;
+      k.strokeScaling = false;
+      k.opacity = 0.8;
+      g.addChild(k);
+    }));
+    if (this.opts.arrType === 'circle') {
+      const c = this.arrayCenter();
+      const r = 4 / this.zoom;
+      g.addChild(new this.ps.Path.Line({ from: [c.x - r, c.y], to: [c.x + r, c.y], strokeColor: '#f97316', strokeWidth: 1.5, strokeScaling: false }));
+      g.addChild(new this.ps.Path.Line({ from: [c.x, c.y - r], to: [c.x, c.y + r], strokeColor: '#f97316', strokeWidth: 1.5, strokeScaling: false }));
+    }
+  }
+
+  arraySel() {
+    if (!this.need(1, '先选中要阵列的图形')) return;
+    const mats = this.arrayMatrices();
+    if (!mats.length) { this.toast('数量至少为 2', 'error'); return; }
+    if (mats.length * this.sel.size > 2000) { this.toast('复制太多了（超过 2000 份）', 'error'); return; }
+    const src = [...this.sel];
+    const all = [...src];
+    mats.forEach((m) => src.forEach((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); all.push(k); }));
     this.sel = new Set(all);
-    this.commit(`已阵列 ${rows} × ${cols}`);
+    const name = { grid: '矩形', line: '直线', circle: '环形' }[this.opts.arrType];
+    this.commit(`已${name}阵列（共 ${mats.length + 1} 份）`);
   }
 
   align(how) {

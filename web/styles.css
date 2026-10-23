@@ -910,3 +910,9 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-peers { display: flex; flex-direction: column; gap: 3px; }
 .sk-peer { text-align: left; font-size: 11.5px !important; padding: 3px 7px !important; }
 .sk-peer.on { background: #fff7ed !important; border-color: #f97316 !important; color: #9a3412 !important; }
+.sk-seg { display: flex; gap: 0; margin-bottom: 4px; }
+.sk-seg button { flex: 1; border-radius: 0 !important; }
+.sk-seg button:first-child { border-radius: 6px 0 0 6px !important; }
+.sk-seg button:last-child { border-radius: 0 6px 6px 0 !important; }
+.sk-host .sk-primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.sk-row .sk-spacer { flex: 1; }
