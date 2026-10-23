@@ -134,8 +134,11 @@ class Recorder:
             info = self.info_for(part)
             if info is None:
                 # 没经过 move() 直接画的内容（部分生成器如此）：按图纸坐标处理
+                is_ref = any(c[0] == "T" and "burn:" in str(c[4])
+                             for path in part.pathes for c in path.path)
                 info = PartInfo(part=part, kind="other", matrix=Affine.identity(),
-                                width=0.0, height=0.0, seq=1000 + idx)
+                                width=0.0, height=0.0, seq=1000 + idx,
+                                label="校准尺" if is_ref else "")
             inv = ~info.matrix
             loops_cut, loops_etch, open_lines = [], [], []
             for path in part.pathes:
@@ -454,11 +457,16 @@ def _layout_flat(parts: list[dict], start_x: float, z: float, prefix: str, grid:
     else:
         row_w = float("inf")
     x, y, row_h = start_x, 0.0, 0.0
-    for n, p in enumerate(parts, 1):
+    n = 0
+    for p in parts:
+        if p.get("label") != "校准尺":
+            n += 1
         bx0, by0, bx1, by1 = p["bbox"]
         pw, ph = bx1 - bx0, by1 - by0
         if grid and x > start_x and x + pw > start_x + row_w:
             x, y, row_h = start_x, y + row_h + gap, 0.0
+        if p.get("label") == "校准尺":
+            p.setdefault("id", "reference")
         p.setdefault("id", f"{prefix}-{p['seq'] + 1}")
         p.setdefault("name", _part_name(p, n))
         p.update(face=None, mirror=False,
