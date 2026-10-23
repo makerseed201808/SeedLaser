@@ -348,7 +348,7 @@ function renderPartsPanel() {
     const row = document.createElement('div');
     row.className = 'pp-row' + (p.id === W.selected ? ' sel' : '') + (dis.has(p.id) ? ' off' : '');
     const n = (W.project.edits[p.id] || []).length;
-    const rep = W.pose.on && W.pose.report && W.pose.report[p.id];
+    const rep = W.pose.report && W.pose.report[p.id];
     const badge = !rep || dis.has(p.id) ? ''
       : rep.collide.length ? `<i class="pp-bad" title="与 ${esc(rep.collide.map(nameOf).join('、'))} 穿透">穿透 ${rep.collide.length}</i>`
       : rep.touch.length ? `<i class="pp-ok" title="与 ${esc(rep.touch.map(nameOf).join('、'))} 咬合">咬合 ${rep.touch.length}</i>`
@@ -368,7 +368,7 @@ function renderPartsPanel() {
     row.querySelector('.pp-edit').addEventListener('click', () => openEditor(p.id));
     panel.appendChild(row);
   });
-  if (W.pose.on) {
+  if (Object.keys(W.project.poses || {}).length) {
     const bar = document.createElement('div');
     bar.className = 'pp-posebar';
     bar.innerHTML = '<button id="pose-reset-sel">所选复位</button><button id="pose-reset-all">全部复位</button>';
@@ -466,9 +466,10 @@ async function loadModel() {
   W.pose.report = null;
   renderPartsPanel();
   view.resize();          // 清单宽度确定后再算画面偏移
-  if (W.pose.on) { poser.updateGizmo(); checkPose(); }
-  if (W.pose.on && Object.keys(W.project.poses || {}).length && W.paramsDirty) {
-    setNote('参数已改变，手动摆放过的板件位置可能需要重新调整（可点「全部复位」）。', 'info');
+  const posed = Object.keys(W.project.poses || {}).length > 0;
+  if (posed) checkPose(W.paramsDirty);
+  if (posed && W.paramsDirty) {
+    setNote('参数已改变，3D 编辑器里摆放过的板件位置可能需要重新调整（可点板件清单下方的「全部复位」）。', 'info');
     W.paramsDirty = false;
   } else if (!m.parts.length) setNote('这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
   else if (m.auto) {
@@ -1365,8 +1366,15 @@ function resetPoses(all) {
 }
 
 let poseCheckSeq = 0;
-const checkPose = debounce(async () => {
-  if (!W.pose.on || !W.model || !W.model.token) return;
+// 咬合 / 穿透检查：只在有手动摆放（3D 编辑器里移动过）时运行；quiet 时只更新清单标记、不改提示
+const checkPose = debounce(async (quiet) => {
+  if (!W.model || !W.model.token) return;
+  if (!Object.keys(W.project.poses || {}).length) {
+    W.pose.report = null;
+    if (view) view.refreshStates();
+    renderPartsPanel();
+    return;
+  }
   const seq = ++poseCheckSeq;
   const dis = new Set(W.project.disabled);
   const ids = W.model.parts.map((p) => p.id).filter((id) => !dis.has(id) && id !== 'reference');
@@ -1396,6 +1404,7 @@ const checkPose = debounce(async () => {
     if (group.length > biggest.length) biggest = group;
   });
   const loose = ids.filter((id) => !biggest.includes(id));
+  if (quiet) return;
   if (bad.length) setNote(`有 ${bad.length} 块板互相穿透（红色）：${bad.map(nameOf).join('、')}`, 'error');
   else if (!loose.length && ids.length > 1) setNote('✓ 所有板件都已咬合，没有穿透', 'ok');
   else setNote(`没有穿透；${loose.map(nameOf).join('、')} 还没有和主体连在一起`, 'info');
@@ -1407,24 +1416,6 @@ function afterPoseChange() {
   checkPose();
 }
 
-function setPoseMode(on) {
-  W.pose.on = on;
-  $('#btn-pose').classList.toggle('on', on);
-  $('#pose-snap').classList.toggle('hidden', !on);
-  $('.view3d-hint').innerHTML = on
-    ? '左键拖板件 · 右键转视角 · 中键平移 · 滚轮缩放 <button class="kbd-btn" id="kbd-btn">⌨ 快捷键</button>'
-    : '拖动旋转 · 右键拖动平移 · 滚轮缩放 · 单击选中板件 · 双击编辑';
-  const kb = document.getElementById('kbd-btn');
-  if (kb) kb.addEventListener('click', () => $('#kbd-help').classList.toggle('hidden'));
-  if (!on) $('#kbd-help').classList.add('hidden');
-  if (poser) poser.applyMouseMapping(on);
-  if (!on) { W.pose.hover = null; }
-  if (!on) { W.pose.report = null; setNote(''); }
-  if (poser) poser.updateGizmo();
-  if (view) view.refreshStates();
-  renderPartsPanel();
-  if (on) checkPose();
-}
 
 document.addEventListener('keydown', (ev) => {
   if (!W.pose.on || W.mode !== '3d' || ED.part || !poser) return;
@@ -1628,11 +1619,13 @@ async function sfSync() {
     const raw = new Map((scene.rawShapes || []).map((s) => [s.id, s]));
     const C = view.root.matrix.clone();
     const Ci = C.clone().invert();
-    const stats = { moved: 0, missing: [], reshaped: [], scaled: [] };
+    const stats = { moved: 0, removed: [], reshaped: [], scaled: [] };
+    const disabled = new Set(W.project.disabled);
     W.project.poses = W.project.poses || {};
     SF.map.forEach((info, sid) => {
       const s = raw.get(sid);
-      if (!s || s.hidden) { stats.missing.push(info.pid); return; }
+      if (!s) { stats.removed.push(info.pid); disabled.add(info.pid); return; }   // 编辑器里删除 = 不使用这块板
+      disabled.delete(info.pid);
       const m = s.importedMesh;
       if (!m || !m.positions || m.positions.length / 3 <= Math.max(...info.idx)) { stats.reshaped.push(info.pid); return; }
       const now = info.idx.map((j) => sfVertex(s, j).sub(SF.off));
@@ -1647,6 +1640,7 @@ async function sfSync() {
       const o = view.objects.get(info.pid);
       if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
     });
+    W.project.disabled = [...disabled];
     SF.stats = stats;
     projectChanged();
   } catch (err) {
@@ -1705,14 +1699,11 @@ async function closeSketchForge() {
   const st = SF.stats;
   if (!st) return;
   const warn = [];
-  if (st.missing.length) warn.push(`${st.missing.map(nameOf).join('、')} 在编辑器里被删除、隐藏或合并，位置未同步`);
+  if (st.removed.length) warn.push(`${st.removed.map(nameOf).join('、')} 已在 3D 编辑器中删除，设为「不使用」（不会导出，可在板件清单重新勾选）`);
   if (st.reshaped.length) warn.push(`${st.reshaped.map(nameOf).join('、')} 形状被修改，位置未同步`);
   if (st.scaled.length) warn.push(`${st.scaled.map(nameOf).join('、')} 尺寸改动不会影响图纸（请改左侧参数）`);
-  if (st.moved) {
-    if (!W.pose.on) setPoseMode(true);   // 进入摆放模式：显示咬合 / 穿透检查结果
-    else checkPose();
-  }
-  if (warn.length) setTimeout(() => setNote(warn.join('；'), 'info'), st.moved ? 600 : 0);
+  checkPose();   // 显示咬合 / 穿透检查结果（没有摆放时清除标记）
+  if (warn.length) setTimeout(() => setNote(warn.join('；'), 'info'), st.moved ? 700 : 0);
 }
 
 function setPartsPanelVisible(on) {
@@ -1779,12 +1770,10 @@ window.SeedWorkshop = {
 
 $('#tab-2d').addEventListener('click', () => setMode('2d'));
 $('#tab-3d').addEventListener('click', () => setMode('3d'));
-$('#btn-pose').addEventListener('click', () => setPoseMode(!W.pose.on));
 $('#btn-sf').addEventListener('click', () => (SF.open ? closeSketchForge() : openSketchForge()));
 $('#btn-parts').addEventListener('click', () => setPartsPanelVisible($('#parts-panel').classList.contains('gone')));
 try { if (localStorage.getItem('seedboxes.partsPanel') === '0') setPartsPanelVisible(false); else $('#btn-parts').classList.add('on'); }
 catch (e) { $('#btn-parts').classList.add('on'); }
-$('#pose-snap select').addEventListener('change', (ev) => { W.pose.snap = ev.target.value; });
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view && view.view(b.dataset.view)));
 $('#pe-close').addEventListener('click', closeEditor);
 document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', async () => {

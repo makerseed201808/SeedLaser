@@ -118,7 +118,6 @@
               <button id="btn-zoom-reset" class="zoom-2d" title="适合窗口">⤢</button>
               <button id="btn-parts" class="view-3d-btn hidden wide" title="显示 / 隐藏板件清单">☰ 板件</button>
               <button id="btn-sf" class="view-3d-btn hidden wide sf-btn" title="在完整的 3D 编辑器（SketchForge）里移动、旋转、组合板件">🛠 3D 编辑器</button>
-              <button id="btn-pose" class="view-3d-btn hidden wide pose-btn" title="手动移动、旋转板件，实时检查是否咬合">✋ 摆放</button>
               <button data-view="iso" class="view-3d-btn hidden wide" title="斜视">斜视</button>
               <button data-view="front" class="view-3d-btn hidden wide" title="正面">正面</button>
               <button data-view="side" class="view-3d-btn hidden wide" title="侧面">侧面</button>
@@ -131,33 +130,7 @@
               <div id="view3d-canvas" class="view3d-canvas"></div>
               <aside id="parts-panel" class="parts-panel"></aside>
               <div id="view3d-note" class="view3d-note hidden"></div>
-              <div id="kbd-help" class="kbd-help hidden">
-                <b>摆放模式操作</b>
-                <table>
-                  <tr><td>左键拖板件</td><td>在台面上移动（靠近其他板的边会自动对齐，按住 Alt 不对齐）</td></tr>
-                  <tr><td>黑色锥形手柄</td><td>升降</td></tr>
-                  <tr><td>彩色弧形箭头</td><td>绕红 X / 绿 Y / 蓝 Z 轴旋转，45° 吸附，Shift 22.5°</td></tr>
-                  <tr><td>左键拖空白处</td><td>框选；Shift+点击 加选 / 减选</td></tr>
-                  <tr><td>右键拖动</td><td>旋转视角</td></tr>
-                  <tr><td>中键 / Ctrl+左键</td><td>平移视角；滚轮缩放（朝鼠标位置）</td></tr>
-                  <tr><td>方向键</td><td>按吸附步长平移（Shift ×10）；Ctrl/⌘+↑↓ 升降</td></tr>
-                  <tr><td>R / Shift+R</td><td>绕竖直轴转 ±90°</td></tr>
-                  <tr><td>D</td><td>落到台面</td></tr>
-                  <tr><td>Ctrl/⌘+Z</td><td>撤销；Ctrl/⌘+Shift+Z 重做</td></tr>
-                  <tr><td>Esc</td><td>取消选中</td></tr>
-                </table>
-                <p>板拖回原来的装配位置附近会自动吸附；放下后自动检查卡榫是否咬合。</p>
-              </div>
-              <div id="pose-snap" class="pose-snap hidden">吸附
-                <select>
-                  <option value="0.5">0.5 mm</option>
-                  <option value="1" selected>1 mm</option>
-                  <option value="t">板厚</option>
-                  <option value="5">5 mm</option>
-                  <option value="0">关</option>
-                </select>
-              </div>
-              <div class="view3d-hint">拖动旋转 · 右键拖动平移 · 滚轮缩放 · 单击选中板件 · 双击编辑</div>
+              <div class="view3d-hint">拖动旋转 · 右键拖动平移 · 滚轮缩放 · 单击选中板件 · 双击开孔 / 刻字 · 用「🛠 3D 编辑器」摆放板件</div>
             </div>
             <!-- 3D 编辑器（SketchForge 改版，全窗口覆盖；iframe 在首次打开时创建） -->
             <div id="sf-host" class="sf-host hidden">
