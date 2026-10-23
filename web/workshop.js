@@ -1640,10 +1640,29 @@ function basis(x, y, z, o) {
 }
 
 // Q 的卡榫 jq 配到 P 的卡榫 jp：返回 P 局部坐标里的若干候选（Q 局部 → P 局部）
+// A 齿区间（旧数据只有段数 k：奇数段）
+function jointIv(j, L) {
+  if (j.iv) return j.iv;
+  const k = Math.max(1, j.k || 1);
+  const out = [];
+  for (let i = 1; i < k; i += 2) out.push([i * L / k, (i + 1) * L / k]);
+  return out;
+}
+
+function sameIv(a, b, L, reversed) {
+  if (a.length !== b.length) return false;
+  const bb = reversed ? b.map(([s, e]) => [L - e, L - s]).reverse() : b;
+  return a.every(([s, e], i) => Math.abs(s - bb[i][0]) < 0.2 && Math.abs(e - bb[i][1]) < 0.2);
+}
+
 function mateOptions(jq, jp, t) {
   const Q = jointFrame(jq);
   const P = jointFrame(jp);
-  if (Math.abs(Q.L - P.L) > 0.6 || jq.k !== jp.k) return [];
+  if (Math.abs(Q.L - P.L) > 0.6) return [];
+  const ivQ = jointIv(jq, Q.L);
+  const ivP = jointIv(jp, P.L);
+  const sigOk = { 1: sameIv(ivQ, ivP, P.L, false), '-1': sameIv(ivQ, ivP, P.L, true) };
+  if (!sigOk[1] && !sigOk[-1]) return [];
   const ez = new THREE.Vector3(0, 0, 1);
   const Lq = basis(Q.u, Q.n, ez, Q.a);
   const det = Math.sign(Lq.determinant());
@@ -1656,6 +1675,7 @@ function mateOptions(jq, jp, t) {
   };
   const at = (sig) => (sig > 0 ? P.a.clone() : P.b.clone());
   for (const sig of [1, -1]) {
+    if (!sigOk[sig]) continue;
     const ux = P.u.clone().multiplyScalar(sig);
     if (pair === 'a+b') {
       for (const sd of [1, -1]) {
