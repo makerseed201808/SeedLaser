@@ -56,6 +56,8 @@ macOS / Linux：
 
 首次运行会自动 `uv sync` 拉取依赖（包含从 GitHub 拉 boxes release-1.2），并运行 `scripts/fetch_boxes_assets.py` 下载上游的作品照片和翻译文件到 `boxes_assets/`（约 30 MB），约 2~3 分钟。后续启动秒开，可离线。
 
+> 连不上 GitHub？在能访问 GitHub 的电脑上运行 `scripts/make_boxes_mirror.sh`，把整个文件夹（含 `third_party/`）拷过去，`run_mac.sh` 会自动改用本地镜像。
+>
 > 为什么要单独下载：boxes 通过 git 安装进 `.venv` 时只安装 `boxes` 包本身，上游仓库根目录的 `static/`（作品照片）不会被安装。
 
 ---

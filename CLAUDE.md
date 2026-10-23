@@ -178,6 +178,7 @@ build_pyd.bat && build_uv.bat
 5. **PyWebView JS API 在独立线程** — 不要假定 main thread
 6. **git 安装的 boxes 不带 static/（作品照片）** — 由 `scripts/fetch_boxes_assets.py` 按 uv.lock 锁定的 commit 下载；升级 boxes 后要重新跑（commit 变化会自动重新下载）
 7. **release-1.2 的生成器 / 照片数比旧 boxes-master 少** — 实测分组内 163 个生成器，145 个有照片、18 个自渲染
+9. **连不上 GitHub 的电脑** — 在能访问 GitHub 的机器上跑 `scripts/make_boxes_mirror.sh` 生成 `third_party/boxes.git`（gitignore，约 30 MB），连同文件夹拷过去；`run_mac.sh` / `build_mac.sh` 检测到 GitHub 不通时用 `GIT_CONFIG_*` 环境变量把 boxes 的 git URL 临时改写到本地镜像（不改全局 git 配置）。`SEEDBOXES_USE_MIRROR=1` 可强制使用。Windows .bat 尚未接入
 8. **macOS .app 未签名** — Gatekeeper 拦截，需右键打开；产物架构随打包机
 
 ---

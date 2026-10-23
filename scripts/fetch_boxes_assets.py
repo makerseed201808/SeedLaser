@@ -13,12 +13,14 @@ import io
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEST = os.path.join(ROOT, "boxes_assets")
+MIRROR = os.path.join(ROOT, "third_party", "boxes.git")
 MARKER = os.path.join(DEST, ".commit")
 KINDS = ("static", "locale")
 
@@ -33,6 +35,19 @@ def locked_commit() -> str:
     return m.group(1)
 
 
+def from_mirror(commit: str) -> bytes:
+    """从本地 boxes 镜像（third_party/boxes.git）导出 tar.gz，格式与 codeload 一致."""
+    print(f"[*] 从本地镜像导出 {commit[:8]}：{MIRROR}")
+    try:
+        return subprocess.run(
+            ["git", "--git-dir", MIRROR, "archive", "--format=tar.gz",
+             f"--prefix=boxes-{commit}/", commit, "static", "locale"],
+            check=True, capture_output=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        sys.exit(f"[X] 本地镜像导出失败：{exc}")
+
+
 def main() -> None:
     commit = locked_commit()
     force = "--force" in sys.argv
@@ -44,15 +59,23 @@ def main() -> None:
                 print(f"[*] boxes 资源已是最新（{commit[:8]}），跳过下载")
                 return
 
-    url = f"https://codeload.github.com/florianfesti/boxes/tar.gz/{commit}"
-    print(f"[*] 下载 boxes 上游资源 {commit[:8]} ...")
-    print(f"    {url}")
-    try:
-        with urllib.request.urlopen(url, timeout=120) as resp:
-            data = resp.read()
-    except Exception as exc:
-        sys.exit(f"[X] 下载失败：{exc}\n    （需要能访问 GitHub；下载一次后可离线使用）")
-    print(f"[*] 已下载 {len(data) / 1e6:.1f} MB，解压 static/ 和 locale/ ...")
+    data = None
+    use_mirror = os.environ.get("SEEDBOXES_USE_MIRROR") == "1" and os.path.isdir(MIRROR)
+    if not use_mirror:
+        url = f"https://codeload.github.com/florianfesti/boxes/tar.gz/{commit}"
+        print(f"[*] 下载 boxes 上游资源 {commit[:8]} ...")
+        print(f"    {url}")
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                data = resp.read()
+            print(f"[*] 已下载 {len(data) / 1e6:.1f} MB")
+        except Exception as exc:
+            if not os.path.isdir(MIRROR):
+                sys.exit(f"[X] 下载失败：{exc}\n    （需要能访问 GitHub，或准备本地镜像 third_party/boxes.git）")
+            print(f"[!] 下载失败（{exc}），改用本地镜像")
+    if data is None:
+        data = from_mirror(commit)
+    print("[*] 解压 static/ 和 locale/ ...")
 
     tmp = DEST + ".tmp"
     shutil.rmtree(tmp, ignore_errors=True)
