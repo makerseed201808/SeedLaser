@@ -906,3 +906,7 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-host button.confirm { background: #fee2e2 !important; border-color: #f87171 !important; color: #b91c1c !important; }
 .parts-panel.free { width: 340px; }
 .sk-row label { white-space: nowrap; }
+.sk-sub-h { margin: 8px 0 4px !important; font-size: 12px !important; }
+.sk-peers { display: flex; flex-direction: column; gap: 3px; }
+.sk-peer { text-align: left; font-size: 11.5px !important; padding: 3px 7px !important; }
+.sk-peer.on { background: #fff7ed !important; border-color: #f97316 !important; color: #9a3412 !important; }

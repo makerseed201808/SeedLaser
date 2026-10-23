@@ -596,6 +596,20 @@ function baseSig(p) {
 
 function sketchOf(id) { return W.project.sketches && W.project.sketches[id]; }
 
+// 其他板上的卡榫（草图里记录的），给编辑器做「配对」
+function peerJoints(id) {
+  const out = [];
+  Object.entries(W.project.sketches || {}).forEach(([pid, sk]) => {
+    if (pid === id || !sk) return;
+    const name = nameOf(pid);
+    (sk.items || []).forEach((it) => (it.joints || []).forEach((j) => {
+      const L = j.L || Math.hypot(j.b[0] - j.a[0], j.b[1] - j.a[1]);
+      out.push({ ...j, L, part: name, pid });
+    }));
+  });
+  return out;
+}
+
 async function openEditor(id) {
   if (!W.model) return;
   const p = W.model.parts.find((q) => q.id === id);
@@ -618,7 +632,7 @@ async function openEditor(id) {
   await sketchEd.open({
     part: { name: p.name, sub: isFree() ? `约 ${fmt(p.w)} × ${fmt(p.h)} mm · 自由设计的板，外轮廓可以随意改` : sub, outline: partOutline(p),
             base: isFree() ? undefined : baseSig(p), thickness: W.model.thickness, free: isFree() },
-    sketch: sketchOf(id), legacy, fonts: W.fonts,
+    sketch: sketchOf(id), legacy, fonts: W.fonts, peers: peerJoints(id),
     onChange: (sk) => saveSketch(id, sk),
     onClose: (sk) => { saveSketch(id, sk); ED.part = null; attachView($('#view3d-canvas')); renderPartsPanel(); },
   });
@@ -1412,6 +1426,8 @@ document.addEventListener('keydown', (ev) => {
 
 const SNAP_DIST = 10;     // mm：中心偏差在这以内
 const SNAP_ANGLE = 20;    // 度：方向偏差在这以内
+const SNAP_DIST_FREE = 25;   // 自由设计：手摆得比较粗，范围放宽
+const SNAP_ANGLE_FREE = 35;
 
 const SF = {
   snap: true, neighbors: null, prevPoses: {},
@@ -1594,7 +1610,102 @@ function poseError(M, T, c) {
   return { d, a: THREE.MathUtils.radToDeg(Math.acos(cos)) };
 }
 
+// ---- 自由设计的磁吸：按草图里记录的卡榫配对
+//   指接 A ↔ 指接 B：两板垂直、成直角拼接（一块板的边线落在另一块板的内表面）
+//   指接 A ↔ 凹槽：两板在同一平面，像拼图一样连上
+//   指接 A ↔ 插槽：A 边插进另一块板板面上的一排孔（T 型）
+// 在板件局部坐标（x、y = 草图坐标，z = 板厚方向）里算出目标，再乘以另一块板当前的摆放。
+
+function jointsOf(pid) {
+  const sk = sketchOf(pid);
+  const out = [];
+  if (sk) (sk.items || []).forEach((it) => (it.joints || []).forEach((j) => out.push(j)));
+  return out;
+}
+
+function jointFrame(j) {
+  const a = new THREE.Vector3(j.a[0], j.a[1], 0);
+  const b = new THREE.Vector3(j.b[0], j.b[1], 0);
+  const c = new THREE.Vector3(j.c[0], j.c[1], 0);
+  const u = b.clone().sub(a);
+  const L = u.length();
+  u.normalize();
+  const n = c.clone().sub(a);
+  n.sub(u.clone().multiplyScalar(n.dot(u))).normalize();
+  return { a, b, u, n, L };
+}
+
+function basis(x, y, z, o) {
+  return new THREE.Matrix4().makeBasis(x, y, z).setPosition(o);
+}
+
+// Q 的卡榫 jq 配到 P 的卡榫 jp：返回 P 局部坐标里的若干候选（Q 局部 → P 局部）
+function mateOptions(jq, jp, t) {
+  const Q = jointFrame(jq);
+  const P = jointFrame(jp);
+  if (Math.abs(Q.L - P.L) > 0.6 || jq.k !== jp.k) return [];
+  const ez = new THREE.Vector3(0, 0, 1);
+  const Lq = basis(Q.u, Q.n, ez, Q.a);
+  const det = Math.sign(Lq.determinant());
+  const pair = [jq.type, jp.type].sort().join('+');
+  const out = [];
+  const add = (x, y, z, o) => {
+    const T = basis(x, y, z, o);
+    if (Math.sign(T.determinant()) !== det) return;
+    out.push(T.multiply(Lq.clone().invert()));
+  };
+  const at = (sig) => (sig > 0 ? P.a.clone() : P.b.clone());
+  for (const sig of [1, -1]) {
+    const ux = P.u.clone().multiplyScalar(sig);
+    if (pair === 'a+b') {
+      for (const sd of [1, -1]) {
+        add(ux, ez.clone().multiplyScalar(-sd), P.n.clone(), at(sig).add(ez.clone().multiplyScalar(sd > 0 ? t : 0)));
+      }
+    } else if (pair === 'a+slot') {
+      for (const zs of [1, -1]) {
+        add(ux, P.n.clone().negate(), ez.clone().multiplyScalar(zs), at(sig).add(ez.clone().multiplyScalar(zs < 0 ? t : 0)));
+      }
+    } else if (pair === 'a+mortise' && jq.type === 'a') {
+      const v = new THREE.Vector3(-P.u.y, P.u.x, 0);
+      for (const sd of [1, -1]) {
+        for (const zs of [1, -1]) {
+          add(ux, ez.clone().multiplyScalar(-sd), v.clone().multiplyScalar(zs),
+            at(sig).add(ez.clone().multiplyScalar(sd > 0 ? t : 0)).add(v.clone().multiplyScalar(-zs * t / 2)));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+async function sfTrySnapFree(moved, prev) {
+  if (!SF.snap || !moved.length) return false;
+  const t = W.model.thickness || 3;
+  const movedSet = new Set(moved);
+  const M = (id, poses) => new THREE.Matrix4().fromArray(poses ? poses[id] : poseOf(partById(id)));
+  const others = [...SF.map.values()].map((i) => i.pid).filter((id) => !movedSet.has(id));
+  let best = null;
+  moved.forEach((qid) => {
+    const c = partCenter(partById(qid));
+    jointsOf(qid).forEach((jq) => others.forEach((pid) => jointsOf(pid).forEach((jp) => {
+      mateOptions(jq, jp, t).forEach((F) => {
+        const target = M(pid).multiply(F);
+        const now = poseError(M(qid), target, c);
+        const before = prev[qid] ? poseError(M(qid, prev), target, c) : { d: Infinity, a: 0 };
+        if (now.d < 1e-3 && now.a < 0.05) return;
+        if (now.d > SNAP_DIST_FREE || now.a > SNAP_ANGLE_FREE) return;
+        if (now.d >= before.d - 1e-6 && now.a >= before.a - 1e-6) return;
+        const score = now.d + now.a * 0.5;
+        if (!best || score < best.score) best = { b: qid, a: pid, target, score };
+      });
+    })));
+  });
+  if (!best) return false;
+  return sfApplySnap(best, moved);
+}
+
 async function sfTrySnap(moved, prev) {
+  if (isFree()) return sfTrySnapFree(moved, prev);
   if (!SF.snap || !SF.neighbors || !moved.length) return false;
   const movedSet = new Set(moved);
   const M = (id, poses) => new THREE.Matrix4().fromArray(poses ? poses[id] : poseOf(partById(id)));
@@ -1614,6 +1725,12 @@ async function sfTrySnap(moved, prev) {
     });
   });
   if (!best) return false;
+  return sfApplySnap(best, moved);
+}
+
+async function sfApplySnap(best, moved) {
+  const movedSet = new Set(moved);
+  const M = (id) => new THREE.Matrix4().fromArray(poseOf(partById(id)));
   const delta = best.target.clone().multiply(M(best.b).invert());
   W.project.poses = W.project.poses || {};
   moved.forEach((id) => {
@@ -1783,7 +1900,9 @@ async function openSketchForge() {
       msg.id = 'sf-msg';
       msg.className = 'sf-msg hidden';
       $('#sf-host').append(bar, msg);
-      if (!W.model.assembled) bar.querySelectorAll('[data-sf=assemble],[data-sf=snap]').forEach((b) => { b.disabled = true; b.title = '这个生成器没有装配信息'; });
+      bar.querySelector('[data-sf=assemble]').disabled = !W.model.assembled;
+      bar.querySelector('[data-sf=snap]').disabled = !W.model.assembled && !isFree();
+      if (!W.model.assembled) bar.querySelector('[data-sf=assemble]').title = isFree() ? '自由设计没有预设的装配位置，用磁吸拼' : '这个生成器没有装配信息';
     }
   } catch (err) {
     loading.textContent = String(err.message || err);
@@ -1902,7 +2021,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, openSketchForge, closeSketchForge,
+    SF, sfCommand, sfSync, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);

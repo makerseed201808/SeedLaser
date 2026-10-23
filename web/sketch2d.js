@@ -24,6 +24,7 @@ const TOOLS = [
   { id: 'polygon', key: 'g', icon: '⬡', name: '多边形', tip: '从中心拖出多边形 / 星形，边数在右侧设置（G）' },
   { id: 'text', key: 't', icon: 'T', name: '文字', tip: '单击放置文字，右侧修改内容、字体、字号（T）' },
   { id: 'joint', key: 'j', icon: '⊓', name: '卡榫', tip: '单击板的一条直边，把它做成指接卡榫 / 凹槽（深度 = 板厚）（J）' },
+  { id: 'mortise', key: 'k', icon: '▤', name: '插槽', tip: '在板面上开一排插槽孔，让另一块板的指接 A 边插进来（T 型连接）；拖出插槽中线，或先在右侧选配对边再单击（K）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '拖动测量距离和角度（M）' },
 ];
@@ -210,7 +211,9 @@ export class SketchEditor {
    * part: { name, sub, outline: {outer, holes}（从外面看）, base, thickness }
    * sketch: 已有草图或 null；legacy: [{ polys, mode }]（旧版开孔 / 刻字，迁移成图形）
    */
-  async open({ part, sketch, legacy, onChange, onClose, fonts }) {
+  async open({ part, sketch, legacy, onChange, onClose, fonts, peers }) {
+    this.peers = peers || [];
+    this.opts.jointPeer = null;
     this.ps.activate();
     this.part = part;
     this.onChange = onChange;
@@ -303,7 +306,7 @@ export class SketchEditor {
     if (it.paths.length === 1) item = mk(it.paths[0]);
     else { item = new ps.CompoundPath({ insert: false }); item.addChildren(it.paths.map(mk)); }
     item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked,
-                  text: it.text ? { ...it.text } : null };
+                  text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null };
     this.content.addChild(item);
     this.style(item);
     return item;
@@ -322,6 +325,9 @@ export class SketchEditor {
     if (item.data.role) out.role = item.data.role;
     if (item.data.locked) out.locked = true;
     if (item.data.text) out.text = { ...item.data.text };
+    if (item.data.joints && item.data.joints.length) {
+      out.joints = item.data.joints.map((j) => ({ ...j, a: j.a.map(r3), b: j.b.map(r3), c: j.c.map(r3) }));
+    }
     return out;
   }
 
@@ -351,6 +357,7 @@ export class SketchEditor {
   }
 
   style(item) {
+    this.hookJoints(item);
     const d = item.data;
     const m = MODES[d.mode] || MODES.cut;
     const outline = d.role === 'outline';
@@ -361,6 +368,21 @@ export class SketchEditor {
     item.fillRule = 'evenodd';
     item.dashArray = d.mode === 'score' ? [5, 3] : null;
     item.opacity = d.locked && this.outlineLocked !== false && outline ? 0.85 : 1;
+  }
+
+  // 卡榫信息（a、b = 边的两端，c = a + 朝外法线）跟着图形的移动 / 旋转 / 缩放 / 镜像一起变换
+  hookJoints(item) {
+    if (item._jointHook) return;
+    item._jointHook = true;
+    const orig = item.transform;
+    const ps = this.ps;
+    item.transform = function (m, ...rest) {
+      if (m && this.data && this.data.joints) {
+        const tp = (q) => { const r = m.transform(new ps.Point(q[0], q[1])); return [r.x, r.y]; };
+        this.data.joints = this.data.joints.map((j) => ({ ...j, a: tp(j.a), b: tp(j.b), c: tp(j.c) }));
+      }
+      return orig.call(this, m, ...rest);
+    };
   }
 
   // ================================================================ 刷新 / 撤销
@@ -672,6 +694,12 @@ export class SketchEditor {
     if (t === 'text') return this.placeText(this.snap(pt));
     if (t === 'trim') { this.drag = { kind: 'trim', changed: false }; this.trimAt(pt); return; }
     if (t === 'joint') { this.jointAt(pt); return; }
+    if (t === 'mortise') {
+      const peer = this.opts.jointPeer;
+      if (peer && peer.type === 'a') { this.placeMortise(this.snap(pt), null); return; }
+      this.drag = { kind: 'mortise', from: this.snap(pt) };
+      return;
+    }
     if (t === 'measure') { this.drag = { kind: 'measure', from: this.snap(pt) }; }
   }
 
@@ -705,6 +733,13 @@ export class SketchEditor {
     else if (d.kind === 'penHandle') this.penHandleDrag(d, pt);
     else if (d.kind === 'trim') this.trimAt(pt);
     else if (d.kind === 'measure') this.measureDrag(d, this.snap(pt), ev);
+    else if (d.kind === 'mortise') {
+      let p = this.snap(pt);
+      if (ev.shiftKey) p = this.constrain45(d.from, p);
+      d.to = p;
+      if (this.rubber) this.rubber.remove();
+      this.rubber = this.mortisePreview(d.from, p);
+    }
   }
 
   onUp(e) {
@@ -724,6 +759,7 @@ export class SketchEditor {
     } else if (d.kind === 'shape') this.shapeFinish(d);
     else if (d.kind === 'penHandle') { /* 点已加入 */ }
     else if (d.kind === 'trim') { if (d.changed) this.commit('已修剪'); }
+    else if (d.kind === 'mortise') { if (this.rubber) { this.rubber.remove(); this.rubber = null; } if (d.to) this.placeMortise(d.from, d.to); }
     this.showSnap(null);
   }
 
@@ -732,6 +768,11 @@ export class SketchEditor {
     if (this.tool === 'line' || this.tool === 'pen') this.pathHover(e.point, e.event);
     else if (this.tool === 'trim') this.trimHover(e.point);
     else if (this.tool === 'joint') this.jointHover(e.point);
+    else if (this.tool === 'mortise' && this.opts.jointPeer && this.opts.jointPeer.type === 'a') {
+      if (this.rubber) this.rubber.remove();
+      const [f, t2] = this.mortiseEnds(this.snap(e.point));
+      this.rubber = this.mortisePreview(f, t2);
+    }
     else if (['rect', 'ellipse', 'polygon', 'text', 'measure'].includes(this.tool)) this.snap(e.point);
   }
 
@@ -1153,7 +1194,9 @@ export class SketchEditor {
     if (!pts) return;
     this.rubber = new this.ps.Path({ parent: this.overlay, segments: [e.curve.point1, ...pts, e.curve.point2],
       strokeColor: '#f97316', strokeWidth: 2, strokeScaling: false });
-    this.status(`边长 ${fmt(e.curve.length)} mm · ${pts.length / 4} 个齿 · 单击应用`);
+    const peer = this.opts.jointPeer;
+    const warn = peer && Math.abs(peer.L - e.curve.length) > 0.3 ? `  ⚠ 和配对边（${fmt(peer.L)} mm）不一样长，拼不上` : '';
+    this.status(`边长 ${fmt(e.curve.length)} mm · ${pts.meta.k} 段 · 单击应用${warn}`);
   }
 
   jointPoints({ curve, path }) {
@@ -1179,6 +1222,7 @@ export class SketchEditor {
       const p1 = a.add(dir.multiply((i + 1) * step));
       out.push(p0, p0.add(off), p1.add(off), p1);
     }
+    out.meta = { type, k, depth, L, a: [a.x, a.y], b: [b.x, b.y], c: [a.x + n.x, a.y + n.y] };
     return out;
   }
 
@@ -1194,7 +1238,56 @@ export class SketchEditor {
     const b = e.curve.point2;
     const clean = pts.filter((q, i) => !((i === 0 && q.getDistance(a) < 1e-6) || (i === pts.length - 1 && q.getDistance(b) < 1e-6)));
     e.path.insertSegments(e.curve.segment1.index + 1, clean.map((q) => new this.ps.Segment(q)));
-    this.commit(`已做成卡榫（${pts.length / 4} 个齿）`);
+    e.item.data.joints = [...(e.item.data.joints || []), { id: newId(), ...pts.meta }];
+    this.commit(`已做成卡榫（${pts.meta.k} 段、${pts.length / 4} 个齿，边长 ${fmt(pts.meta.L)} mm）`);
+  }
+
+  // ---------------------------------------------------------------- 插槽（T 型连接）
+
+  mortiseEnds(center) {
+    const L = this.opts.jointPeer.L;
+    const d = this.opts.mortiseVertical ? new this.ps.Point(0, L / 2) : new this.ps.Point(L / 2, 0);
+    return [center.subtract(d), center.add(d)];
+  }
+
+  mortiseRects(from, to) {
+    const L = to.getDistance(from);
+    if (L < 1) return null;
+    const t = Number(this.opts.jointDepth) || this.part.thickness || 3;
+    let k = Math.round(Number(this.opts.jointCount) || 0);
+    if (k <= 0) { k = Math.max(3, Math.floor(L / (t * 3))); if (k % 2 === 0) k -= 1; }
+    const u = to.subtract(from).normalize();
+    const v = new this.ps.Point(-u.y, u.x);
+    const step = L / k;
+    const rects = [];
+    for (let i = 1; i < k; i += 2) {
+      const p0 = from.add(u.multiply(i * step));
+      const p1 = from.add(u.multiply((i + 1) * step));
+      rects.push([p0.add(v.multiply(-t / 2)), p1.add(v.multiply(-t / 2)), p1.add(v.multiply(t / 2)), p0.add(v.multiply(t / 2))]);
+    }
+    return { rects, k, t, L, u, v };
+  }
+
+  mortisePreview(from, to) {
+    const r = this.mortiseRects(from, to);
+    const g = new this.ps.Group({ parent: this.overlay });
+    g.addChild(new this.ps.Path.Line({ from, to, strokeColor: '#f97316', dashArray: [4, 3], strokeWidth: 1, strokeScaling: false }));
+    if (r) {
+      r.rects.forEach((q) => g.addChild(new this.ps.Path({ segments: q, closed: true, strokeColor: '#f97316', strokeWidth: 1.5, strokeScaling: false })));
+      this.status(`插槽长 ${fmt(r.L)} mm · ${r.k} 段 · ${r.rects.length} 个孔 · 孔宽 ${fmt(r.t)} mm`);
+    }
+    return g;
+  }
+
+  placeMortise(from, to) {
+    if (!to) [from, to] = this.mortiseEnds(from);
+    if (this.rubber) { this.rubber.remove(); this.rubber = null; }
+    const r = this.mortiseRects(from, to);
+    if (!r || !r.rects.length) { this.status('插槽太短'); return; }
+    const it = this.addItem({ mode: 'cut', paths: r.rects.map((q) => ({ closed: true, segs: q.map((p) => [p.x, p.y, 0, 0, 0, 0]) })),
+      joints: [{ id: newId(), type: 'mortise', k: r.k, depth: r.t, L: r.L, a: [from.x, from.y], b: [to.x, to.y], c: [from.x + r.v.x, from.y + r.v.y] }] });
+    this.sel = new Set([it]);
+    this.commit(`已开插槽（${r.rects.length} 个孔，长 ${fmt(r.L)} mm）`);
   }
 
   // ---------------------------------------------------------------- 测量
@@ -1516,10 +1609,18 @@ export class SketchEditor {
           <option value="slot" ${this.opts.jointType === 'slot' ? 'selected' : ''}>凹槽：奇数段凹进</option></select></label></div>
         <div class="sk-row"><label>齿数<input data-o="jointCount" type="number" min="0" step="1" value="${this.opts.jointCount}"></label><span class="sk-small">0 = 自动（奇数）</span></div>
         <div class="sk-row"><label>深度<input data-o="jointDepth" type="number" min="0" step="0.1" value="${depth}"> mm</label></div>
-        <p class="sk-small">两块板相交的那条边：一块做「指接 A」、另一块做「指接 B」，齿数相同、边长相同，就能咬合。深度默认等于板厚。</p>`;
+        <p class="sk-small">两块板相交的那条边：一块做「指接 A」、另一块做「指接 B」，段数相同、边长相同，就能咬合。深度默认等于板厚。</p>` + this.peerHtml('joint');
+    } else if (t === 'mortise') {
+      const depth = this.opts.jointDepth || this.part.thickness || 3;
+      html = `<h4>插槽（T 型连接）</h4>
+        <div class="sk-row"><label>段数<input data-o="jointCount" type="number" min="0" step="1" value="${this.opts.jointCount}"></label><span class="sk-small">0 = 自动</span></div>
+        <div class="sk-row"><label>孔宽<input data-o="jointDepth" type="number" min="0" step="0.1" value="${depth}"> mm</label>
+          <label class="sk-check"><input data-o="mortiseVertical" type="checkbox" ${this.opts.mortiseVertical ? 'checked' : ''}>竖向</label></div>
+        <p class="sk-small">另一块板的边做成「指接 A」，段数、长度和这里一样，就能插进这排孔里。孔宽默认等于板厚。</p>` + this.peerHtml('mortise');
     } else if (t === 'trim') html = '<h4>修剪</h4><p class="sk-small">鼠标移到线上会标红将被删掉的一段（到最近的交点为止），单击或拖过即删除。没有交点的整条路径会被整个删掉。</p>';
     box.innerHTML = html;
     box.classList.toggle('hidden', !html);
+    box.querySelectorAll('[data-peer]').forEach((b) => b.addEventListener('click', () => this.pickPeer(Number(b.dataset.peer))));
     box.querySelectorAll('[data-o]').forEach((el) => {
       const handler = async () => {
         const k = el.dataset.o;
@@ -1532,10 +1633,34 @@ export class SketchEditor {
         }
         this.opts[k] = v;
         if (k === 'star') this.renderToolOpts();
+        if (k === 'jointType' || k === 'jointCount') { this.opts.jointPeer = null; this.renderToolOpts(); }
       };
       el.addEventListener('change', handler);
       if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') el.blur(); });
     });
+  }
+
+  // 其他板上已有的卡榫：点一下就设成配对的类型和段数
+  peerHtml(tool) {
+    const list = (this.peers || []).filter((p) => (tool === 'mortise' ? p.type === 'a' : ['a', 'b', 'slot', 'mortise'].includes(p.type)));
+    if (!list.length) return '<p class="sk-small">其他板上还没有卡榫。先在一块板上做好，再回来这里配对。</p>';
+    const cur = this.opts.jointPeer;
+    const names = { a: '指接 A', b: '指接 B', slot: '凹槽', mortise: '插槽' };
+    return '<h4 class="sk-sub-h">和其他板配对</h4><div class="sk-peers">' + list.map((p) => {
+      const i = this.peers.indexOf(p);
+      const on = cur && cur.id === p.id ? ' on' : '';
+      return `<button data-peer="${i}" class="sk-peer${on}" title="点一下设成配对的类型和段数">${escAttr(p.part)} · ${names[p.type] || p.type} · ${fmt(p.L)} mm · ${p.k} 段</button>`;
+    }).join('') + '</div>';
+  }
+
+  pickPeer(i) {
+    const p = (this.peers || [])[i];
+    if (!p) return;
+    this.opts.jointPeer = p;
+    this.opts.jointCount = p.k;
+    if (this.tool === 'joint') this.opts.jointType = p.type === 'a' ? 'b' : p.type === 'b' ? 'a' : p.type === 'slot' ? 'a' : 'a';
+    this.renderToolOpts();
+    this.status(this.tool === 'mortise' ? `单击板面放置 ${fmt(p.L)} mm 长的插槽` : `去点一条 ${fmt(p.L)} mm 长的直边`);
   }
 
   renderBoardInfo() {
