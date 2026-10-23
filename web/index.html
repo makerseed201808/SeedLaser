@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- 'unsafe-eval'：pywebview 用 new Function 生成 JS API 桩函数，macOS WKWebView 严格执行 CSP，
+       不加会导致 window.pywebview.api 无法创建（卡在"加载中"）。仍禁止内联脚本。 -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';">
+        content="default-src 'self' data:; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';">
   <title>Boxes.py 客户端</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
