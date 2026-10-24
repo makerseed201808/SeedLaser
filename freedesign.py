@@ -178,6 +178,24 @@ class FreeDesign(boxes.Boxes):
         items = part_sketches(self.design)
         sw, sh = float(self.sheet_w or 0), float(self.sheet_h or 0)
         gap = max(0.0, float(self.part_gap or 0)) + 2 * burn
+        if (sw <= 0 or sh <= 0) and placed_on_sheet(items):
+            # 二维画板：所见即所切，按画板上的位置导出
+            sheet = ((self.design or {}).get("free") or {}).get("sheet") or {}
+            for p, sk in items:
+                with self.saved_context():
+                    self.moveTo(float(p["sx"]) + self.spacing, float(p["sy"]) + self.spacing)
+                    sketch2d.draw(self, sk, burn)
+            if sheet.get("w") and sheet.get("h"):
+                with self.saved_context():
+                    self.set_source_color(Color.ANNOTATIONS)
+                    self.ctx.rectangle(self.spacing, self.spacing, float(sheet["w"]), float(sheet["h"]))
+                    self.ctx.stroke()
+                    self.set_source_color(Color.BLACK)
+                self.notes.append(f"按二维画板上的位置导出（材料 {float(sheet['w']):g}×{float(sheet['h']):g} mm）")
+            loose = ((self.design or {}).get("free") or {}).get("loose") or []
+            if loose:
+                self.notes.append(f"有 {len(loose)} 个图形不在任何板件里，没有导出")
+            return
         if sw <= 0 or sh <= 0:
             for _p, sk, dx, dy, _b in layout(items, gap=max(gap, 1.0)):
                 with self.saved_context():
@@ -241,10 +259,19 @@ class FreeDesign(boxes.Boxes):
             self.notes.append(f"放不下（比材料还大）：{names}")
 
 
+def placed_on_sheet(items) -> bool:
+    return bool(items) and all(p.get("sx") is not None and p.get("sy") is not None for p, _ in items)
+
+
 def model_parts(design: dict | None) -> list[dict]:
     """3D 用的零件列表（与 model3d.Recorder.extract + assemble 的输出字段一致），平铺在台面上."""
     out = []
-    for p, sk, dx, dy, b in layout(part_sketches(design, include_disabled=True), gap=12.0):
+    items = part_sketches(design, include_disabled=True)
+    if placed_on_sheet(items):      # 二维画板上画的：3D 平铺位置和画板一致
+        placed = [(p, sk, float(p["sx"]), float(p["sy"]), _bounds(sk)) for p, sk in items]
+    else:
+        placed = layout(items, gap=12.0)
+    for p, sk, dx, dy, b in placed:
         g = sketch2d.geometry_3d(sk)
         if g is None:
             continue

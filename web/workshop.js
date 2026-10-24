@@ -532,12 +532,13 @@ async function loadModel() {
     setNote('参数已改变，3D 编辑器里摆放过的板件位置可能需要重新调整（可点板件清单下方的「全部复位」）。', 'info');
     W.paramsDirty = false;
   } else if (!m.parts.length) setNote('这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
-  else if (m.free) setNote('自由设计：板件先平放在台面上。点「🛠 3D 编辑器」把它们拼起来，回来后自动检查有没有干涉。', 'info');
+  else if (m.free) setNote('自由设计：板件按二维画板上的位置平放。拖动板件靠近会自动吸附，或点「🧩 按卡榫自动拼装」；拼好后自动检查干涉。', 'info');
   else if (m.auto) {
     setNote(`自动装配（试验）：已拼上 ${m.placed} 块板${m.floating ? `，另有 ${m.floating} 块（隔板、盖子等）放在旁边` : ''}。` +
             '形状仅供参考，以图纸为准。', 'info');
   } else setNote(m.assembled ? '' : '这个生成器暂不支持拼装预览，下面是所有板件平铺的样子（仍可开孔、刻字、禁用）。',
                m.assembled ? '' : 'info');
+  if (W.wantSheet && isFree()) { W.wantSheet = false; openSheet(); }
 }
 
 function rebuildPart(id) {
@@ -667,6 +668,114 @@ function saveSketch(id, sk) {
   checkPose();                           // 实时检查：改过的板还能不能拼上
 }
 
+// ------------------------------------------------------------------ 自由设计：二维画板（所有板件画在一张材料上）
+
+function translateItem(it, dx, dy) {
+  const t = ([x, y]) => [Math.round((x + dx) * 1e3) / 1e3, Math.round((y + dy) * 1e3) / 1e3];
+  const out = { ...it, paths: it.paths.map((p) => ({ ...p, segs: p.segs.map((g) => [...t(g), g[2], g[3], g[4], g[5]]) })) };
+  if (it.joints) out.joints = it.joints.map((j) => ({ ...j, a: t(j.a), b: t(j.b), c: t(j.c) }));
+  if (it.bridges) out.bridges = it.bridges.map(t);
+  if (it.text) out.text = { ...it.text, x: it.text.x + dx, y: it.text.y + dy, path: it.text.path ? it.text.path.map(t) : it.text.path };
+  return out;
+}
+
+function freeSheet() {
+  const f = W.project.free || (W.project.free = { parts: [] });
+  if (!f.sheet) f.sheet = { w: 400, h: 300 };
+  return f.sheet;
+}
+
+// 把各板件的草图按它在画板上的位置拼成一张大草图
+function composeSheet() {
+  const sheet = freeSheet();
+  const items = [];
+  let cx = 10, cy = sheet.h - 10, rowH = 0;
+  freeParts().forEach((p) => {
+    const sk = (W.project.sketches || {})[p.id] || rectSketch(p.w, p.h);
+    if (p.sx == null) {                       // 旧项目 / 新建的板：自动找个空位
+      if (cx + p.w > sheet.w - 10 && cx > 10) { cx = 10; cy -= rowH + 10; rowH = 0; }
+      p.sx = cx; p.sy = cy - p.h; cx += p.w + 10; rowH = Math.max(rowH, p.h);
+    }
+    const outlineIdx = Math.max(0, sk.items.findIndex((it) => it.role === 'outline'));
+    sk.items.forEach((it, i) => items.push({ ...translateItem(it, p.sx, p.sy), pid: i === outlineIdx ? p.id : undefined, role: undefined }));
+  });
+  (W.project.free.loose || []).forEach((it) => items.push(it));
+  return { items, bridge_w: W.project.free.bridge_w, guides: W.project.free.guides };
+}
+
+// 画板 → 各板件：识别结果拆回 project.free.parts / sketches（板件坐标从 0 开始）
+function applySheet(res) {
+  if (!res || !res.sheet) return;
+  const f = W.project.free;
+  const old = new Map(freeParts().map((p) => [p.id, p]));
+  const parts = [];
+  W.project.sketches = W.project.sketches || {};
+  res.parts.forEach((rp, i) => {
+    const [x0, y0, x1, y1] = rp.bounds;
+    const prev = old.get(rp.pid);
+    const items = rp.items.map((it) => {
+      const { pid, ...rest } = translateItem(it, -x0, -y0);
+      if (it.id === rp.outline) rest.role = 'outline'; else delete rest.role;
+      return rest;
+    });
+    W.project.sketches[rp.pid] = { items, ...(res.bridge_w != null ? { bridge_w: res.bridge_w } : {}) };
+    parts.push({ ...(prev || {}), id: rp.pid, name: prev ? prev.name : nextPartName([...old.values(), ...parts]), w: Math.round((x1 - x0) * 100) / 100,
+                 h: Math.round((y1 - y0) * 100) / 100, sx: x0, sy: y0 });
+    old.delete(rp.pid);
+  });
+  old.forEach((_p, id) => {                          // 画板上删掉的板
+    delete W.project.sketches[id];
+    if (W.project.poses) delete W.project.poses[id];
+  });
+  f.parts = parts;
+  if (res.size) f.sheet = res.size;
+  f.loose = res.loose;
+  f.bridge_w = res.bridge_w;
+  f.guides = res.guides;
+  projectChanged();
+}
+
+function nextPartName(list) {
+  const nums = list.map((p) => Number((/^板件 (\d+)$/.exec(p.name || '') || [])[1]) || 0);
+  return `板件 ${Math.max(0, ...nums) + 1}`;
+}
+
+let sheetTimer = null;
+async function openSheet() {
+  for (let i = 0; i < 50 && !isFree(); i++) await new Promise((r) => setTimeout(r, 100));
+  if (!isFree()) return;
+  if (SF.open) await closeSketchForge();
+  if (sketchEd && sketchEd.opened) sketchEd.close();
+  if (!sketchEd) {
+    sketchEd = new SketchEditor($('#sk-host'), { api: api(), toast });
+    sketchEd.onPreviewResize = () => { if (view) view.resize(); };
+  }
+  if (!W.fonts) W.fonts = await api().list_fonts();
+  const sheet = freeSheet();
+  const names = Object.fromEntries(freeParts().map((p) => [p.id, p.name]));
+  ED.part = null;
+  await sketchEd.open({
+    part: { name: '自由设计 · 二维画板', sub: '', free: true, sheet, names, thickness: W.model ? W.model.thickness : (Number((window.SeedApp.collectParams() || {}).thickness) || 3),
+            outline: { outer: [[0, 0], [sheet.w, 0], [sheet.w, sheet.h], [0, sheet.h]], holes: [] } },
+    sketch: composeSheet(), fonts: W.fonts, peers: [],
+    onChange: (res) => {
+      applySheet(res);
+      if (sketchEd.part) sketchEd.part.names = Object.fromEntries(freeParts().map((p) => [p.id, p.name]));
+      clearTimeout(sheetTimer);
+      sheetTimer = setTimeout(() => loadModel(), 900);    // 右下角 3D 实时预览
+    },
+    onClose: async (res) => {
+      clearTimeout(sheetTimer);
+      applySheet(res);
+      attachView($('#view3d-canvas'));
+      await loadModel();
+      renderPartsPanel();
+      if (W.model && W.model.parts.length) toast(`已生成 ${W.model.parts.length} 块板的 3D 模型：拖动板件靠近会自动吸附，或点「按卡榫自动拼装」`, 'ok');
+    },
+  });
+  attachView(sketchEd.previewHost);
+}
+
 function closeEditor() {
   if (sketchEd && sketchEd.opened) sketchEd.close();
   ED.part = null;
@@ -690,10 +799,12 @@ function freePartForm() {
   box.innerHTML = `<b>＋ 新建板件</b>
     <label>宽<input type="number" data-k="w" value="${W.freeW || 100}" min="1" step="1"></label>
     <label>高<input type="number" data-k="h" value="${W.freeH || 60}" min="1" step="1"></label>
-    <button class="primary" data-k="add">添加并编辑</button>
+    <button class="primary" data-k="sheet" title="所有板件画在一张材料上，所见即所切">📐 打开二维画板</button>
+    <button data-k="add">添加并编辑</button>
     <button data-k="auto" title="按卡榫配对把板自动拼起来">🧩 按卡榫自动拼装</button>
     <button data-k="flat" title="所有板平放在台面上">平铺</button>
     <button data-k="names" title="粘贴一列名字，自动生成一排名牌">📛 批量名牌</button>`;
+  box.querySelector('[data-k=sheet]').addEventListener('click', () => openSheet());
   box.querySelector('[data-k=names]').addEventListener('click', () => nameplateDialog());
   box.querySelector('[data-k=auto]').addEventListener('click', () => freeAutoAssemble());
   box.querySelector('[data-k=flat]').addEventListener('click', () => {
@@ -1906,6 +2017,7 @@ async function freeAutoAssemble() {
   for (let i = 0; i < ids.length; i++) {
     for (let k = i + 1; k < ids.length; k++) {
       jointsOf(ids[i]).forEach((ja) => jointsOf(ids[k]).forEach((jb) => {
+        if (ja.pair && jb.pair && ja.pair !== jb.pair) return;     // 画板里配过对的边只和自己的另一半拼
         if (mateOptions(ja, jb, t).length || mateOptions(jb, ja, t).length) links.push({ a: ids[i], b: ids[k], ja, jb });
       }));
     }
@@ -2148,6 +2260,8 @@ function hasContent() {
 }
 
 window.SeedWorkshop = {
+  wantSheet() { W.wantSheet = true; },
+  openSheet() { return openSheet(); },
   reset(name) {
     W.name = name;
     W.model = null;
@@ -2221,7 +2335,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, freeAutoAssemble, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
+    SF, sfCommand, sfSync, freeAutoAssemble, openSheet, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);

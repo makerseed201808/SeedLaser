@@ -665,7 +665,7 @@ async function doOpenProject() {
 function bindEvents() {
   $('#btn-preview').addEventListener('click', doPreview);
   $('#btn-laser').addEventListener('click', openLaserDialog);
-  $('#free-entry').addEventListener('click', () => selectGenerator('FreeDesign'));
+  $('#free-entry').addEventListener('click', () => { if (window.SeedWorkshop) window.SeedWorkshop.wantSheet(); selectGenerator('FreeDesign'); });
   $('#btn-save').addEventListener('click', doSave);
   $('#btn-save-project').addEventListener('click', doSaveProject);
   $('#btn-open-project').addEventListener('click', doOpenProject);

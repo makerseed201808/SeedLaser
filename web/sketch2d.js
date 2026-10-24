@@ -290,6 +290,9 @@ export class SketchEditor {
     this.undoStack = [];
     this.redoStack = [];
     this.outlineLocked = !part.free;
+    this.sheetMode = !!part.sheet;
+    this.$('[data-act=reset]').classList.toggle('hidden', this.sheetMode);
+    this.$('.sk-back').textContent = this.sheetMode ? '生成 3D · 去装配 →' : '← 完成 · 返回';
     this.content.removeChildren();
     this.sel.clear();
     const banner = this.$('.sk-banner');
@@ -305,7 +308,7 @@ export class SketchEditor {
         banner.querySelector('[data-b=keep]').onclick = () => banner.classList.add('hidden');
         banner.querySelector('[data-b=reset]').onclick = () => { banner.classList.add('hidden'); this.resetToOriginal(); };
       }
-    } else {
+    } else if (!this.sheetMode) {
       this.seedFromPart(legacy);
     }
     this.current = JSON.stringify(this.serialize().items);
@@ -370,7 +373,7 @@ export class SketchEditor {
     else { item = new ps.CompoundPath({ insert: false }); item.addChildren(it.paths.map(mk)); }
     item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked,
                   text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null,
-                  group: it.group || null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
+                  group: it.group || null, pid: it.pid || null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
     this.content.addChild(item);
     this.style(item);
     return item;
@@ -390,6 +393,7 @@ export class SketchEditor {
     if (item.data.locked) out.locked = true;
     if (item.data.text) out.text = { ...item.data.text };
     if (item.data.group) out.group = item.data.group;
+    if (item.data.pid) out.pid = item.data.pid;
     if (item.data.bridges && item.data.bridges.length) out.bridges = item.data.bridges.map((b) => b.map(r3));
     if (item.data.joints && item.data.joints.length) {
       out.joints = item.data.joints.map((j) => ({ ...j, a: j.a.map(r3), b: j.b.map(r3), c: j.c.map(r3) }));
@@ -406,6 +410,7 @@ export class SketchEditor {
   }
 
   serializeForSave() {
+    if (this.sheetMode) return this.serializeSheet();
     const s = this.serialize();
     return { ...s, modified: this.isModified(s) };
   }
@@ -670,6 +675,7 @@ export class SketchEditor {
     v.viewSize = new this.ps.Size(this.canvas.clientWidth || 800, this.canvas.clientHeight || 600);
     let b = null;
     this.content.children.forEach((c) => { b = b ? b.unite(c.bounds) : c.bounds.clone(); });
+    if (this.sheetMode) { const m = new this.ps.Rectangle(0, 0, this.part.sheet.w, this.part.sheet.h); b = b ? b.unite(m) : m; }
     if (!b) b = new this.ps.Rectangle(0, 0, 100, 100);
     const pad = 40;
     const z = Math.min((v.viewSize.width - 2 * pad) / Math.max(1, b.width), (v.viewSize.height - 2 * pad) / Math.max(1, b.height));
@@ -871,7 +877,88 @@ export class SketchEditor {
 
   // ================================================================ 尺寸标注（选中图形的直线段长度，点一下可改）
 
+  // ---------------------------------------------------------------- 画板模式：识别板件
+  // 最外层的闭合切割轮廓 = 一块板；轮廓里面的孔、雕刻、文字归这块板
+  recognizeParts() {
+    const loops = [];
+    this.content.children.forEach((it) => {
+      if (!it.data || it.data.mode !== 'cut') return;
+      this.itemPaths(it).forEach((p) => {
+        if (p.closed && p.segments.length > 2 && Math.abs(p.area) > 1) loops.push({ item: it, path: p, area: Math.abs(p.area) });
+      });
+    });
+    loops.forEach((L) => {
+      const q = L.path.firstSegment.point;
+      L.depth = loops.filter((O) => O !== L && O.area > L.area && O.path.contains(q)).length;
+    });
+    const outers = loops.filter((L) => L.depth % 2 === 0);
+    const partItems = [...new Set(outers.map((L) => L.item))];
+    const parts = partItems.map((item) => ({ item, members: [item],
+      bounds: outers.filter((L) => L.item === item).reduce((b, L) => (b ? b.unite(L.path.bounds) : L.path.bounds.clone()), null) }));
+    const loose = [];
+    this.content.children.forEach((it) => {
+      if (!it.data || !it.data.mode || partItems.includes(it)) return;
+      const c = it.bounds.center;
+      let best = null;
+      outers.forEach((L) => {
+        if (!L.path.contains(c)) return;
+        if (!best || L.depth > best.depth || (L.depth === best.depth && L.area < best.area)) best = L;
+      });
+      const part = best && parts.find((p) => p.item === best.item);
+      if (part) part.members.push(it); else loose.push(it);
+    });
+    parts.sort((a, b) => (Math.abs(b.bounds.top - a.bounds.top) > 5 ? b.bounds.top - a.bounds.top : a.bounds.left - b.bounds.left));
+    // 板件编号：沿用轮廓上记的 pid；复制出来的（pid 重复）换新的
+    const seen = new Set();
+    parts.forEach((p) => {
+      if (!p.item.data.pid || seen.has(p.item.data.pid)) p.item.data.pid = 'p' + newId();
+      seen.add(p.item.data.pid);
+    });
+    return { parts, loose };
+  }
+
+  serializeSheet() {
+    const { parts, loose } = this.recognizeParts();
+    const s = this.serialize();
+    const byId = new Map(s.items.map((it) => [it.id, it]));
+    return {
+      sheet: true, size: { ...this.part.sheet }, bridge_w: s.bridge_w, guides: s.guides,
+      parts: parts.map((p) => ({
+        pid: p.item.data.pid, outline: p.item.data.id,
+        bounds: [r3(p.bounds.left), r3(p.bounds.top), r3(p.bounds.right), r3(p.bounds.bottom)],
+        items: p.members.map((m) => byId.get(m.data.id)).filter(Boolean).map((it) => ({ ...it, pid: it.id === p.item.data.id ? p.item.data.pid : undefined })),
+      })),
+      loose: loose.map((m) => byId.get(m.data.id)).filter(Boolean),
+    };
+  }
+
+  drawPartLabels() {
+    let box = this.$('.sk-plabels');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'sk-plabels';
+      this.$('.sk-dims').parentNode.appendChild(box);
+    }
+    box.innerHTML = '';
+    const { parts, loose } = this.recognizeParts();
+    const names = this.part.names || {};
+    const v = this.ps.view;
+    parts.forEach((p, i) => {
+      const at = v.projectToView(new this.ps.Point(p.bounds.left, p.bounds.bottom));
+      const lab = document.createElement('span');
+      lab.className = 'sk-plabel';
+      lab.textContent = `${names[p.item.data.pid] || '新板件 ' + (i + 1)} · ${fmt(p.bounds.width)}×${fmt(p.bounds.height)}`;
+      lab.style.left = `${at.x}px`;
+      lab.style.top = `${at.y}px`;
+      box.appendChild(lab);
+    });
+    const sub = `材料 ${fmt(this.part.sheet.w)} × ${fmt(this.part.sheet.h)} mm · 板厚 ${fmt(this.part.thickness || 0)} mm · 识别到 ${parts.length} 块板` +
+      (loose.length ? ` · ⚠ ${loose.length} 个图形不在任何板里（不会导出）` : '');
+    this.$('.sk-sub').textContent = sub;
+  }
+
   drawDims() {
+    if (this.sheetMode) this.drawPartLabels();
     const box = this.$('.sk-dims');
     if (!box) return;
     box.innerHTML = '';
@@ -1045,6 +1132,7 @@ export class SketchEditor {
 
   setTool(id) {
     this.finishDrawing();
+    if (this.opts.jointPeer && this.opts.jointPeer.pair) this.opts.jointPeer = null;
     if (id === 'text' && this.tool !== 'text') this.sel.clear();     // 文字工具：放新文字（不是改选中的）
     if (id !== this.tool) this.editJoint = null;
     this.tool = id;
@@ -1747,8 +1835,26 @@ export class SketchEditor {
     const { pts, n } = this.jointPoints(a, b, (q) => e.path.contains(q), this.opts.jointType, iv, depth);
     if (e.item.data.text) this.convertText(e.item);
     e.path.insertSegments(e.curve.segment1.index + 1, pts.map((q) => new this.ps.Segment(q)));
-    e.item.data.joints = [...(e.item.data.joints || []), { id: newId(), ...this.jointMeta(this.opts.jointType, iv, depth, a, b, n) }];
-    this.commit(`已做成卡榫（${iv.length} 个 A 齿，边长 ${fmt(b.getDistance(a))} mm）`);
+    const meta = { id: newId(), ...this.jointMeta(this.opts.jointType, iv, depth, a, b, n) };
+    let label = `已做成卡榫（${iv.length} 个 A 齿，边长 ${fmt(b.getDistance(a))} mm）`;
+    let next = null;
+    const peer = this.opts.jointPeer;
+    if (this.sheetMode && peer && peer.pair) {          // 画板模式：第二条边 → 和第一条配成一对
+      meta.pair = peer.pair;
+      if (Math.abs(peer.L - meta.L) > 0.3) label += `  ⚠ 和第一条边（${fmt(peer.L)} mm）不一样长，拼不上`;
+      else label = `已配对 ✔ 两条边会在 3D 里拼在一起（${iv.length} 个齿）`;
+      this.opts.jointPeer = null; this.opts.jointType = 'a';
+    } else if (this.sheetMode && this.opts.pairMode !== false && meta.type === 'a') {
+      meta.pair = newId();
+      next = { iv: meta.iv, L: meta.L, pair: meta.pair, part: '刚才那条边' };
+    }
+    e.item.data.joints = [...(e.item.data.joints || []), meta];
+    this.commit(label);
+    if (next) {
+      this.opts.jointPeer = next; this.opts.jointType = 'b';
+      this.renderToolOpts();
+      this.status(`第一条边做好了（${fmt(meta.L)} mm）。现在点另一块板上要和它拼在一起的边，会自动做成配套的 B 齿；Esc 取消配对`);
+    }
   }
 
   // ---- 修改已有的卡榫：载入参数 → 右侧改 → 应用（先恢复成直边再重做）
@@ -2901,6 +3007,23 @@ export class SketchEditor {
 
   renderBoardInfo() {
     const p = this.part;
+    if (this.sheetMode) {
+      const box = this.$('.sk-boardinfo');
+      box.innerHTML = `<h4>二维画板</h4>
+        <p class="sk-small">材料（激光机台面）尺寸：
+          <input type="number" data-sheet="w" value="${fmt(p.sheet.w)}" min="10" step="10" style="width:64px"> ×
+          <input type="number" data-sheet="h" value="${fmt(p.sheet.h)}" min="10" step="10" style="width:64px"> mm</p>
+        <p class="sk-small">每个<b>最外层的闭合切割轮廓</b>就是一块板；画在它里面的孔、雕刻和文字都属于这块板。板厚 <b>${fmt(p.thickness || 0)} mm</b>。</p>
+        <p class="sk-small">两块板要拼在一起：用「卡榫」工具先点 A 板的一条边，再点 B 板的一条边，自动配成一对，3D 里会按它自动拼装。</p>
+        <p class="sk-small">画好后点左上角「生成 3D · 去装配」。导出的图纸和画板上的位置一样。</p>`;
+      box.querySelectorAll('[data-sheet]').forEach((inp) => inp.addEventListener('change', () => {
+        const v = Math.max(10, Number(inp.value) || 0);
+        p.sheet = { ...p.sheet, [inp.dataset.sheet]: v };
+        p.outline = { outer: [[0, 0], [p.sheet.w, 0], [p.sheet.w, p.sheet.h], [0, p.sheet.h]], holes: [] };
+        this.drawReference(); this.refresh(); this.drawDims(); this.emitChange();
+      }));
+      return;
+    }
     this.$('.sk-boardinfo').innerHTML = `<h4>这块板</h4>
       <p class="sk-small">${p.sub || ''}</p>
       <p class="sk-small">板厚 <b>${fmt(p.thickness || 0)} mm</b>。卡榫边改动后，回到 3D 会自动检查能不能拼上（红色 = 穿透）。</p>
@@ -2927,7 +3050,7 @@ export class SketchEditor {
     else if (ev.key === '?' || (ev.shiftKey && ev.key === '/')) this.showKeys();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
-    else if (ev.key === 'Escape') { if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
+    else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
       const s = ev.shiftKey ? 10 : (this.snapStep || 1);
