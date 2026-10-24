@@ -2183,6 +2183,8 @@ async function sfSync() {
       if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
     });
     W.project.disabled = [...disabled];
+    // 编辑器里的场景已和项目一致（删掉的板 = 不使用）。之后在板件清单里重新勾选，钥匙就变了，下次打开会重新导入
+    SF.key = sfSceneKey();
     SF.stats = stats;
     projectChanged();
     const prev = SF.prevPoses || {};

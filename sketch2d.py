@@ -89,8 +89,9 @@ def _valid(poly: Polygon):
 
 
 def cut_solid(sketch: dict):
-    """切割闭合路径按奇偶规则组成的实体（shapely 几何，可能为空）."""
-    geom = None
+    """切割闭合路径组成的实体（shapely 几何，可能为空）。
+    完全落在另一个轮廓里面（边界不相交）的才是孔；互相交叉的轮廓都算实体（并集），和编辑器的显示一致。"""
+    polys = []
     for item in sketch.get("items") or []:
         if item.get("mode", "cut") != "cut":
             continue
@@ -98,11 +99,18 @@ def cut_solid(sketch: dict):
             if not closed:
                 continue
             poly = _valid(Polygon(pts))
-            if poly.is_empty:
-                continue
-            geom = poly if geom is None else geom.symmetric_difference(poly)
-    if geom is None:
+            if not poly.is_empty:
+                polys.append(poly)
+    if not polys:
         return Polygon()
+    depth = [sum(1 for k, o in enumerate(polys) if k != i and o.area > p.area and o.contains(p)) for i, p in enumerate(polys)]
+    geom = Polygon()
+    for d in range(max(depth) + 1):
+        layer = [p for p, dp in zip(polys, depth) if dp == d]
+        if not layer:
+            continue
+        u = unary_union(layer)
+        geom = geom.union(u) if d % 2 == 0 else geom.difference(u)
     return geom.buffer(0)
 
 

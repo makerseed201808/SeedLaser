@@ -563,11 +563,18 @@ export class SketchEditor {
       this.itemPaths(it).forEach((p) => { if (p.closed && p.segments.length > 2) { loops.push(p.clone({ insert: false })); owner.push(it); } });
     });
     if (!loops.length) return;
-    const cp = new this.ps.CompoundPath({ children: loops, insert: false });
-    cp.fillRule = 'evenodd';
-    cp.fillColor = WOOD;
-    cp.strokeColor = null;
-    this.boardLayer.insertChild(0, cp);
+    // 填充规则：完全落在另一个轮廓里面的才是孔；互相交叉的轮廓都算实体（重叠处不会变空）
+    const { depth, parent } = SketchEditor.loopDepths(loops);
+    let at = 0;
+    loops.forEach((L, i) => {
+      if (depth[i] % 2) return;
+      const holes = loops.filter((_, k) => parent[k] === i && depth[k] % 2 === 1);
+      const cp = new this.ps.CompoundPath({ children: [L, ...holes].map((q) => q.clone({ insert: false })), insert: false });
+      cp.fillRule = 'evenodd';
+      cp.fillColor = WOOD;
+      cp.strokeColor = null;
+      this.boardLayer.insertChild(at++, cp);
+    });
     this.drawMarks();
     // 两条切割轮廓交叉：重叠的那一块会被切成单独的小块（不是自动差集），用红色标出来
     if (!this.drag && loops.length <= 60) {
@@ -910,6 +917,24 @@ export class SketchEditor {
 
   // ---------------------------------------------------------------- 画板模式：识别板件
   // 最外层的闭合切割轮廓 = 一块板；轮廓里面的孔、雕刻、文字归这块板
+  // 每个闭合轮廓的嵌套层数：只有「完全在里面、边界不相交」才算被包含。parent = 直接包住它的最小轮廓
+  static loopDepths(loops) {
+    const n = loops.length;
+    const area = loops.map((p) => Math.abs(p.area));
+    const inside = (a, b) => a !== b && area[b] > area[a] && loops[b].bounds.contains(loops[a].bounds)
+      && loops[b].contains(loops[a].firstSegment.point) && !loops[a].getIntersections(loops[b]).length;
+    const depth = new Array(n).fill(0);
+    const parent = new Array(n).fill(-1);
+    for (let a = 0; a < n; a++) {
+      for (let b = 0; b < n; b++) {
+        if (!inside(a, b)) continue;
+        depth[a]++;
+        if (parent[a] < 0 || area[b] < area[parent[a]]) parent[a] = b;
+      }
+    }
+    return { depth, parent };
+  }
+
   recognizeParts() {
     const loops = [];
     this.content.children.forEach((it) => {
@@ -918,10 +943,8 @@ export class SketchEditor {
         if (p.closed && p.segments.length > 2 && Math.abs(p.area) > 1) loops.push({ item: it, path: p, area: Math.abs(p.area) });
       });
     });
-    loops.forEach((L) => {
-      const q = L.path.firstSegment.point;
-      L.depth = loops.filter((O) => O !== L && O.area > L.area && O.path.contains(q)).length;
-    });
+    const dd = SketchEditor.loopDepths(loops.map((L) => L.path)).depth;
+    loops.forEach((L, i) => { L.depth = dd[i]; });
     const outers = loops.filter((L) => L.depth % 2 === 0);
     const partItems = [...new Set(outers.map((L) => L.item))];
     const parts = partItems.map((item) => ({ item, members: [item],
