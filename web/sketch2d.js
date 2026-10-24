@@ -161,11 +161,11 @@ export class SketchEditor {
             <h4>形状运算</h4>
             <div class="sk-btns">
               <button data-act="unite" title="选中的闭合图形合成一个；只选 1 个时，和与它重叠的图形合成一个">并集</button>
-              <button data-act="subtract" title="只选 1 个：从它身上减掉和其他图形重叠的部分（只改它）；选多个：最下面的减去其他">差集</button>
+              <button data-act="subtract" title="只选 1 个：把它当刀，从重叠的图形上切掉这一块，它自己删除；选多个：最下面的减去其他">差集</button>
               <button data-act="intersect" title="只选 1 个：它只保留和其他图形重叠的部分；选多个：只保留共同重叠的部分">交集</button>
               <button data-act="exclude" title="保留不重叠的部分">异或</button>
             </div>
-            <p class="sk-small">只选 1 个图形时，和它重叠的图形一起运算，<b>只改选中的那个</b>。</p>
+            <p class="sk-small">只选 1 个图形时：<b>差集</b> = 把它当刀，切掉重叠的图形上的这一块，刀本身删除；<b>交集</b> = 它只保留重叠部分；<b>并集</b> = 和重叠的图形合成一个。</p>
             <div class="sk-row"><label>偏移<input data-opt="offset" type="number" step="0.5" value="2"> mm</label>
               <select data-opt="offsetJoin"><option value="round">圆角</option><option value="miter">尖角</option></select>
               <button data-act="offset" title="生成外扩（正数）/ 内缩（负数）的新轮廓">偏移</button></div>
@@ -1672,8 +1672,8 @@ export class SketchEditor {
     if (this.overlapBox) { this.overlapBox.remove(); this.overlapBox = null; }
   }
 
-  // 只选了 1 个图形：和与它交叉的图形做运算，只改选中的那个（并集除外）
-  //   差集：选中的 − 和它重叠的部分；交集：选中的只留重叠部分；并集：和重叠的图形合成一个
+  // 只选了 1 个图形：和与它交叉的图形做运算
+  //   差集：选中的当刀，从重叠的图形上切掉，刀删除；交集：选中的只留重叠部分；并集：和重叠的图形合成一个
   booleanWithOverlaps(op) {
     const it = [...this.sel][0];
     const closed = (c) => this.itemPaths(c).every((p) => p.closed);
@@ -1697,15 +1697,31 @@ export class SketchEditor {
       this.commit(`已合并（并集）：${all.length} 个图形合成一个`);
       return;
     }
-    others.forEach((o) => { res = op === 'subtract' ? res.subtract(o, opts) : res.intersect(o, opts); });
+    if (op === 'subtract') {
+      // 选中的图形当「刀」：从每个和它重叠的图形上切掉重叠部分，刀本身删除
+      const fresh = [];
+      others.forEach((o) => {
+        const r = o.subtract(it, opts);
+        if (!r || r.isEmpty()) { o.remove(); return; }
+        r.data = { ...o.data, id: newId(), text: null, joints: null, bridges: null, origin: o.data.origin ? [...o.data.origin] : null };
+        r.insertAbove(o);
+        o.remove();
+        this.style(r);
+        fresh.push(r);
+      });
+      it.remove();
+      this.sel = new Set(fresh);
+      this.commit(`已差集：用选中的图形把 ${others.length} 个重叠的图形切掉一块，选中的图形本身已删除`);
+      return;
+    }
+    others.forEach((o) => { res = res.intersect(o, opts); });
     if (!res || res.isEmpty()) { this.toast('结果为空，没有改动', 'error'); return; }
     res.data = { ...it.data, id: newId(), text: null, joints: null, bridges: null, origin: it.data.origin ? [...it.data.origin] : null };
     res.insertAbove(it);
     it.remove();
     this.style(res);
     this.sel = new Set([res]);
-    this.commit(op === 'subtract' ? '已差集：从选中的图形上减掉和其他图形重叠的部分（其他图形不变）'
-                                  : '已交集：选中的图形只保留和其他图形重叠的部分（其他图形不变）');
+    this.commit('已交集：选中的图形只保留和其他图形重叠的部分（其他图形不变）');
   }
 
   // ---------------------------------------------------------------- 文字
