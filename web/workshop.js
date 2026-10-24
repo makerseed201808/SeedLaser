@@ -1949,8 +1949,8 @@ async function nameplateDialog() {
       <label>字高<input data-n="size" type="number" min="3" step="0.5" value="${o.size}"> mm</label>
       <label>字体<select data-n="font">${W.fonts.map((f) => `<option value="${f.id}" ${f.id === o.font ? 'selected' : ''}>${f.name}</option>`).join('')}</select></label>
       <label>文字<select data-n="mode"><option value="engrave" ${o.mode === 'engrave' ? 'selected' : ''}>雕刻</option>
-        <option value="cut" ${o.mode === 'cut' ? 'selected' : ''}>镂空切割（自动焊接笔画）</option><option value="score" ${o.mode === 'score' ? 'selected' : ''}>划线</option></select></label>
-      <label><input data-n="border" type="checkbox" ${o.border ? 'checked' : ''}>内圈装饰边框（划线）</label>
+        <option value="cut" ${o.mode === 'cut' ? 'selected' : ''}>镂空切割（自动焊接笔画）</option><option value="score" ${o.mode === 'score' ? 'selected' : ''}>描线</option></select></label>
+      <label><input data-n="border" type="checkbox" ${o.border ? 'checked' : ''}>内圈装饰边框（描线）</label>
     </div>
     <div class="app-modal-actions"><button data-m="close">取消</button><button data-m="ok" class="primary">生成名牌</button></div></div>`;
   m.classList.remove('hidden');

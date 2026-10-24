@@ -9,7 +9,7 @@
 segs 是 paper.js 的锚点 + 相对控制柄（三次贝塞尔）；控制柄全为 0 时就是直线段。
 
 切割（cut）里的闭合路径按奇偶规则组成板的实体：最外圈是外轮廓，里面一圈是孔，孔里再一圈是岛……
-导出时整体按激光补偿 burn 外扩（外轮廓向外、孔向内）。雕刻 / 划线原样输出。
+导出时整体按激光补偿 burn 外扩（外轮廓向外、孔向内）。雕刻 / 描线原样输出。
 """
 from __future__ import annotations
 
@@ -194,7 +194,7 @@ def cut_polylines(sketch: dict, burn: float = 0.0) -> list[tuple[list, bool, boo
 
 def draw(box: Any, sketch: dict, burn: float = 0.0, cut: bool = True, marks: bool = True) -> None:
     """在当前零件、当前坐标系（从外面看）里画出草图。调用前设好 surface._p 和 ctx._m.
-    cut / marks：是否画切割部分 / 雕刻和划线部分（共边切割时切割部分另外画）。"""
+    cut / marks：是否画切割部分 / 雕刻和描线部分（共边切割时切割部分另外画）。"""
     from boxes.Color import Color
 
     ctx = box.ctx

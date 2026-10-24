@@ -517,7 +517,7 @@ function formatBytes(n) {
 const LASER_LAYERS = [
   { key: 'cut', name: '切割', color: '黑色 / 蓝色', swatch: '#1f6feb', hint: '外轮廓（黑）和内孔（蓝）' },
   { key: 'engrave', name: '雕刻', color: '绿色', swatch: '#16a34a', hint: '填充雕刻' },
-  { key: 'score', name: '划线', color: '品红', swatch: '#c026d3', hint: '沿线浅刻' },
+  { key: 'score', name: '描线', color: '品红', swatch: '#c026d3', hint: '沿线浅刻' },
 ];
 const LASER_PRESETS = {
   '椴木板 3 mm': { cut: [10, 70, 1], engrave: [200, 22, 1], score: [40, 18, 1] },

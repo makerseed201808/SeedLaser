@@ -8,7 +8,7 @@
 const MODES = {
   cut: { name: '切割', color: '#1f6feb', hint: '激光切穿' },
   engrave: { name: '雕刻', color: '#16a34a', hint: '填充雕刻（闭合图形）' },
-  score: { name: '划线', color: '#c026d3', hint: '沿线浅刻' },
+  score: { name: '描线', color: '#c026d3', hint: '沿线浅刻' },
 };
 const OUTLINE_COLOR = '#1c2733';
 const WOOD = '#ead3ac';
@@ -486,7 +486,7 @@ export class SketchEditor {
     }
     this.current = now;
     this.refresh();
-    if (label) this.status(label);
+    if (label) this.status(label + (this.overlapWarn ? '　⚠ 有切割线交叉：红色那块会被切成单独掉下来的小块；要挖掉或合并，请选中两个图形用「差集 / 并集」' : ''));
     this.emitChange();
   }
 
@@ -556,6 +556,23 @@ export class SketchEditor {
     cp.strokeColor = null;
     this.boardLayer.insertChild(0, cp);
     this.drawMarks();
+    // 两条切割轮廓交叉：重叠的那一块会被切成单独的小块（不是自动差集），用红色标出来
+    if (!this.drag && loops.length <= 60) {
+      let warn = 0;
+      for (let i = 0; i < loops.length; i++) {
+        for (let k = i + 1; k < loops.length; k++) {
+          const A = loops[i]; const B = loops[k];
+          if (!A.bounds.intersects(B.bounds) || !A.getIntersections(B).length) continue;
+          const lens = A.intersect(B, { insert: false });
+          if (!lens || lens.isEmpty()) continue;
+          lens.fillColor = new this.ps.Color(0.94, 0.27, 0.27, 0.28);
+          lens.strokeColor = '#ef4444'; lens.dashArray = [2, 2]; lens.strokeScaling = false; lens.strokeWidth = 1;
+          this.boardLayer.addChild(lens);
+          warn++;
+        }
+      }
+      this.overlapWarn = warn;
+    }
   }
 
   // 连接点标记（橙色小横杠，跨在切割线上）
@@ -1131,6 +1148,7 @@ export class SketchEditor {
   // ================================================================ 工具
 
   setTool(id) {
+    this.closeOverlap();
     this.finishDrawing();
     if (this.opts.jointPeer && this.opts.jointPeer.pair) this.opts.jointPeer = null;
     if (id === 'text' && this.tool !== 'text') this.sel.clear();     // 文字工具：放新文字（不是改选中的）
@@ -1155,6 +1173,7 @@ export class SketchEditor {
 
   onDown(e) {
     const ev = e.event;
+    this.closeOverlap();
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
     if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView }; return; }
     const pt = e.point;
@@ -1509,7 +1528,7 @@ export class SketchEditor {
     let from = d.from;
     let w = p.x - from.x;
     let h = p.y - from.y;
-    if (ev.shiftKey || (this.tool === 'polygon')) { const s = Math.max(Math.abs(w), Math.abs(h)); w = s * Math.sign(w || 1); h = s * Math.sign(h || 1); }
+    if (ev.shiftKey || ev.ctrlKey || ev.metaKey || (this.tool === 'polygon')) { const s = Math.max(Math.abs(w), Math.abs(h)); w = s * Math.sign(w || 1); h = s * Math.sign(h || 1); }
     if (ev.altKey || d.alt) from = from.subtract(new this.ps.Point(w, h));
     return new this.ps.Rectangle(from, from.add(new this.ps.Point(ev.altKey || d.alt ? 2 * w : w, ev.altKey || d.alt ? 2 * h : h)));
   }
@@ -1541,7 +1560,7 @@ export class SketchEditor {
     if (d.preview) d.preview.remove();
     d.preview = this.makeShape(d, p, ev);
     d.last = p;
-    d.ev = { shiftKey: ev.shiftKey, altKey: ev.altKey };
+    d.ev = { shiftKey: ev.shiftKey, altKey: ev.altKey, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey };
     if (!d.preview) return;
     d.preview.strokeColor = MODES[this.opts.mode].color;
     d.preview.strokeWidth = 1.4;
@@ -1562,7 +1581,56 @@ export class SketchEditor {
     this.style(shape);
     this.sel.clear();
     this.sel.add(shape);
-    this.commit('已添加图形');
+    const hits = this.content.children.filter((c) => c !== shape && c.data && c.data.mode && this.selectable(c)
+      && shape.bounds.intersects(c.bounds) && shape.getIntersections(c).length);
+    if (!hits.length) { this.commit('已添加图形'); return; }
+    // 和已有图形交叉：先不自动定切割 / 雕刻 / 描线，暂作描线（不影响板面），让用户选
+    shape.data.mode = 'score';
+    if (shape.data.role) shape.data.role = null;
+    this.style(shape);
+    this.commit('新图形和已有图形重叠了，请选择怎么处理');
+    this.askOverlap(shape, hits.find((c) => c.data.mode === 'cut' && this.itemPaths(c).every((p) => p.closed)));
+  }
+
+  askOverlap(shape, board) {
+    this.closeOverlap();
+    const box = document.createElement('div');
+    box.className = 'sk-overlap';
+    box.innerHTML = `<b>图形重叠了，要怎么处理？</b>
+      <div class="sk-overlap-row">
+        <button data-m="cut"><i style="background:${MODES.cut.color}"></i>切割</button>
+        <button data-m="engrave"><i style="background:${MODES.engrave.color}"></i>雕刻</button>
+        <button data-m="score"><i style="background:${MODES.score.color}"></i>描线</button>
+      </div>
+      ${board ? `<div class="sk-overlap-row">
+        <button data-b="unite" title="和板合成一个外轮廓（并集）">＋ 并入板</button>
+        <button data-b="subtract" title="从板上挖掉这一块（差集）">− 从板上减去</button>
+      </div>` : ''}
+      <span class="sk-small">先暂作「描线」，不影响板面；Esc 或点别处 = 保持描线</span>`;
+    const v = this.ps.view;
+    const p1 = v.projectToView(shape.bounds.topLeft);
+    const p2 = v.projectToView(shape.bounds.bottomRight);
+    box.style.left = `${Math.max(8, (p1.x + p2.x) / 2 - 120)}px`;
+    box.style.top = `${Math.max(p1.y, p2.y) + 10}px`;     // 放在图形正下方，不挡住它
+    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    box.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', () => {
+      this.closeOverlap();
+      this.sel = new Set([shape]);
+      this.applyMode(b.dataset.m);
+    }));
+    box.querySelectorAll('[data-b]').forEach((b) => b.addEventListener('click', () => {
+      this.closeOverlap();
+      if (!shape.parent || !board.parent) return;
+      shape.data.mode = board.data.mode;
+      this.sel = new Set([board, shape]);
+      this.boolean(b.dataset.b);
+    }));
+    this.$('.sk-dims').parentNode.appendChild(box);
+    this.overlapBox = box;
+  }
+
+  closeOverlap() {
+    if (this.overlapBox) { this.overlapBox.remove(); this.overlapBox = null; }
   }
 
   // ---------------------------------------------------------------- 文字
@@ -2191,7 +2259,8 @@ export class SketchEditor {
     const before = base;
     items.forEach((it) => { if (it !== before) it.remove(); });
     if (!res || res.isEmpty()) { before.remove(); this.sel.clear(); this.commit('结果为空'); return; }
-    res.data = { id: newId(), mode, role: op === 'subtract' || op === 'unite' ? role : null, locked: false, text: null };
+    res.data = { id: newId(), mode, role: op === 'subtract' || op === 'unite' ? role : null, locked: false, text: null,
+      pid: op === 'subtract' || op === 'unite' ? base.data.pid || null : null };
     if (res.data.role === 'outline') res.data.locked = true;
     res.insertAbove(before);
     before.remove();
@@ -2762,7 +2831,7 @@ export class SketchEditor {
   startTour() {
     const steps = [
       { sel: '.sk-tools', title: '① 画图工具', text: '直线、曲线、矩形、圆、文字……点一下就能用，鼠标停在按钮上会显示用法和快捷键。' },
-      { sel: '.sk-palette', title: '② 加工方式', text: '蓝色 = 切穿，绿色 = 雕刻，紫色 = 划线。先选中图形，再点颜色就能改。' },
+      { sel: '.sk-palette', title: '② 加工方式', text: '蓝色 = 切穿，绿色 = 雕刻，紫色 = 描线。先选中图形，再点颜色就能改。' },
       { sel: '.sk-numeric', title: '③ 精确尺寸', text: '选中图形后在这里输入位置、宽高、角度；右边一排是对齐按钮。也可以直接点图上的长度数字修改。' },
       { sel: '.sk-side', title: '④ 更多操作', text: '形状运算（并集 / 差集…）、阵列、对齐、圆角、镜像复制都在右侧。卡榫、插槽工具让板子能拼起来。' },
       { sel: '.sk-3d', title: '⑤ 3D 实时预览', text: '每改一次，3D 都会更新，并检查和相邻的板会不会撞在一起（红色 = 穿透）。' },
@@ -3054,7 +3123,7 @@ export class SketchEditor {
     else if (ev.key === '?' || (ev.shiftKey && ev.key === '/')) this.showKeys();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
-    else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
+    else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
       const s = ev.shiftKey ? 10 : (this.snapStep || 1);
@@ -3105,7 +3174,7 @@ export function flattenPath(path, steps = 16) {
   return pts;
 }
 
-/** 草图 → { cut: 闭合切割环[], open: 开放切割线[], engrave: 闭合雕刻环[], lines: 划线 / 开放雕刻线[] } */
+/** 草图 → { cut: 闭合切割环[], open: 开放切割线[], engrave: 闭合雕刻环[], lines: 描线 / 开放雕刻线[] } */
 export function sketchPolys(sketch) {
   const out = { cut: [], open: [], engrave: [], lines: [] };
   (sketch.items || []).forEach((it) => {

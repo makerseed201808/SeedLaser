@@ -473,7 +473,7 @@ def _write_laser_sheet(path: str, name: str, params: dict[str, Any], laser: dict
     stem, _ext = os.path.splitext(path)
     out = stem + "_加工参数.txt"
     rows = [("切割（外轮廓）", "黑色 #000000", laser["cut"]), ("切割（内孔）", "蓝色 #0000FF", laser["cut"]),
-            ("雕刻（填充）", "绿色 #00FF00", laser.get("engrave") or {}), ("划线", "品红 #FF00FF", laser.get("score") or {})]
+            ("雕刻（填充）", "绿色 #00FF00", laser.get("engrave") or {}), ("描线", "品红 #FF00FF", laser.get("score") or {})]
     lines = [f"SeedBoxes 加工参数 — {'自由设计' if name == 'FreeDesign' else name}",
              f"图纸：{os.path.basename(path)}    生成时间：{datetime.datetime.now():%Y-%m-%d %H:%M}",
              f"材料厚度：{params.get('thickness', '3')} mm    激光补偿 burn：{params.get('burn', '0.1')} mm"
@@ -482,7 +482,7 @@ def _write_laser_sheet(path: str, name: str, params: dict[str, Any], laser: dict
     for title, color, v in rows:
         lines.append(f"{title:<12}{color:<16}{v.get('speed', ''):>10}{v.get('power', ''):>8}{v.get('passes', ''):>6}")
     lines += ["", "红色 #FF0000 是标注（尺寸、说明），不要加工。",
-              "建议加工顺序：雕刻 → 划线 → 内孔切割 → 外轮廓切割（外轮廓最后切，零件不会提前掉落移位）。",
+              "建议加工顺序：雕刻 → 描线 → 内孔切割 → 外轮廓切割（外轮廓最后切，零件不会提前掉落移位）。",
               "参考值按 40～60W CO₂ 激光机估计；第一次请先在边角料上试切再调整。"]
     if info:
         lines += [""] + [f"· {x}" for x in info]

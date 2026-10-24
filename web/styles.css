@@ -988,3 +988,9 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-plabels { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
 .sk-plabel { position: absolute; transform: translate(0, -100%); margin-top: -4px; font-size: 11px; color: #1d4ed8; background: rgba(239,246,255,.92);
   border: 1px solid #bfdbfe; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+
+.sk-overlap { position: absolute; z-index: 5; width: 240px; background: #fff; border: 1px solid #fdba74; border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.14); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.sk-overlap-row { display: flex; gap: 6px; }
+.sk-overlap-row button { flex: 1; padding: 4px 6px; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.sk-overlap-row i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
