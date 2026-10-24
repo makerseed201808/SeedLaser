@@ -2152,6 +2152,18 @@ function sfVertex(s, j) {
   return v.add(new THREE.Vector3(s.x, (s.elevation || 0) + h / 2, s.z));
 }
 
+// 编辑器里是不是每块启用的板都在（防止场景和板件清单不一致）
+async function sfSceneComplete() {
+  try {
+    const scene = await sfCommand('get_scene');
+    const ids = new Set((scene.objects || scene.shapes || []).map((o) => o.id));
+    const dis = new Set(W.project.disabled);
+    const want = W.model.parts.filter((p) => !dis.has(p.id) && p.id !== 'reference' && view.objects.get(p.id)).map((p) => p.id);
+    const have = new Set([...SF.map].filter(([sid]) => ids.has(sid)).map(([, info]) => info.pid));
+    return want.every((id) => have.has(id));
+  } catch (e) { return false; }
+}
+
 // 读回编辑器里的摆放 → W.project.poses
 async function sfSync() {
   if (!SF.frame || !W.model || SF.syncing) { SF.dirty = true; return; }
@@ -2166,8 +2178,8 @@ async function sfSync() {
     W.project.poses = W.project.poses || {};
     SF.map.forEach((info, sid) => {
       const s = raw.get(sid);
-      if (!s) { stats.removed.push(info.pid); disabled.add(info.pid); return; }   // 编辑器里删除 = 不使用这块板
-      disabled.delete(info.pid);
+      // 3D 编辑器里删掉的板：只是从装配场景里拿走，不改图纸（要不导出请取消「使用」）；下次打开会重新放回
+      if (!s) { stats.removed.push(info.pid); return; }
       const m = s.importedMesh;
       if (!m || !m.positions || m.positions.length / 3 <= Math.max(...info.idx)) { stats.reshaped.push(info.pid); return; }
       const now = info.idx.map((j) => sfVertex(s, j).sub(SF.off));
@@ -2183,8 +2195,10 @@ async function sfSync() {
       if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
     });
     W.project.disabled = [...disabled];
-    // 编辑器里的场景已和项目一致（删掉的板 = 不使用）。之后在板件清单里重新勾选，钥匙就变了，下次打开会重新导入
-    SF.key = sfSceneKey();
+    if (stats.removed.length) {
+      stats.removed.forEach((pid) => { for (const [sid, info] of SF.map) if (info.pid === pid) SF.map.delete(sid); });
+      SF.key = null;                                // 下次打开 3D 编辑器时重新导入全部板件
+    }
     SF.stats = stats;
     projectChanged();
     const prev = SF.prevPoses || {};
@@ -2213,6 +2227,7 @@ async function openSketchForge() {
   loading.textContent = '正在启动 3D 编辑器…';
   try {
     await sfEnsureFrame();
+    if (SF.key === sfSceneKey() && !(await sfSceneComplete())) SF.key = null;   // 编辑器里少了板 → 重新导入
     if (SF.key !== sfSceneKey()) {
       loading.textContent = '正在导入板件…';
       pushUndo();
@@ -2263,7 +2278,7 @@ async function closeSketchForge() {
   const st = SF.stats;
   if (!st) return;
   const warn = [];
-  if (st.removed.length) warn.push(`${st.removed.map(nameOf).join('、')} 已在 3D 编辑器中删除，设为「不使用」（不会导出，可在板件清单重新勾选）`);
+  if (st.removed.length) warn.push(`${st.removed.map(nameOf).join('、')} 在 3D 编辑器里被删掉了：这只影响装配场景，图纸里仍然保留，下次打开 3D 编辑器会放回。不想导出这块板，请在板件清单里取消「使用」`);
   if (st.reshaped.length) warn.push(`${st.reshaped.map(nameOf).join('、')} 形状被修改，位置未同步`);
   if (st.scaled.length) warn.push(`${st.scaled.map(nameOf).join('、')} 尺寸改动不会影响图纸（请改左侧参数）`);
   checkPose();   // 显示咬合 / 穿透检查结果（没有摆放时清除标记）
