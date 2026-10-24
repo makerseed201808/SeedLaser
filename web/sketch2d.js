@@ -291,6 +291,8 @@ export class SketchEditor {
     this.redoStack = [];
     this.outlineLocked = !part.free;
     this.sheetMode = !!part.sheet;
+    const oldLabels = this.$('.sk-plabels');
+    if (oldLabels) oldLabels.innerHTML = '';
     this.$('[data-act=reset]').classList.toggle('hidden', this.sheetMode);
     this.$('.sk-back').textContent = this.sheetMode ? '生成 3D · 去装配 →' : '← 完成 · 返回';
     this.content.removeChildren();
@@ -545,9 +547,10 @@ export class SketchEditor {
     this.boardLayer.removeChildren();
     if (this.reference) this.boardLayer.addChild(this.reference);
     const loops = [];
+    const owner = [];
     this.content.children.forEach((it) => {
       if (!it.data || it.data.mode !== 'cut') return;
-      this.itemPaths(it).forEach((p) => { if (p.closed && p.segments.length > 2) loops.push(p.clone({ insert: false })); });
+      this.itemPaths(it).forEach((p) => { if (p.closed && p.segments.length > 2) { loops.push(p.clone({ insert: false })); owner.push(it); } });
     });
     if (!loops.length) return;
     const cp = new this.ps.CompoundPath({ children: loops, insert: false });
@@ -561,6 +564,7 @@ export class SketchEditor {
       let warn = 0;
       for (let i = 0; i < loops.length; i++) {
         for (let k = i + 1; k < loops.length; k++) {
+          if (owner[i] === owner[k]) continue;        // 同一个图形自己的笔画（如文字）重叠不算
           const A = loops[i]; const B = loops[k];
           if (!A.bounds.intersects(B.bounds) || !A.getIntersections(B).length) continue;
           const lens = A.intersect(B, { insert: false });
@@ -2919,6 +2923,9 @@ export class SketchEditor {
 
   renderToolOpts() {
     const box = this.$('.sk-toolopts');
+    // 正在输入的框（比如修改文字）还没提交就要被重画：先让它失焦，触发 change 把内容应用上
+    const focused = box.querySelector(':focus');
+    if (focused && focused.dataset.o) focused.blur();
     const t = this.tool;
     const textSel = this.sel.size === 1 && [...this.sel][0].data.text ? [...this.sel][0] : null;
     let html = '';
