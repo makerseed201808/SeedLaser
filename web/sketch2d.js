@@ -375,7 +375,7 @@ export class SketchEditor {
     else { item = new ps.CompoundPath({ insert: false }); item.addChildren(it.paths.map(mk)); }
     item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked,
                   text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null,
-                  group: it.group || null, pid: it.pid || null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
+                  group: it.group || null, pid: it.pid || null, origin: it.origin ? [...it.origin] : null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
     this.content.addChild(item);
     this.style(item);
     return item;
@@ -396,6 +396,7 @@ export class SketchEditor {
     if (item.data.text) out.text = { ...item.data.text };
     if (item.data.group) out.group = item.data.group;
     if (item.data.pid) out.pid = item.data.pid;
+    if (item.data.origin) out.origin = item.data.origin.map(r3);
     if (item.data.bridges && item.data.bridges.length) out.bridges = item.data.bridges.map((b) => b.map(r3));
     if (item.data.joints && item.data.joints.length) {
       out.joints = item.data.joints.map((j) => ({ ...j, a: j.a.map(r3), b: j.b.map(r3), c: j.c.map(r3) }));
@@ -458,6 +459,15 @@ export class SketchEditor {
         this.data.joints = this.data.joints.map((j) => ({ ...j, a: tp(j.a), b: tp(j.b), c: tp(j.c) }));
       }
       if (m && this.data && this.data.bridges) this.data.bridges = this.data.bridges.map(tp);
+      // 画板模式：板件的「原点」跟着整块板平移 / 旋转（排版用），缩放 / 镜像算改形状，原点不动
+      if (m && this.data && this.data.origin) {
+        const det = m.a * m.d - m.b * m.c;
+        if (Math.abs(det - 1) < 1e-6 && Math.abs(m.a * m.a + m.b * m.b - 1) < 1e-6) {
+          const o = this.data.origin;
+          const p = tp(o);
+          this.data.origin = [p[0], p[1], ((o[2] || 0) + Math.atan2(m.b, m.a) * 180 / Math.PI + 360) % 360];
+        }
+      }
       if (m && this.data && this.data.text) {
         // 只平移时保留可编辑的文字；旋转 / 缩放 / 镜像后转成路径
         const pure = Math.abs(m.a - 1) < 1e-9 && Math.abs(m.d - 1) < 1e-9 && Math.abs(m.b) < 1e-9 && Math.abs(m.c) < 1e-9;
@@ -947,7 +957,8 @@ export class SketchEditor {
       parts: parts.map((p) => ({
         pid: p.item.data.pid, outline: p.item.data.id,
         bounds: [r3(p.bounds.left), r3(p.bounds.top), r3(p.bounds.right), r3(p.bounds.bottom)],
-        items: p.members.map((m) => byId.get(m.data.id)).filter(Boolean).map((it) => ({ ...it, pid: it.id === p.item.data.id ? p.item.data.pid : undefined })),
+        origin: p.item.data.origin || null,
+        items: p.members.map((m) => byId.get(m.data.id)).filter(Boolean).map((it) => ({ ...it, pid: it.id === p.item.data.id ? p.item.data.pid : undefined, origin: undefined })),
       })),
       loose: loose.map((m) => byId.get(m.data.id)).filter(Boolean),
     };

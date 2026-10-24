@@ -670,6 +670,23 @@ function saveSketch(id, sk) {
 
 // ------------------------------------------------------------------ 自由设计：二维画板（所有板件画在一张材料上）
 
+// 旋转 ang 度（绕原点）再平移 (dx, dy)；局部坐标 ↔ 画板坐标
+function placeItem(it, ang, dx, dy) {
+  if (!ang) return translateItem(it, dx, dy);
+  const c = Math.cos(ang * Math.PI / 180); const s = Math.sin(ang * Math.PI / 180);
+  const R = ([x, y]) => [x * c - y * s, x * s + y * c];
+  const t = (q) => { const [x, y] = R(q); return [Math.round((x + dx) * 1e3) / 1e3, Math.round((y + dy) * 1e3) / 1e3]; };
+  const out = { ...it, paths: it.paths.map((p) => ({ ...p, segs: p.segs.map((g) => [...t(g), ...R([g[2], g[3]]), ...R([g[4], g[5]])]) })) };
+  if (it.joints) out.joints = it.joints.map((j) => ({ ...j, a: t(j.a), b: t(j.b), c: t(j.c) }));
+  if (it.bridges) out.bridges = it.bridges.map(t);
+  if (it.text) delete out.text;                 // 转过角度的文字变成路径
+  return out;
+}
+function unplaceItem(it, ang, ox, oy) {          // placeItem 的逆变换
+  const back = translateItem(it, -ox, -oy);
+  return ang ? placeItem(back, -ang, 0, 0) : back;
+}
+
 function translateItem(it, dx, dy) {
   const t = ([x, y]) => [Math.round((x + dx) * 1e3) / 1e3, Math.round((y + dy) * 1e3) / 1e3];
   const out = { ...it, paths: it.paths.map((p) => ({ ...p, segs: p.segs.map((g) => [...t(g), g[2], g[3], g[4], g[5]]) })) };
@@ -697,7 +714,9 @@ function composeSheet() {
       p.sx = cx; p.sy = cy - p.h; cx += p.w + 10; rowH = Math.max(rowH, p.h);
     }
     const outlineIdx = Math.max(0, sk.items.findIndex((it) => it.role === 'outline'));
-    sk.items.forEach((it, i) => items.push({ ...translateItem(it, p.sx, p.sy), pid: i === outlineIdx ? p.id : undefined, role: undefined }));
+    const sa = p.sa || 0;
+    sk.items.forEach((it, i) => items.push({ ...placeItem(it, sa, p.sx, p.sy), role: undefined,
+      pid: i === outlineIdx ? p.id : undefined, origin: i === outlineIdx ? [p.sx, p.sy, sa] : undefined }));
   });
   (W.project.free.loose || []).forEach((it) => items.push(it));
   return { items, bridge_w: W.project.free.bridge_w, guides: W.project.free.guides };
@@ -713,14 +732,16 @@ function applySheet(res) {
   res.parts.forEach((rp, i) => {
     const [x0, y0, x1, y1] = rp.bounds;
     const prev = old.get(rp.pid);
+    // 局部坐标系跟着「原点」走：改形状不会让 3D 里装配好的板错位；新板以左下角为原点
+    const [ox, oy, oa] = rp.origin || [x0, y0, 0];
     const items = rp.items.map((it) => {
-      const { pid, ...rest } = translateItem(it, -x0, -y0);
+      const { pid, origin, ...rest } = unplaceItem(it, oa || 0, ox, oy);
       if (it.id === rp.outline) rest.role = 'outline'; else delete rest.role;
       return rest;
     });
     W.project.sketches[rp.pid] = { items, ...(res.bridge_w != null ? { bridge_w: res.bridge_w } : {}) };
     parts.push({ ...(prev || {}), id: rp.pid, name: prev ? prev.name : nextPartName([...old.values(), ...parts]), w: Math.round((x1 - x0) * 100) / 100,
-                 h: Math.round((y1 - y0) * 100) / 100, sx: x0, sy: y0 });
+                 h: Math.round((y1 - y0) * 100) / 100, sx: ox, sy: oy, sa: oa || 0 });
     old.delete(rp.pid);
   });
   old.forEach((_p, id) => {                          // 画板上删掉的板
@@ -1360,7 +1381,7 @@ class Poser {
     const p = W.model.parts.find((q) => q.id === pid);
     W.project.poses = W.project.poses || {};
     // 回到装配位置时不再记录（等于复位）
-    if (p && matricesClose(o.group.matrix, new THREE.Matrix4().fromArray(p.matrix), 0.01)) {
+    if (p && !isFree() && matricesClose(o.group.matrix, new THREE.Matrix4().fromArray(p.matrix), 0.01)) {
       delete W.project.poses[pid];
       return;
     }
@@ -1876,10 +1897,12 @@ async function sfApplySnap(best, moved) {
   const M = (id) => new THREE.Matrix4().fromArray(poseOf(partById(id)));
   const delta = best.target.clone().multiply(M(best.b).invert());
   W.project.poses = W.project.poses || {};
+  // 自由设计：被吸附的那块也记下装配位置，之后在画板里挪动 / 旋转它，3D 装配不受影响
+  if (isFree() && best.a && !W.project.poses[best.a]) W.project.poses[best.a] = M(best.a).toArray().map((x) => Math.round(x * 1e4) / 1e4);
   moved.forEach((id) => {
     const p = partById(id);
     const arr = delta.clone().multiply(M(id)).toArray().map((x) => Math.round(x * 1e4) / 1e4);
-    if (arr.every((x, k) => Math.abs(x - p.matrix[k]) < 1e-3)) delete W.project.poses[id]; else W.project.poses[id] = arr;
+    if (!isFree() && arr.every((x, k) => Math.abs(x - p.matrix[k]) < 1e-3)) delete W.project.poses[id]; else W.project.poses[id] = arr;
     const o = view.objects.get(id);
     if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }
   });
@@ -2025,8 +2048,9 @@ async function freeAutoAssemble() {
   if (!links.length) { toast('没找到能配对的卡榫：两条边的长度和齿的设置要一样（A 配 B、A 配凹槽、A 配插槽）', 'error'); return null; }
   const degree = (id) => links.filter((l) => l.a === id || l.b === id).length;
   const root = ids.slice().sort((x, y) => degree(y) - degree(x))[0];
-  const poses = {};                               // 只记录拼装后的姿态；root 用平铺位置
+  const poses = {};                               // 记录拼装后的姿态（root 也记：之后画板里挪动它不影响装配）
   const placed = new Set([root]);
+  poses[root] = partById(root).matrix.map((x) => Math.round(x * 1e4) / 1e4);
   const used = new Set();
   const M = (id) => new THREE.Matrix4().fromArray(poses[id] || partById(id).matrix);
   const centerW = (id, m) => partCenter(partById(id)).applyMatrix4(m || M(id));
@@ -2153,7 +2177,7 @@ async function sfSync() {
       const pose = Ci.clone().multiply(delta).multiply(C).multiply(info.base);
       const arr = pose.toArray().map((x) => Math.round(x * 1e4) / 1e4);
       const p = W.model.parts.find((q) => q.id === info.pid);
-      const same = arr.every((x, k) => Math.abs(x - p.matrix[k]) < 1e-3);
+      const same = !isFree() && arr.every((x, k) => Math.abs(x - p.matrix[k]) < 1e-3);
       if (same) delete W.project.poses[info.pid]; else { W.project.poses[info.pid] = arr; stats.moved++; }
       const o = view.objects.get(info.pid);
       if (o) { o.group.matrix.fromArray(poseOf(p)); o.group.matrixWorldNeedsUpdate = true; }

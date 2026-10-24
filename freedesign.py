@@ -183,7 +183,7 @@ class FreeDesign(boxes.Boxes):
             sheet = ((self.design or {}).get("free") or {}).get("sheet") or {}
             for p, sk in items:
                 with self.saved_context():
-                    self.moveTo(float(p["sx"]) + self.spacing, float(p["sy"]) + self.spacing)
+                    self.moveTo(float(p["sx"]) + self.spacing, float(p["sy"]) + self.spacing, float(p.get("sa") or 0))
                     sketch2d.draw(self, sk, burn)
             if sheet.get("w") and sheet.get("h"):
                 with self.saved_context():
@@ -259,6 +259,11 @@ class FreeDesign(boxes.Boxes):
             self.notes.append(f"放不下（比材料还大）：{names}")
 
 
+def _flat_matrix(a: float, dx: float, dy: float) -> list[float]:
+    c, s = math.cos(a), math.sin(a)
+    return [c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, dx, dy, 0, 1]
+
+
 def placed_on_sheet(items) -> bool:
     return bool(items) and all(p.get("sx") is not None and p.get("sy") is not None for p, _ in items)
 
@@ -269,6 +274,7 @@ def model_parts(design: dict | None) -> list[dict]:
     items = part_sketches(design, include_disabled=True)
     if placed_on_sheet(items):      # 二维画板上画的：3D 平铺位置和画板一致
         placed = [(p, sk, float(p["sx"]), float(p["sy"]), _bounds(sk)) for p, sk in items]
+        rot = {p["id"]: math.radians(float(p.get("sa") or 0)) for p, _ in items}
     else:
         placed = layout(items, gap=12.0)
     for p, sk, dx, dy, b in placed:
@@ -281,6 +287,6 @@ def model_parts(design: dict | None) -> list[dict]:
             "w": round(x1 - x0, 4), "h": round(y1 - y0, 4), "edges": "", "label": "",
             "outer": g["outer"], "holes": g["holes"], "extra": g["extra"], "etch": g["etch"], "lines": [],
             "bbox": [x0, y0, x1, y1], "face": None, "mirror": False,
-            "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, dx, dy, 0, 1],
+            "matrix": _flat_matrix(rot.get(p["id"], 0.0) if placed_on_sheet(items) else 0.0, dx, dy),
         })
     return out
