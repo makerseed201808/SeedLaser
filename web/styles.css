@@ -994,3 +994,9 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-overlap-row { display: flex; gap: 6px; }
 .sk-overlap-row button { flex: 1; padding: 4px 6px; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .sk-overlap-row i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.sk-boolhint { min-height: 22px; margin: 6px 0 4px; }
+.sk-bool-card { display: flex; gap: 8px; align-items: flex-start; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+.sk-bool-card b { font-size: 12px; }
+.sk-bool-card p { margin: 2px 0 0; line-height: 1.5; }
+.sk-bool-fig { width: 72px; flex: none; }

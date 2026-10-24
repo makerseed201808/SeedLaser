@@ -160,12 +160,12 @@ export class SketchEditor {
           <section class="sk-card">
             <h4>形状运算</h4>
             <div class="sk-btns">
-              <button data-act="unite" title="选中的闭合图形合成一个；只选 1 个时，和与它重叠的图形合成一个">并集</button>
-              <button data-act="subtract" title="只选 1 个：把它当刀，从重叠的图形上切掉这一块，它自己删除；选多个：最下面的减去其他">差集</button>
-              <button data-act="intersect" title="只选 1 个：它只保留和其他图形重叠的部分；选多个：只保留共同重叠的部分">交集</button>
-              <button data-act="exclude" title="保留不重叠的部分">异或</button>
+              <button data-act="unite" data-bh="unite">并集</button>
+              <button data-act="subtract" data-bh="subtract">差集</button>
+              <button data-act="intersect" data-bh="intersect">交集</button>
+              <button data-act="exclude" data-bh="exclude">异或</button>
             </div>
-            <p class="sk-small">只选 1 个图形时：<b>差集</b> = 把它当刀，切掉重叠的图形上的这一块，刀本身删除；<b>交集</b> = 它只保留重叠部分；<b>并集</b> = 和重叠的图形合成一个。</p>
+            <div class="sk-boolhint"></div>
             <div class="sk-row"><label>偏移<input data-opt="offset" type="number" step="0.5" value="2"> mm</label>
               <select data-opt="offsetJoin"><option value="round">圆角</option><option value="miter">尖角</option></select>
               <button data-act="offset" title="生成外扩（正数）/ 内缩（负数）的新轮廓">偏移</button></div>
@@ -237,6 +237,7 @@ export class SketchEditor {
     this.content.activate();
     this.zoom = 4;
 
+    this.initBoolHints();
     this.$('.sk-ruler-x').addEventListener('pointerdown', (ev) => this.rulerDown(ev, 'y'));
     this.$('.sk-ruler-y').addEventListener('pointerdown', (ev) => this.rulerDown(ev, 'x'));
     this.$('.sk-ruler-corner').addEventListener('click', () => { if (this.guides.length) { this.guides = []; this.drawGuides(); this.emitChange(); this.status('已清除参考线'); } });
@@ -1670,6 +1671,39 @@ export class SketchEditor {
 
   closeOverlap() {
     if (this.overlapBox) { this.overlapBox.remove(); this.overlapBox = null; }
+  }
+
+  // 形状运算按钮：鼠标移上去，下方显示示意图和用法
+  initBoolHints() {
+    const box = this.$('.sk-boolhint');
+    if (!box) return;
+    const sq = '<rect x="8" y="10" width="44" height="40"/>';
+    const ci = '<circle cx="58" cy="34" r="22"/>';
+    const fig = (body, defs = '') => `<svg viewBox="0 0 90 62" class="sk-bool-fig"><defs>${defs}</defs>${body}` +
+      `<g fill="none" stroke="#94a3b8" stroke-dasharray="3 2">${sq}${ci}</g></svg>`;
+    const W = '#e8cfa8';
+    const H = {
+      unite: { name: '并集', fig: fig(`<g fill="${W}">${sq}${ci}</g>`),
+        text: '两个图形合成<b>一整块</b>，重叠的线消失。<br>用法：只选 1 个 → 和所有与它重叠的图形合并；或按 Shift 选多个再点。<br>例：圆形底座 + 长方形把手 → 一块勺子形的板。' },
+      subtract: { name: '差集', fig: fig(`<rect x="8" y="10" width="44" height="40" fill="${W}" mask="url(#skm-sub)"/>` +
+          '<circle cx="58" cy="34" r="22" fill="none" stroke="#ef4444" stroke-width="1.5"/>',
+        '<mask id="skm-sub"><rect width="90" height="62" fill="#fff"/><circle cx="58" cy="34" r="22" fill="#000"/></mask>'),
+        text: '把选中的图形<b>当成刀</b>（红圈），从重叠的图形上切掉这一块，<b>刀本身删除</b>。<br>用法：只选「刀」那个图形，再点差集。<br>例：用圆形在板边切出半圆缺口、开把手孔。' },
+      intersect: { name: '交集', fig: fig(`<g clip-path="url(#skm-int)"><circle cx="58" cy="34" r="22" fill="${W}"/></g>`,
+        '<clipPath id="skm-int"><rect x="8" y="10" width="44" height="40"/></clipPath>'),
+        text: '只<b>保留重叠的部分</b>，其余都去掉。<br>用法：只选 1 个 → 它只留下和其他图形重叠的那块（其他图形不变）。<br>例：把圆形裁成 1/4 圆、做扇形。' },
+      exclude: { name: '异或', fig: fig(`<path fill="${W}" fill-rule="evenodd" d="M8 10h44v40H8z M80 34a22 22 0 1 0-44 0a22 22 0 1 0 44 0z"/>`),
+        text: '保留各自<b>不重叠的部分</b>，重叠的那块挖空。<br>用法：按 Shift 选中 2 个图形再点。<br>例：两个圆交叉做链环、镂空装饰图案。注意：挖空后可能分成几块。' },
+    };
+    const idle = '<p class="sk-small">鼠标移到按钮上可以看示意图和用法。</p>';
+    box.innerHTML = idle;
+    this.$$('[data-bh]').forEach((b) => {
+      const show = () => { const h = H[b.dataset.bh]; box.innerHTML = `<div class="sk-bool-card">${h.fig}<div><b>${h.name}</b><p class="sk-small">${h.text}</p></div></div>`; };
+      b.addEventListener('mouseenter', show);
+      b.addEventListener('focus', show);
+      b.addEventListener('mouseleave', () => { box.innerHTML = idle; });
+      b.addEventListener('blur', () => { box.innerHTML = idle; });
+    });
   }
 
   // 只选了 1 个图形：和与它交叉的图形做运算
