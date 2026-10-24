@@ -160,11 +160,12 @@ export class SketchEditor {
           <section class="sk-card">
             <h4>形状运算</h4>
             <div class="sk-btns">
-              <button data-act="unite" title="选中的闭合图形合成一个（焊接）">并集</button>
-              <button data-act="subtract" title="最下面的图形减去其他图形">差集</button>
-              <button data-act="intersect" title="只保留所有图形重叠的部分">交集</button>
+              <button data-act="unite" title="选中的闭合图形合成一个；只选 1 个时，和与它重叠的图形合成一个">并集</button>
+              <button data-act="subtract" title="只选 1 个：从它身上减掉和其他图形重叠的部分（只改它）；选多个：最下面的减去其他">差集</button>
+              <button data-act="intersect" title="只选 1 个：它只保留和其他图形重叠的部分；选多个：只保留共同重叠的部分">交集</button>
               <button data-act="exclude" title="保留不重叠的部分">异或</button>
             </div>
+            <p class="sk-small">只选 1 个图形时，和它重叠的图形一起运算，<b>只改选中的那个</b>。</p>
             <div class="sk-row"><label>偏移<input data-opt="offset" type="number" step="0.5" value="2"> mm</label>
               <select data-opt="offsetJoin"><option value="round">圆角</option><option value="miter">尖角</option></select>
               <button data-act="offset" title="生成外扩（正数）/ 内缩（负数）的新轮廓">偏移</button></div>
@@ -1671,6 +1672,42 @@ export class SketchEditor {
     if (this.overlapBox) { this.overlapBox.remove(); this.overlapBox = null; }
   }
 
+  // 只选了 1 个图形：和与它交叉的图形做运算，只改选中的那个（并集除外）
+  //   差集：选中的 − 和它重叠的部分；交集：选中的只留重叠部分；并集：和重叠的图形合成一个
+  booleanWithOverlaps(op) {
+    const it = [...this.sel][0];
+    const closed = (c) => this.itemPaths(c).every((p) => p.closed);
+    if (!closed(it)) { this.toast('形状运算只能用于闭合图形（可先「闭合路径」）', 'error'); return; }
+    const others = this.content.children.filter((c) => c !== it && c.data && c.data.mode && this.selectable(c) && closed(c)
+      && c.bounds.intersects(it.bounds) && (it.getIntersections(c).length || c.contains(it.bounds.center) || it.contains(c.bounds.center)));
+    if (!others.length) { this.toast('没有和它重叠的图形。要两个图形之间运算，请按 Shift 多选', 'error'); return; }
+    const opts = { insert: false };
+    let res = it;
+    if (op === 'unite') {
+      // 合并后沿用板件轮廓（有 pid / outline 的那个）的身份
+      const all = [it, ...others];
+      const keep = all.find((c) => c.data.pid) || all.find((c) => c.data.role === 'outline') || all.reduce((a, b) => (Math.abs(b.area) > Math.abs(a.area) ? b : a));
+      all.forEach((o) => { if (o !== it) res = res.unite(o, opts); });
+      res.data = { id: newId(), mode: keep.data.mode, role: keep.data.role, locked: false, text: null, pid: keep.data.pid || null,
+                   origin: keep.data.origin ? [...keep.data.origin] : null };
+      res.insertAbove(keep);
+      all.forEach((o) => o.remove());
+      this.style(res);
+      this.sel = new Set([res]);
+      this.commit(`已合并（并集）：${all.length} 个图形合成一个`);
+      return;
+    }
+    others.forEach((o) => { res = op === 'subtract' ? res.subtract(o, opts) : res.intersect(o, opts); });
+    if (!res || res.isEmpty()) { this.toast('结果为空，没有改动', 'error'); return; }
+    res.data = { ...it.data, id: newId(), text: null, joints: null, bridges: null, origin: it.data.origin ? [...it.data.origin] : null };
+    res.insertAbove(it);
+    it.remove();
+    this.style(res);
+    this.sel = new Set([res]);
+    this.commit(op === 'subtract' ? '已差集：从选中的图形上减掉和其他图形重叠的部分（其他图形不变）'
+                                  : '已交集：选中的图形只保留和其他图形重叠的部分（其他图形不变）');
+  }
+
   // ---------------------------------------------------------------- 文字
 
   textParams(base) {
@@ -2276,6 +2313,7 @@ export class SketchEditor {
   }
 
   boolean(op) {
+    if (this.sel.size === 1 && op !== 'exclude') { this.booleanWithOverlaps(op); return; }
     if (!this.need(2, '形状运算需要选中至少 2 个闭合图形')) return;
     const items = this.content.children.filter((c) => this.sel.has(c));   // 按层次从下到上
     if (items.some((it) => this.itemPaths(it).some((p) => !p.closed))) {
