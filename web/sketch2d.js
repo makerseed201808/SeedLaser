@@ -1258,6 +1258,10 @@ export class SketchEditor {
       if (this.rubber) this.rubber.remove();
       this.rubber = this.mortisePreview(d.from, p);
     }
+    // 移动 / 缩放 / 旋转 / 改节点时，木色板面实时跟着走（每帧最多重画一次）
+    if (['move', 'scale', 'rotate', 'node'].includes(d.kind) && !this._boardRaf) {
+      this._boardRaf = requestAnimationFrame(() => { this._boardRaf = null; if (this.drag) this.drawBoard(); });
+    }
   }
 
   onUp(e) {
