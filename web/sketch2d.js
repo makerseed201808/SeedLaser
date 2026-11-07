@@ -601,6 +601,8 @@ export class SketchEditor {
     const lockBtn = this.$('.sk-lock');
     lockBtn.textContent = this.outlineLocked ? '🔒 外轮廓已锁定' : '🔓 外轮廓可编辑';
     lockBtn.classList.toggle('on', !this.outlineLocked);
+    // 只有带卡榫边的生成零件外轮廓（locked）才需要这个开关；自己画的图形没有，就不显示
+    lockBtn.classList.toggle('hidden', !this.content.children.some((it) => it.data && it.data.locked && it.data.role === 'outline'));
   }
 
   // 左侧功能按钮：在属性面板里跳到对应区块（展开、滚到可见处、闪一下）
@@ -1293,12 +1295,24 @@ export class SketchEditor {
     const segCount = paths.reduce((n, p) => n + p.curves.length, 0);
     if (segCount > 60 || it.data.text) return;
     const v = this.ps.view;
+    // 选择工具下，尺寸标签不能盖住缩放 / 旋转手柄（否则拉不动边）：挪到手柄旁边
+    const hs = [];
+    if (this.tool === 'select') {
+      const b = it.bounds;
+      [b.topLeft, b.topRight, b.bottomLeft, b.bottomRight, b.leftCenter, b.rightCenter, b.topCenter, b.bottomCenter,
+        new this.ps.Point(b.center.x, b.bottom + 22 / this.zoom)].forEach((q) => hs.push(v.projectToView(q)));
+    }
     paths.forEach((p) => p.curves.forEach((c) => {
       if (!c.isStraight() || c.length * this.zoom < 28) return;
-      const mid = c.getPointAtTime(0.5);
-      let n = c.getNormalAtTime(0.5).normalize(10 / this.zoom);
-      if (p.closed && p.contains(mid.add(n))) n = n.negate();
-      const at = v.projectToView(mid.add(n));
+      let at = null;
+      for (const t of [0.5, 0.25, 0.75]) {
+        const mid = c.getPointAtTime(t);
+        let n = c.getNormalAtTime(t).normalize(10 / this.zoom);
+        if (p.closed && p.contains(mid.add(n))) n = n.negate();
+        const q = v.projectToView(mid.add(n));
+        if (hs.every((h) => Math.abs(h.x - q.x) > 26 || Math.abs(h.y - q.y) > 16)) { at = q; break; }
+      }
+      if (!at) return;
       const lab = document.createElement('button');
       lab.className = 'sk-dim';
       lab.textContent = fmt(c.length);
@@ -1574,6 +1588,7 @@ export class SketchEditor {
     }
     const pt = e.point;
     this.showCoords(pt);
+    if ((d.kind === 'move' || d.kind === 'scale' || d.kind === 'marquee') && !this.dragStarted(d, ev)) return;
     if (d.kind === 'move') {
       if (this.snapGuide) { this.snapGuide.remove(); this.snapGuide = null; }
       const raw = pt.subtract(d.start);
@@ -1636,6 +1651,10 @@ export class SketchEditor {
         if (!e.event.shiftKey) this.sel.clear();
         picked.forEach((it) => this.sel.add(it));
         this.expandGroups();
+      } else if (d.clickPick) {                       // 单击图形内部 = 选中它
+        if (!e.event.shiftKey) this.sel.clear();
+        if (e.event.shiftKey && this.sel.has(d.clickPick)) this.groupOf(d.clickPick).forEach((c) => this.sel.delete(c));
+        else { this.groupOf(d.clickPick).forEach((c) => this.sel.add(c)); this.keyItem = d.clickPick; }
       } else if (!e.event.shiftKey) this.sel.clear();
       this.refresh();
     } else if (d.kind === 'shape') this.shapeFinish(d);
@@ -1672,12 +1691,19 @@ export class SketchEditor {
       if (h.kind === 'rotate') {
         this.drag = { kind: 'rotate', center: b.center, x0: e.event.offsetX, moved: false, applied: 0, label: '已旋转', pushed: true };
       } else {
-        this.drag = { kind: 'scale', key: h.key, bounds: b, sx: 1, sy: 1, label: '已缩放' };
+        // 按「手柄位置 + 鼠标位移」算，鼠标没点在手柄正中也不会一拖就跳
+        this.drag = { kind: 'scale', key: h.key, bounds: b, sx: 1, sy: 1, label: '已缩放', grab: h.at.clone(), start: pt, v0: [e.event.offsetX, e.event.offsetY] };
       }
       this.undoStack.pop();   // commit 会自动比较并记录
       return;
     }
-    const it = this.hitItem(pt);
+    let it = this.hitItem(pt);
+    if (!it) {
+      // 没点在线上：点在图形内部。已选中的图形可以从内部直接拖动；没选中的，单击（不拖）才选中，拖动仍是框选
+      const inner = this.hitInside(pt);
+      if (inner && this.sel.has(inner)) it = inner;
+      else { this.drag = { kind: 'marquee', from: pt, v0: [e.event.offsetX, e.event.offsetY], clickPick: inner }; return; }
+    }
     if (it) {
       if (e.event.shiftKey) {
         if (this.sel.has(it)) this.groupOf(it).forEach((c) => this.sel.delete(c)); else { this.groupOf(it).forEach((c) => this.sel.add(c)); this.keyItem = it; }
@@ -1692,10 +1718,31 @@ export class SketchEditor {
       }
       const b = this.selBounds();
       this.drag = { kind: 'move', start: pt, anchor: this.nearestCorner(b, pt), moved: new this.ps.Point(0, 0), label: '已移动',
-        box0: b.clone(), targets: this.alignTargets(this.sel), circ: this.sel.size === 1 ? this.circleOf([...this.sel][0]) : null };
+        box0: b.clone(), targets: this.alignTargets(this.sel), circ: this.sel.size === 1 ? this.circleOf([...this.sel][0]) : null,
+        v0: [e.event.offsetX, e.event.offsetY] };
       return;
     }
-    this.drag = { kind: 'marquee', from: pt };
+  }
+
+  // 点在哪个闭合图形内部：取面积最小的那个（板里的孔优先于板）
+  hitInside(pt) {
+    let best = null; let area = Infinity;
+    this.content.children.forEach((it) => {
+      if (!this.selectable(it) || !it.visible || !it.bounds.contains(pt)) return;
+      const ps = this.itemPaths(it).filter((q) => q.closed && q.contains(pt));
+      if (!ps.length) return;
+      const a = Math.min(...ps.map((q) => Math.abs(q.area) || q.bounds.area));
+      if (a < area) { area = a; best = it; }
+    });
+    return best;
+  }
+
+  // 鼠标按下后要先挪动 3 像素才算拖动（手抖的单击不会把图形挪走或吸到网格上）
+  dragStarted(d, ev) {
+    if (d.live || !d.v0) return true;
+    if (Math.hypot(ev.offsetX - d.v0[0], ev.offsetY - d.v0[1]) < 3) return false;
+    d.live = true;
+    return true;
   }
 
   nearestCorner(b, pt) {
@@ -1710,7 +1757,7 @@ export class SketchEditor {
     const fx = k.includes('l') ? b.right : k.includes('r') ? b.left : b.center.x;
     const fy = k === 'b' || k.startsWith('t') ? b.bottom : k === 't' || k.startsWith('b') ? b.top : b.center.y;
     // 拖动点坐标（paper 的 top = y 小）
-    const p = this.snap(pt, { exclude: this.sel });
+    const p = this.snap(d.grab ? d.grab.add(pt.subtract(d.start)) : pt, { exclude: this.sel });
     let sx = k === 't' || k === 'b' ? 1 : (p.x - fx) / ((k.includes('l') ? b.left : b.right) - fx);
     let sy = k === 'l' || k === 'r' ? 1 : (p.y - fy) / ((k === 't' || k.startsWith('t') ? b.top : b.bottom) - fy);
     if (!isFinite(sx) || Math.abs(sx) < 0.01) sx = 0.01 * Math.sign(sx || 1);
