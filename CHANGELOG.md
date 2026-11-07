@@ -1,6 +1,6 @@
 # 更新日志
 
-版本号规则：`主版本.次版本.修订`。每天收工时如果有功能变化，就打一个新标签（`git tag vX.Y.Z`）并推到 GitHub：双击 `scripts/push_github.command`（推送当前分支到 main 和所有标签）。
+版本号规则：`主版本.次版本.修订`。每天收工时如果有功能变化，就打一个新标签（`git tag vX.Y.Z`）并推到 GitHub。装过一次 `scripts/setup_autopush.command` 后，Mac 会在后台自动推送新提交和标签；也可以随时双击 `scripts/push_github.command` 手动推送。
 
 ## v0.2.0 — 2026-11-07
 
