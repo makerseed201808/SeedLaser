@@ -1,6 +1,6 @@
 [project]
 name = "seedboxes"
-version = "0.1.0"
+version = "0.2.0"
 description = "SeedBoxes — 基于 Boxes.py 二次开发的桌面客户端（PyWebView + 中文界面，Windows / macOS）"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }

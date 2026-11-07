@@ -52,3 +52,6 @@ _test_cython.bat
 # boxes 上游资源（scripts/fetch_boxes_assets.py 下载）
 boxes_assets/
 third_party/
+
+# 同步临时包
+.sync/

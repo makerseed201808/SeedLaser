@@ -61,7 +61,7 @@ def get_web_path() -> str:
 def main() -> None:
     api = Api()
     web_dir = get_web_path()
-    title = "SeedLaser v0.1"
+    title = "SeedLaser v0.2"
     window = webview.create_window(
         title=title,
         url=os.path.join(web_dir, "index.html"),
