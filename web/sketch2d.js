@@ -555,7 +555,7 @@ export class SketchEditor {
     }
     this.current = now;
     this.refresh();
-    if (label) this.status(label + (this.overlapWarn ? '　⚠ 有切割线交叉：橙色那块会被切成单独掉下来的小块；要挖掉或合并，请选中两个图形用「差集 / 并集」' : ''));
+    if (label) this.status(label);
     this.emitChange();
   }
 
@@ -705,24 +705,7 @@ export class SketchEditor {
       this.boardLayer.insertChild(at++, cp);
     });
     this.drawMarks();
-    // 两条切割轮廓交叉：重叠的那一块会被切成单独的小块（不是自动差集），用橙色标出来
-    if (!this.drag && loops.length <= 60) {
-      let warn = 0;
-      for (let i = 0; i < loops.length; i++) {
-        for (let k = i + 1; k < loops.length; k++) {
-          if (owner[i] === owner[k]) continue;        // 同一个图形自己的笔画（如文字）重叠不算
-          const A = loops[i]; const B = loops[k];
-          if (!A.bounds.intersects(B.bounds) || !A.getIntersections(B).length) continue;
-          const lens = A.intersect(B, { insert: false });
-          if (!lens || lens.isEmpty()) continue;
-          lens.fillColor = new this.ps.Color(0.98, 0.45, 0.09, 0.28);
-          lens.strokeColor = '#f97316'; lens.dashArray = [2, 2]; lens.strokeScaling = false; lens.strokeWidth = 1;
-          this.boardLayer.addChild(lens);
-          warn++;
-        }
-      }
-      this.overlapWarn = warn;
-    }
+    this.overlapWarn = 0;             // 重叠不再标色、不提示（用户要求）
   }
 
   // 连接点标记（橙色小横杠，跨在切割线上）
@@ -1925,52 +1908,7 @@ export class SketchEditor {
     this.style(shape);
     this.sel.clear();
     this.sel.add(shape);
-    const hits = this.content.children.filter((c) => c !== shape && c.data && c.data.mode && this.selectable(c)
-      && shape.bounds.intersects(c.bounds) && shape.getIntersections(c).length);
-    if (!hits.length) { this.commit('已添加图形'); return; }
-    // 和已有图形交叉：先不自动定切割 / 雕刻 / 描线，暂作描线（不影响板面），让用户选
-    shape.data.mode = 'score';
-    if (shape.data.role) shape.data.role = null;
-    this.style(shape);
-    this.commit('新图形和已有图形重叠了，请选择怎么处理');
-    this.askOverlap(shape, hits.find((c) => c.data.mode === 'cut' && this.itemPaths(c).every((p) => p.closed)));
-  }
-
-  askOverlap(shape, board) {
-    this.closeOverlap();
-    const box = document.createElement('div');
-    box.className = 'sk-overlap';
-    box.innerHTML = `<b>图形重叠了，要怎么处理？</b>
-      <div class="sk-overlap-row">
-        <button data-m="cut"><i style="background:${MODES.cut.color}"></i>切割</button>
-        <button data-m="engrave"><i style="background:${MODES.engrave.color}"></i>雕刻</button>
-        <button data-m="score"><i style="background:${MODES.score.color}"></i>描线</button>
-      </div>
-      ${board ? `<div class="sk-overlap-row">
-        <button data-b="unite" title="和板合成一个外轮廓（并集）">＋ 并入板</button>
-        <button data-b="subtract" title="从板上挖掉这一块（差集）">− 从板上减去</button>
-      </div>` : ''}
-      <span class="sk-small">先暂作「描线」，不影响板面；Esc 或点别处 = 保持描线</span>`;
-    const v = this.ps.view;
-    const p1 = v.projectToView(shape.bounds.topLeft);
-    const p2 = v.projectToView(shape.bounds.bottomRight);
-    box.style.left = `${Math.max(8, (p1.x + p2.x) / 2 - 120)}px`;
-    box.style.top = `${Math.max(p1.y, p2.y) + 10}px`;     // 放在图形正下方，不挡住它
-    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
-    box.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', () => {
-      this.closeOverlap();
-      this.sel = new Set([shape]);
-      this.applyMode(b.dataset.m);
-    }));
-    box.querySelectorAll('[data-b]').forEach((b) => b.addEventListener('click', () => {
-      this.closeOverlap();
-      if (!shape.parent || !board.parent) return;
-      shape.data.mode = board.data.mode;
-      this.sel = new Set([board, shape]);
-      this.boolean(b.dataset.b);
-    }));
-    this.$('.sk-dims').parentNode.appendChild(box);
-    this.overlapBox = box;
+    this.commit('已添加图形');                 // 和已有图形重叠也不提示（用户要求）；需要合并 / 挖掉时用「运算」
   }
 
   closeOverlap() {
