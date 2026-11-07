@@ -224,10 +224,10 @@ export class SketchEditor {
             <h4>镜像</h4>
             <div class="sk-btns">
               <button data-act="flipH" title="左右翻过来">水平镜像</button><button data-act="flipV" title="上下翻过来">垂直镜像</button>
-              <button data-act="mirCopyH" title="以板的竖直中线为对称轴，复制出左右对称的另一半">左右镜像复制</button>
-              <button data-act="mirCopyV" title="以板的水平中线为对称轴，复制出上下对称的另一半">上下镜像复制</button>
+              <button data-act="mirCopyH" title="复制出左右对称的另一半：板上的孔 / 刻字以这块板的中线对称；其他图形紧贴在右边">左右镜像复制</button>
+              <button data-act="mirCopyV" title="复制出上下对称的另一半：板上的孔 / 刻字以这块板的中线对称；其他图形紧贴在下边">上下镜像复制</button>
             </div>
-            <p class="sk-small">「镜像」翻转选中的图形本身；「镜像复制」保留原图，再复制出对称的一份（对称轴是板的中线）。</p>
+            <p class="sk-small">「镜像」翻转选中的图形本身；「镜像复制」保留原图，再复制出对称的一份：板上的孔、刻字按这块板的中线对称；独立的图形紧贴在右边（上下镜像紧贴在下边），画一半镜像一下就是完整的对称形状。</p>
           </section>
           <section class="sk-card" data-panel="transform" data-key="t-rotate">
             <h4>旋转</h4>
@@ -3819,13 +3819,31 @@ export class SketchEditor {
   }
 
   // 镜像复制：以整块板的中线为对称轴
+  // 镜像复制的对称轴：
+  //   选中的是某块板上的孔 / 刻字 / 描线 → 这块板自己的中线（在板上左右 / 上下对称）；
+  //   其他（独立图形、整块板）→ 紧贴选中图形的右边线（上下：下边线），画一半镜像一下就是完整的对称形状
+  mirrorAxis(horizontal) {
+    const items = [...this.sel];
+    const b = this.selBounds();
+    if (!this.sheetMode) return { c: this.boardBounds().center, why: '以板的中线为对称轴' };
+    const { parts } = this.recognizeParts();
+    const host = parts.find((p) => items.every((it) => it !== p.item && p.members.includes(it)));
+    if (host) {
+      const names = (this.part && this.part.names) || {};
+      return { c: host.bounds.center, why: `以「${names[host.item.data.pid] || '这块板'}」的${horizontal ? '竖直' : '水平'}中线为对称轴` };
+    }
+    // paper 的 top = y 小 = 屏幕下方
+    return horizontal ? { c: new this.ps.Point(b.right, b.center.y), why: '紧贴在右边' }
+      : { c: new this.ps.Point(b.center.x, b.top), why: '紧贴在下边' };
+  }
+
   mirrorCopy(horizontal) {
     if (!this.need(1)) return;
-    const c = this.boardBounds().center;
+    const { c, why } = this.mirrorAxis(horizontal);
     const copies = this.regroup([...this.sel].map((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); return k; }));
     copies.forEach((k) => k.scale(horizontal ? -1 : 1, horizontal ? 1 : -1, c));
     this.sel = new Set([...this.sel, ...copies]);
-    this.commit(horizontal ? '已左右镜像复制' : '已上下镜像复制');
+    this.commit(`已${horizontal ? '左右' : '上下'}镜像复制（${why}）`);
   }
 
   // 删除完全重合的图形（起点不同、方向相反的也算重合）
