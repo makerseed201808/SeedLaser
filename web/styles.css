@@ -1019,3 +1019,6 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-layers-card h4 { display: flex; align-items: center; }
 .sk-card-x { margin-left: auto; border: 0 !important; background: transparent !important; color: #8a95a3; padding: 0 4px !important; font-size: 12px; cursor: pointer; }
 .sk-card-x:hover { color: #1f2933; }
+
+.sk-side [data-panel].hidden, .sk-boardinfo.hidden { display: none; }
+.sk-tools-sep { display: block; height: 1px; background: #e1e6ed; margin: 4px 2px; flex-shrink: 0; }

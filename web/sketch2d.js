@@ -28,6 +28,11 @@ const TOOLS = [
   { id: 'bridge', key: 'b', icon: '⫶', name: '连接点', tip: '在切割线上点一下加连接点（留一小段不切），镂空的部分切完不会掉下来；再点一次删除（B）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '拖动测量距离和角度（M）' },
+  // 下面是「功能面板」：画布上照常可以选择 / 移动，右侧只显示对应的参数卡片
+  { id: 'p-align', panel: 'align', sep: true, icon: '⫴', name: '对齐', tip: '对齐与分布：先选中图形（Shift 多选或框选），再点右侧的对齐方式' },
+  { id: 'p-bool', panel: 'bool', icon: '◑', name: '运算', tip: '形状运算（并集 / 差集 / 交集 / 异或）和偏移：先选中图形' },
+  { id: 'p-array', panel: 'array', icon: '⁙', name: '阵列', tip: '阵列（直线 / 环形 / 沿路径 / 矩形）：先选中一个图形，右侧设置后点「阵列」' },
+  { id: 'p-transform', panel: 'transform', icon: '⟲', name: '变换', tip: '圆角 / 倒角、镜像、旋转 90°、闭合、拆分、编组、删除重复图形：先选中图形' },
 ];
 
 // 对齐 / 分布图标（16×16 线框）
@@ -129,7 +134,7 @@ export class SketchEditor {
         <span class="sk-num-hint">回车生效（X / Y 为左下角）</span>
       </div>
       <div class="sk-main">
-        <div class="sk-tools">${TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}"><span class="i">${t.icon}</span>${t.name}</button>`).join('')}</div>
+        <div class="sk-tools">${TOOLS.map((t) => `${t.sep ? '<i class="sk-tools-sep"></i>' : ''}<button data-tool="${t.id}" title="${t.tip}"><span class="i">${t.icon}</span>${t.name}</button>`).join('')}</div>
         <div class="sk-canvas-wrap"><canvas class="sk-canvas" resize></canvas>
           <canvas class="sk-ruler-x" title="从标尺往画布上拖，拉出参考线"></canvas><canvas class="sk-ruler-y" title="从标尺往画布上拖，拉出参考线"></canvas>
           <div class="sk-ruler-corner" title="清除所有参考线">✕</div>
@@ -151,7 +156,7 @@ export class SketchEditor {
             </div>
             <p class="sk-small">选中图形后点图层（或下方色块）即可改加工方式；新画的图形使用当前图层。</p>
           </section>
-          <section class="sk-card">
+          <section class="sk-card" data-panel="align">
             <h4>对齐与分布</h4>
             <div class="sk-row"><label>对齐到<select data-opt="alignTo">
               <option value="sel">选区（所有选中图形的外框）</option>
@@ -162,7 +167,7 @@ export class SketchEditor {
             <p class="sk-small sk-align-hint">按住 Shift 点选多个图形（或框选），再点对齐方式。只选一个时对齐到整块板。</p>
           </section>
           <section class="sk-card sk-toolopts"></section>
-          <section class="sk-card">
+          <section class="sk-card" data-panel="bool">
             <h4>形状运算</h4>
             <div class="sk-btns">
               <button data-act="unite" data-bh="unite">并集</button>
@@ -175,11 +180,11 @@ export class SketchEditor {
               <select data-opt="offsetJoin"><option value="round">圆角</option><option value="miter">尖角</option></select>
               <button data-act="offset" title="生成外扩（正数）/ 内缩（负数）的新轮廓">偏移</button></div>
           </section>
-          <section class="sk-card">
+          <section class="sk-card" data-panel="array">
             <h4>阵列</h4>
             <div class="sk-array"></div>
           </section>
-          <section class="sk-card">
+          <section class="sk-card" data-panel="transform">
             <h4>变换</h4>
             <div class="sk-row"><label>圆角 / 倒角<input data-opt="cornerR" type="number" min="0.1" step="0.5" value="3"> mm</label>
               <button data-act="fillet" title="把选中图形的尖角变圆（节点工具下只改当前节点）">圆角</button>
@@ -558,9 +563,19 @@ export class SketchEditor {
     this.updateNumeric();
     this.renderToolOpts();
     this.updateCounts();
+    this.updateCards();
     const lockBtn = this.$('.sk-lock');
     lockBtn.textContent = this.outlineLocked ? '🔒 外轮廓已锁定' : '🔓 外轮廓可编辑';
     lockBtn.classList.toggle('on', !this.outlineLocked);
+  }
+
+  // 右侧卡片：只显示当前工具对应的那一张（工具参数卡片有内容时也显示）
+  updateCards() {
+    if (!this.$) return;
+    this.$$('.sk-side [data-panel]').forEach((c) => c.classList.toggle('hidden', c.dataset.panel !== this.panel));
+    const board = this.$('.sk-boardinfo');
+    if (board) board.classList.toggle('hidden', !!this.panel || this.tool !== 'select' || this.sel.size > 0);
+    if (this.arrActive && this.panel !== 'array') { this.arrActive = false; this.drawSelection(); }
   }
 
   updateCounts() {
@@ -1205,6 +1220,22 @@ export class SketchEditor {
   // ================================================================ 工具
 
   setTool(id) {
+    // 功能面板：画布按「选择」工具工作，右侧只显示这个面板；再点一次同一个按钮回到选择
+    const def = TOOLS.find((q) => q.id === id);
+    if (def && def.panel) {
+      const off = this.panel === def.panel;
+      this.panel = off ? null : def.panel;
+      this.panelTool = off ? null : id;
+      if (this.tool !== 'select') this.setTool('select');
+      this.panel = off ? null : def.panel;            // setTool('select') 会清掉，补回
+      this.panelTool = off ? null : id;
+      this.$$('.sk-tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === (this.panelTool || 'select')));
+      this.status(off ? TOOLS[0].tip : def.tip);
+      this.updateCards();
+      return;
+    }
+    this.panel = null;
+    this.panelTool = null;
     this.closeOverlap();
     this.finishDrawing();
     if (this.opts.jointPeer && this.opts.jointPeer.pair) this.opts.jointPeer = null;
@@ -3023,8 +3054,8 @@ export class SketchEditor {
     const steps = [
       { sel: '.sk-tools', title: '① 画图工具', text: '直线、曲线、矩形、圆、文字……点一下就能用，鼠标停在按钮上会显示用法和快捷键。' },
       { sel: '.sk-palette', title: '② 加工方式', text: '蓝色 = 切穿，绿色 = 雕刻，红色 = 描线。先选中图形，再点颜色就能改。' },
-      { sel: '.sk-numeric', title: '③ 精确尺寸', text: '选中图形后在这里输入位置、宽高、角度；右边一排是对齐按钮。也可以直接点图上的长度数字修改。' },
-      { sel: '.sk-side', title: '④ 更多操作', text: '形状运算（并集 / 差集…）、阵列、对齐、圆角、镜像复制都在右侧。卡榫、插槽工具让板子能拼起来。' },
+      { sel: '.sk-numeric', title: '③ 精确尺寸', text: '选中图形后在这里输入位置、宽高、角度；后面一排是对齐按钮。也可以直接点图上的长度数字修改；单击图形上方的蓝点可以输入旋转角度。' },
+      { sel: '.sk-tools-sep', title: '④ 更多操作', text: '左边下面一组是功能：对齐、运算（并集 / 差集…）、阵列、变换（圆角、镜像复制…）。点哪个，右侧就出现哪个的参数。卡榫、插槽工具让板子能拼起来。' },
       { sel: '.sk-3d', title: '⑤ 3D 实时预览', text: '每改一次，3D 都会更新，并检查和相邻的板会不会撞在一起（红色 = 穿透）。' },
       { sel: '.sk-back', title: '⑥ 完成', text: '画好了点这里回到主界面；修改会自动保存到项目里。' },
     ];

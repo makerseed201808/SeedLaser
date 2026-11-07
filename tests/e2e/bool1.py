@@ -18,6 +18,7 @@ async def main():
         await pg.mouse.move(c[0]-40, c[1]-30); await pg.mouse.down(); await pg.mouse.move(c[0]+50, c[1]+60, steps=6); await pg.mouse.up()
         await pg.keyboard.up('Control'); await pg.wait_for_timeout(300)
         await pg.click('.sk-overlap [data-m=cut]'); await pg.wait_for_timeout(300)
+        await pg.click('[data-tool=p-bool]')
         await pg.click('[data-act=subtract]'); await pg.wait_for_timeout(500)
         print(await pg.evaluate(f"{ed}.content.children.map(c=>[c.data.pid?'板':'圆', Math.round(Math.abs(c.area))])"))
         print(await pg.evaluate("document.querySelector('.sk-status').textContent"))
