@@ -8,7 +8,7 @@
 const MODES = {
   cut: { name: '切割', color: '#1f6feb', hint: '激光切穿' },
   engrave: { name: '雕刻', color: '#16a34a', hint: '填充雕刻（闭合图形）' },
-  score: { name: '描线', color: '#c026d3', hint: '沿线浅刻' },
+  score: { name: '描线', color: '#dc2626', hint: '沿线浅刻' },
 };
 const OUTLINE_COLOR = '#1c2733';
 const WOOD = '#ead3ac';
@@ -505,7 +505,7 @@ export class SketchEditor {
     }
     this.current = now;
     this.refresh();
-    if (label) this.status(label + (this.overlapWarn ? '　⚠ 有切割线交叉：红色那块会被切成单独掉下来的小块；要挖掉或合并，请选中两个图形用「差集 / 并集」' : ''));
+    if (label) this.status(label + (this.overlapWarn ? '　⚠ 有切割线交叉：橙色那块会被切成单独掉下来的小块；要挖掉或合并，请选中两个图形用「差集 / 并集」' : ''));
     this.emitChange();
   }
 
@@ -583,7 +583,7 @@ export class SketchEditor {
       this.boardLayer.insertChild(at++, cp);
     });
     this.drawMarks();
-    // 两条切割轮廓交叉：重叠的那一块会被切成单独的小块（不是自动差集），用红色标出来
+    // 两条切割轮廓交叉：重叠的那一块会被切成单独的小块（不是自动差集），用橙色标出来
     if (!this.drag && loops.length <= 60) {
       let warn = 0;
       for (let i = 0; i < loops.length; i++) {
@@ -593,8 +593,8 @@ export class SketchEditor {
           if (!A.bounds.intersects(B.bounds) || !A.getIntersections(B).length) continue;
           const lens = A.intersect(B, { insert: false });
           if (!lens || lens.isEmpty()) continue;
-          lens.fillColor = new this.ps.Color(0.94, 0.27, 0.27, 0.28);
-          lens.strokeColor = '#ef4444'; lens.dashArray = [2, 2]; lens.strokeScaling = false; lens.strokeWidth = 1;
+          lens.fillColor = new this.ps.Color(0.98, 0.45, 0.09, 0.28);
+          lens.strokeColor = '#f97316'; lens.dashArray = [2, 2]; lens.strokeScaling = false; lens.strokeWidth = 1;
           this.boardLayer.addChild(lens);
           warn++;
         }
@@ -1819,7 +1819,7 @@ export class SketchEditor {
     const piece = this.trimPiece(pt);
     if (!piece) return;
     this.rubber = piece.preview;
-    this.rubber.strokeColor = '#ef4444';
+    this.rubber.strokeColor = '#f97316';
     this.rubber.strokeWidth = 3;
     this.rubber.strokeScaling = false;
     this.overlay.addChild(this.rubber);
@@ -2962,7 +2962,7 @@ export class SketchEditor {
   startTour() {
     const steps = [
       { sel: '.sk-tools', title: '① 画图工具', text: '直线、曲线、矩形、圆、文字……点一下就能用，鼠标停在按钮上会显示用法和快捷键。' },
-      { sel: '.sk-palette', title: '② 加工方式', text: '蓝色 = 切穿，绿色 = 雕刻，紫色 = 描线。先选中图形，再点颜色就能改。' },
+      { sel: '.sk-palette', title: '② 加工方式', text: '蓝色 = 切穿，绿色 = 雕刻，红色 = 描线。先选中图形，再点颜色就能改。' },
       { sel: '.sk-numeric', title: '③ 精确尺寸', text: '选中图形后在这里输入位置、宽高、角度；右边一排是对齐按钮。也可以直接点图上的长度数字修改。' },
       { sel: '.sk-side', title: '④ 更多操作', text: '形状运算（并集 / 差集…）、阵列、对齐、圆角、镜像复制都在右侧。卡榫、插槽工具让板子能拼起来。' },
       { sel: '.sk-3d', title: '⑤ 3D 实时预览', text: '每改一次，3D 都会更新，并检查和相邻的板会不会撞在一起（红色 = 穿透）。' },
