@@ -952,6 +952,7 @@ function applyPendingImport() {
   else { if (imp.thickness) setFormNum('thickness', imp.thickness); if (imp.burn >= 0) setFormNum('burn', imp.burn); }
   W.wantSheet = true;
   W.stage = 'design';
+  W.quietParamsUntil = Date.now() + 2000;   // 放进设计时改板厚 / 切缝是有意的，位置也随模型带来，不提示「参数已改变」
   const warn = p0 && Number(p0.thickness) !== imp.thickness ? `；注意：模型按 ${imp.thickness} mm 板厚生成，当前设计是 ${p0.thickness} mm` : '';
   toast(`已把「${imp.from}」的 ${imp.parts.length} 块板放进${into ? '当前' : '新'}设计${imp.assembled ? '，3D 装配位置也带过来了' : ''}${warn}`, warn ? 'info' : 'success');
 }
@@ -2651,7 +2652,7 @@ window.SeedWorkshop = {
   setFileLabel(t) { if (sketchEd) sketchEd.setFileLabel(t); },
   paramsChanged: debounce(() => {
     W.stale = true;
-    W.paramsDirty = true;
+    if (!(W.quietParamsUntil && Date.now() < W.quietParamsUntil)) W.paramsDirty = true;
     if (W.mode === '3d') loadModel();
   }, 600),
   refresh() { W.stale = true; if (W.mode === '3d') loadModel(); },

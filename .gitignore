@@ -55,3 +55,5 @@ third_party/
 
 # 同步临时包
 .sync/
+# Cowork 输出
+Claude outputs/
