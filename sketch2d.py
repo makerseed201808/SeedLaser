@@ -153,7 +153,7 @@ def geometry_3d(sketch: dict) -> dict | None:
 
 def cut_polylines(sketch: dict, burn: float = 0.0) -> list[tuple[list, bool, bool]]:
     """闭合切割轮廓（按 burn 补偿后）→ [(点列, 是否闭合, 是否外轮廓)]。
-    有连接点（item["bridges"]）的轮廓在连接点处断开，留下 bridge_w 宽的材料不切。"""
+    有水口（item["bridges"]）的轮廓在水口处断开，留下 bridge_w 宽的材料不切。"""
     from shapely.geometry import LineString, Point
     from shapely.ops import substring
 
@@ -178,7 +178,7 @@ def cut_polylines(sketch: dict, burn: float = 0.0) -> list[tuple[list, bool, boo
             line = LineString(list(ring.coords))
             L = line.length
             cuts = sorted(line.project(b) for b in near)
-            # 从第一个连接点之后开始，逐段输出（跳过每个连接点两侧 gap/2）
+            # 从第一个水口之后开始，逐段输出（跳过每个水口两侧 gap/2）
             for j, d in enumerate(cuts):
                 start = d + gap / 2
                 end = cuts[(j + 1) % len(cuts)] - gap / 2 + (L if j == len(cuts) - 1 else 0)

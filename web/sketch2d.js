@@ -32,7 +32,7 @@ const TOOLS = [
   { id: 'text', key: 't', icon: 'T', name: '文字', tip: '单击放置文字，右侧修改内容、字体、字号（T）' },
   { id: 'joint', key: 'j', icon: '⊓', name: '卡榫', tip: '单击板的一条直边，把它做成指接卡榫 / 凹槽（深度 = 板厚）（J）' },
   { id: 'mortise', key: 'k', icon: '▤', name: '插槽', tip: '在板面上开一排插槽孔，让另一块板的指接 A 边插进来（T 型连接）；拖出插槽中线，或先在右侧选配对边再单击（K）' },
-  { id: 'bridge', key: 'b', icon: '⫶', name: '连接点', tip: '在切割线上点一下加连接点（留一小段不切），镂空的部分切完不会掉下来；再点一次删除（B）' },
+  { id: 'bridge', key: 'b', icon: '⫶', name: '水口', tip: '在切割线上点一下加水口：留一小段不切，零件切完还连在板上不会掉，取下时用刀片划断；再点一次删除（B）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '拖动测量距离和角度（M）' },
   // 下面是「功能面板」：画布上照常可以选择 / 移动，右侧只显示对应的参数卡片
@@ -709,7 +709,7 @@ export class SketchEditor {
     this.overlapWarn = 0;             // 重叠不再标色、不提示（用户要求）
   }
 
-  // 连接点标记（橙色小横杠，跨在切割线上）
+  // 水口标记（橙色小横杠，跨在切割线上）
   drawMarks() {
     this.marks.removeChildren();
     const w = Math.max(0.3, Number(this.opts.bridgeW) || 1);
@@ -732,18 +732,18 @@ export class SketchEditor {
     });
   }
 
-  // ---------------------------------------------------------------- 连接点
+  // ---------------------------------------------------------------- 水口
 
   bridgeAt(pt) {
     const tol = 7 / this.zoom;
-    // 点在已有连接点上：删除
+    // 点在已有水口上：删除
     for (const it of this.content.children) {
       const list = it.data && it.data.bridges;
       if (!list) continue;
       const i = list.findIndex(([x, y]) => Math.hypot(x - pt.x, y - pt.y) < tol);
       if (i >= 0) {
         it.data.bridges = list.filter((_, k) => k !== i);
-        this.commit('已删除连接点');
+        this.commit('已删除水口');
         return;
       }
     }
@@ -753,7 +753,7 @@ export class SketchEditor {
     const it = this.topItem(res.item);
     const p = res.location.point;
     it.data.bridges = [...(it.data.bridges || []), [p.x, p.y]];
-    this.commit(`已加连接点（宽 ${fmt(this.opts.bridgeW)} mm）`);
+    this.commit(`已加水口（宽 ${fmt(this.opts.bridgeW)} mm）`);
   }
 
   autoBridges() {
@@ -769,8 +769,8 @@ export class SketchEditor {
       });
       if (list.length) { it.data.bridges = list; count += list.length; }
     });
-    if (!count) { this.toast('没有可以加连接点的闭合切割图形（先选中镂空图形）', 'error'); return; }
-    this.commit(`已自动加 ${count} 个连接点`);
+    if (!count) { this.toast('没有可以加水口的闭合切割图形（先选中镂空图形）', 'error'); return; }
+    this.commit(`已自动加 ${count} 个水口`);
   }
 
   // 生成器原始轮廓（虚线参考）
@@ -3352,7 +3352,7 @@ export class SketchEditor {
   showKeys() {
     const groups = [
       ['工具', [['V', '选择'], ['A', '节点编辑'], ['L', '直线'], ['P', '曲线（钢笔）'], ['R', '矩形'], ['E', '椭圆'], ['G', '多边形 / 星形'],
-        ['T', '文字'], ['J', '卡榫'], ['K', '插槽'], ['B', '连接点'], ['X', '修剪'], ['M', '测量']]],
+        ['T', '文字'], ['J', '卡榫'], ['K', '插槽'], ['B', '水口'], ['X', '修剪'], ['M', '测量']]],
       ['编辑', [['Ctrl/⌘ + Z', '撤销'], ['Ctrl/⌘ + Shift + Z', '重做'], ['Ctrl/⌘ + C / V', '复制 / 粘贴'], ['Ctrl/⌘ + D', '原位复制一份'],
         ['Delete', '删除（节点工具下删节点）'], ['Ctrl/⌘ + A', '全选'], ['Ctrl/⌘ + G', '编组'], ['Ctrl/⌘ + Shift + G', '取消编组'], ['Ctrl/⌘ + I', '导入']]],
       ['移动与视图', [['方向键', '移动（按吸附步长）'], ['Shift + 方向键', '移动 10 mm'], ['F', '适合窗口'], ['滚轮', '缩放'],
@@ -3527,11 +3527,11 @@ export class SketchEditor {
         html += this.peerHtml(t);
       }
     } else if (t === 'bridge') {
-      html = `<h4>连接点（搭桥）</h4>
+      html = `<h4>水口（微连）</h4>
         <div class="sk-row"><label>宽度<input data-o="bridgeW" type="number" min="0.2" step="0.1" value="${this.opts.bridgeW}"> mm</label></div>
         <div class="sk-row"><label>每个图形<input data-o="bridgeN" type="number" min="1" step="1" value="${this.opts.bridgeN || 2}"> 个</label>
           <button data-bridge="auto">自动加</button><button data-bridge="clear">清除</button></div>
-        <p class="sk-small">在切割线上单击加一个；点橙色标记删除。「自动加」作用于选中的图形（没选时作用于所有镂空）。切完用刀片划断连接点即可取下。</p>`;
+        <p class="sk-small">在切割线上单击加一个；点橙色标记删除。「自动加」作用于选中的图形（没选时作用于所有镂空）。切完用刀片划断水口即可取下。<br>建议：每个零件 2 个、放在相对的直边上；不要放在卡榫 / 插槽边上，留下的小凸起会让榫插不进去。</p>`;
     } else if (t === 'trim') html = '<h4>修剪</h4><p class="sk-small">鼠标移到线上会标红将被删掉的一段（到最近的交点为止），单击或拖过即删除。没有交点的整条路径会被整个删掉。</p>';
     if ((t === 'joint' || t === 'mortise') && !this.findEdit()) html = this.staleJointsHtml() + html;
     box.innerHTML = html;
@@ -3549,7 +3549,7 @@ export class SketchEditor {
         const targets = this.sel.size ? [...this.sel] : this.content.children;
         let n = 0;
         targets.forEach((it) => { if (it.data && it.data.bridges && it.data.bridges.length) { n += it.data.bridges.length; it.data.bridges = null; } });
-        if (n) this.commit(`已清除 ${n} 个连接点`);
+        if (n) this.commit(`已清除 ${n} 个水口`);
       }
     }));
     box.querySelectorAll('[data-je]').forEach((b) => b.addEventListener('click', () => {
