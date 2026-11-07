@@ -45,10 +45,11 @@ launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null
 launchctl bootstrap "gui/$(id -u)" "$PLIST" || { echo "❌ 安装失败"; pause; exit 1; }
 echo "已安装。正在做第一次检查（约 15 秒）…"
 echo "如果 macOS 弹出「bash 想访问『桌面』文件夹」，请点「允许」。"
+: > "$LOG.new" 2>/dev/null; tail -n 50 "$LOG" > "$LOG.new" 2>/dev/null; echo "---- $(date '+%Y-%m-%d %H:%M:%S') 重新安装 ----" >> "$LOG.new"; mv "$LOG.new" "$LOG"
 sleep 15
 echo "---- 最近的日志 ----"
 tail -n 5 "$LOG" 2>/dev/null || echo "（还没有日志：说明没有需要推送的内容）"
-if tail -n 3 "$LOG" 2>/dev/null | grep -q "进不了仓库文件夹"; then
+if tail -n 3 "$LOG" 2>/dev/null | grep -qE "进不了仓库文件夹|Operation not permitted"; then
   echo
   echo "⚠ macOS 不让后台程序访问「桌面」。请打开：系统设置 → 隐私与安全性 → 完全磁盘访问权限，"
   echo "  点「+」，按 ⌘⇧G 输入 /bin/bash 添加并打开开关，然后再双击本脚本一次。"

@@ -7,7 +7,11 @@ REPO="$1"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
 notify() { osascript -e "display notification \"$1\" with title \"SeedLaser\"" >/dev/null 2>&1; }
 
-cd "$REPO" 2>/dev/null || { log "❌ 进不了仓库文件夹 $REPO（多半是 macOS 隐私权限：需要允许 bash 访问「桌面」文件夹）"; exit 1; }
+# 后台程序读「桌面」要权限：cd 能成功但读不了内容，所以用 ls 实测一下
+if ! cd "$REPO" 2>/dev/null || ! ls "$REPO/.git" >/dev/null 2>&1; then
+  log "❌ 进不了仓库文件夹 $REPO（macOS 隐私权限：请在「完全磁盘访问权限」里加上 /bin/bash）"
+  exit 1
+fi
 
 # 同一时间只跑一个；等几秒让提交 / 打标签写完
 LOCK="/tmp/seedlaser-autopush.lock"
