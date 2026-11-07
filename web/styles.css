@@ -1004,3 +1004,13 @@ input, textarea, select { font: inherit; user-select: text; }
 .fit-box h4 { margin: 12px 0 4px; font-size: 13px; }
 .fit-res { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 6px 10px; font-size: 13px; line-height: 1.7; margin-top: 6px; }
 .fit-warn { color: #b45309; font-size: 12px; margin: 4px 0 0; }
+
+.sk-rotbox { position: absolute; z-index: 6; width: 220px; background: #fff; border: 1px solid #93c5fd; border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.14); padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.sk-rotbox input { width: 70px; margin: 0 4px; }
+.sk-rot-quick { display: flex; flex-wrap: wrap; gap: 4px; }
+.sk-rot-quick button { padding: 2px 6px; font-size: 11px; }
+.sk-rot-act { display: flex; justify-content: flex-end; gap: 6px; }
+
+.sk-num-sep { width: 1px; height: 20px; background: #d3dae3; margin: 0 2px; display: inline-block; }
+.sk-numeric { flex-wrap: wrap; row-gap: 4px; }

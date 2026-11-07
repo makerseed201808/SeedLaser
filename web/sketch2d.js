@@ -122,11 +122,11 @@ export class SketchEditor {
         <label>高<input data-num="h" type="number" step="0.1" min="0.1"></label>
         <button class="sk-ratio on" data-act="ratio" title="锁定宽高比">🔗</button>
         <label>旋转<input data-num="rot" type="number" step="1" value="0"></label><span class="sk-unit">°</span>
-        <span class="sk-num-hint">回车生效（X / Y 为左下角）</span>
-        <span class="sk-spacer"></span>
+        <i class="sk-sep sk-num-sep"></i>
         <span class="sk-num-label">对齐</span>
         <span class="sk-aligns">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}">${alignIcon(k)}</button>`).join('')}
           <i class="sk-sep"></i>${['dh', 'dv'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}（选 3 个以上）">${alignIcon(k)}</button>`).join('')}</span>
+        <span class="sk-num-hint">回车生效（X / Y 为左下角）</span>
       </div>
       <div class="sk-main">
         <div class="sk-tools">${TOOLS.map((t) => `<button data-tool="${t.id}" title="${t.tip}"><span class="i">${t.icon}</span>${t.name}</button>`).join('')}</div>
@@ -1219,6 +1219,7 @@ export class SketchEditor {
   onDown(e) {
     const ev = e.event;
     this.closeOverlap();
+    this.closeRotateBox();
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
     if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView }; return; }
     const pt = e.point;
@@ -1332,7 +1333,10 @@ export class SketchEditor {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
-    if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'node') this.commit(d.label || '已修改');
+    if (d.kind === 'rotate' && !d.moved) {           // 单击手柄：不算一次修改，改为输入角度
+      this.undoStack.pop();
+      this.askRotate(d.center);
+    } else if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'node') this.commit(d.label || '已修改');
     else if (d.kind === 'marquee') {
       if (d.box) {
         const r = d.box.bounds;
@@ -1375,7 +1379,7 @@ export class SketchEditor {
       this.pushUndo();
       const b = this.selBounds();
       if (h.kind === 'rotate') {
-        this.drag = { kind: 'rotate', center: b.center, start: pt.subtract(b.center).angle, applied: 0, label: '已旋转', pushed: true };
+        this.drag = { kind: 'rotate', center: b.center, x0: e.event.offsetX, moved: false, applied: 0, label: '已旋转', pushed: true };
       } else {
         this.drag = { kind: 'scale', key: h.key, bounds: b, sx: 1, sy: 1, label: '已缩放' };
       }
@@ -1430,14 +1434,58 @@ export class SketchEditor {
     this.status(`尺寸 ${fmt(nb.width)} × ${fmt(nb.height)} mm`);
   }
 
+  // 按住旋转手柄左右拖：向右 = 顺时针，每 2 像素 1°（小幅度微调）；按住 Shift 按 15° 一档
   rotateDrag(d, pt, ev) {
-    let a = pt.subtract(d.center).angle - d.start;
-    const step = ev.shiftKey ? 1 : 15;
-    a = Math.round(a / step) * step;
+    const dx = ev.offsetX - d.x0;
+    if (Math.abs(dx) > 3) d.moved = true;
+    if (!d.moved) return;
+    let a = dx / 2;
+    a = ev.shiftKey ? Math.round(a / 15) * 15 : Math.round(a);
     const delta = a - d.applied;
-    if (delta) { this.sel.forEach((it) => it.rotate(delta, d.center)); d.applied = a; }
+    if (delta) { this.sel.forEach((it) => it.rotate(-delta, d.center)); d.applied = a; }   // 向右拖 = 顺时针
     this.drawSelection();
-    this.status(`旋转 ${fmt(((a % 360) + 360) % 360)}°（Shift 取消 15° 吸附）`);
+    this.status(`${a >= 0 ? '顺时针' : '逆时针'} ${fmt(Math.abs(a))}°（左右拖动微调；Shift = 15° 一档；松开手柄不拖 = 输入角度）`);
+  }
+
+  // 单击旋转手柄（没有拖动）：弹出小框输入角度
+  askRotate(center) {
+    this.closeRotateBox();
+    const box = document.createElement('div');
+    box.className = 'sk-rotbox';
+    box.innerHTML = `<label>旋转<input type="number" step="1" value="90"> °</label>
+      <div class="sk-rot-quick">${[-90, -45, -15, 15, 45, 90, 180].map((v) => `<button data-v="${v}">${v > 0 ? '+' : ''}${v}°</button>`).join('')}</div>
+      <p class="sk-small">正数 = 逆时针（和上方「旋转」框一致）。回车确定，Esc 取消。</p>
+      <div class="sk-rot-act"><button data-a="cancel">取消</button><button data-a="ok" class="primary">旋转</button></div>`;
+    const v = this.ps.view;
+    const b = this.selBounds();
+    const p1 = v.projectToView(b.topLeft); const p2 = v.projectToView(b.bottomRight);
+    box.style.left = `${Math.max(8, (p1.x + p2.x) / 2 - 110)}px`;
+    const top = Math.min(p1.y, p2.y) - 160;
+    box.style.top = `${top >= 8 ? top : Math.max(p1.y, p2.y) + 12}px`;   // 上方放不下就放到图形下方，不挡住图形
+    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    const inp = box.querySelector('input');
+    const apply = (deg) => {
+      this.closeRotateBox();
+      if (!Number.isFinite(deg) || !deg || !this.sel.size) return;
+      this.pushUndo();
+      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.rotate(deg, center); });
+      this.commit(`已旋转 ${deg > 0 ? '逆时针' : '顺时针'} ${fmt(Math.abs(deg))}°`, true);
+    };
+    box.querySelectorAll('[data-v]').forEach((btn) => btn.addEventListener('click', () => apply(Number(btn.dataset.v))));
+    box.querySelector('[data-a=ok]').addEventListener('click', () => apply(Number(inp.value)));
+    box.querySelector('[data-a=cancel]').addEventListener('click', () => this.closeRotateBox());
+    inp.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') apply(Number(inp.value));
+      if (ev.key === 'Escape') this.closeRotateBox();
+    });
+    this.$('.sk-dims').parentNode.appendChild(box);
+    this.rotateBox = box;
+    setTimeout(() => { inp.focus(); inp.select(); }, 0);
+  }
+
+  closeRotateBox() {
+    if (this.rotateBox) { this.rotateBox.remove(); this.rotateBox = null; }
   }
 
   cloneItem(it) {
@@ -3033,7 +3081,7 @@ export class SketchEditor {
       this.sel.forEach((it) => { this.convertTextIfRotated(it); it.scale(sx, sy, b.topLeft); });
     } else if (k === 'rot') {
       if (!v) return;
-      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.rotate(-v, b.center); });   // 正数 = 逆时针（数学方向）
+      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.rotate(v, b.center); });   // 正数 = 逆时针（数据坐标 y 向上，paper 的正角 = 逆时针）
     }
     this.commit('已修改尺寸 / 位置');
   }
