@@ -42,6 +42,12 @@ async def main():
         await pg.mouse.move(hx + 3 + 40, hy + 2, steps=6)        # 40 像素 = 2 mm
         await pg.mouse.up()
         w = (await B())[2]; assert abs(w - 46) < 0.6, w
+        # 4b 光标：旋转手柄 = 旋转箭头，右边手柄 = 左右箭头，选中图形内部 = 移动
+        cur = lambda: pg.evaluate(f"{ED}.canvas.style.cursor")
+        bb = await B(); rx, ry = await pg.evaluate(f"(()=>{{const e={ED};const r=e.canvas.getBoundingClientRect();const h=e.handles.find(h=>h.kind==='rotate');const v=e.ps.view.projectToView(h.at);return [v.x+r.left,v.y+r.top]}})()")
+        await pg.mouse.move(rx + 1, ry); c = await cur(); assert 'svg' in c, c
+        hx, hy = await V(bb[0] + bb[2], bb[1] + bb[3] / 2); await pg.mouse.move(hx, hy); assert await cur() == 'ew-resize', await cur()
+        x, y = await V(bb[0] + 10, bb[1] + 10); await pg.mouse.move(x, y); assert await cur() == 'move', await cur()
         # 5 单击空白取消选择；在内部拖动（未选中）= 框选，不移动
         await pg.mouse.click(*(await V(5, 5)))
         assert await sel() == 0
@@ -50,6 +56,6 @@ async def main():
         assert await B() == before
         await b.close()
     assert not errs, errs
-    print('PASS precise1：单击内部选中；手抖不挪；内部拖动移动；手柄不被尺寸挡、缩放不跳；未选中内部拖 = 框选；隐藏外轮廓锁定')
+    print('PASS precise1：单击内部选中；手抖不挪；内部拖动移动；手柄不被尺寸挡、缩放不跳；未选中内部拖 = 框选；隐藏外轮廓锁定；手柄光标（旋转箭头 / 双向箭头 / 移动）')
 
 asyncio.run(main())

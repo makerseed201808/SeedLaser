@@ -19,6 +19,7 @@ const RADIAL_REPEAT = {
 };
 const WOOD = '#ead3ac';
 const SELECT = '#0ea5e9';
+const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='white' stroke-width='4.5'/><path d='M19 4v4h-4' stroke='white' stroke-width='4.5'/><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='%230ea5e9' stroke-width='2'/><path d='M19 4v4h-4' stroke='%230ea5e9' stroke-width='2'/></g></svg>") 12 12, alias`;   // 旋转手柄的光标（带白边的圆形箭头）
 const SMART = '#16a34a';          // 智能辅助线（对齐 / 贴边 / 相切）
 
 const TOOLS = [
@@ -1666,6 +1667,7 @@ export class SketchEditor {
 
   onMove(e) {
     this.showCoords(e.point);
+    if (this.tool === 'select' && !this.pickCenter) this.hoverCursor(e.point);
     if (this.tool === 'line' || this.tool === 'pen') this.pathHover(e.point, e.event);
     else if (this.tool === 'trim') this.trimHover(e.point);
     else if (this.tool === 'joint') this.jointHover(e.point);
@@ -1675,6 +1677,25 @@ export class SketchEditor {
       this.rubber = this.mortisePreview(f, t2);
     }
     else if (['rect', 'ellipse', 'polygon', 'text', 'measure'].includes(this.tool)) this.snap(e.point);
+  }
+
+  // 选择工具：鼠标移到手柄上换成对应的光标（旋转 = 旋转箭头，边 / 角 = 双向箭头），移到选中的图形上 = 移动
+  hoverCursor(pt) {
+    const h = this.sel.size ? this.hitHandle(pt) : null;
+    let c = 'default';
+    if (h && h.kind === 'rotate') c = ROTATE_CURSOR;
+    else if (h) {
+      // y 向上：paper 的 bottom（b）在屏幕上方
+      c = { l: 'ew-resize', r: 'ew-resize', t: 'ns-resize', b: 'ns-resize', bl: 'nwse-resize', tr: 'nwse-resize', br: 'nesw-resize', tl: 'nesw-resize' }[h.key] || 'default';
+    } else if (this.sel.size) {
+      const it = this.hitItem(pt) || this.hitInside(pt);
+      if (it && this.sel.has(it)) c = 'move';
+    }
+    if (this.canvas.style.cursor !== c) this.canvas.style.cursor = c;
+    if (this.hoverRot !== (h && h.kind === 'rotate')) {
+      this.hoverRot = !!(h && h.kind === 'rotate');
+      if (this.hoverRot) this.status('拖动旋转：向右 = 顺时针，Shift = 15° 一档；单击 = 输入角度');
+    }
   }
 
   showCoords(pt) {
