@@ -19,6 +19,7 @@ const RADIAL_REPEAT = {
 };
 const WOOD = '#ead3ac';
 const SELECT = '#0ea5e9';
+const SMART = '#16a34a';          // 智能辅助线（对齐 / 贴边 / 相切）
 
 const TOOLS = [
   { id: 'select', key: 'v', icon: '➤', name: '选择', tip: '点选 / 框选，拖动移动；拖控制点缩放、旋转（V）' },
@@ -500,7 +501,7 @@ export class SketchEditor {
     item.strokeColor = outline ? OUTLINE_COLOR : m.color;
     item.fillColor = d.mode === 'engrave' ? new this.ps.Color(0.09, 0.64, 0.29, 0.28) : null;
     item.fillRule = 'evenodd';
-    item.dashArray = d.mode === 'score' ? [5, 3] : null;
+    item.dashArray = null;                     // 描线也用实线（用户要求），只靠红色区分
     item.opacity = d.locked && this.outlineLocked !== false && outline ? 0.85 : 1;
   }
 
@@ -892,6 +893,7 @@ export class SketchEditor {
         cands.sort((u, v) => u.prio - v.prio || u.d - v.d);
         const best = cands[0];
         this.showSnap(best.q, best.kind);
+        this.lastSnapKind = best.kind;
         return best.q.clone();
       }
     }
@@ -903,13 +905,31 @@ export class SketchEditor {
     });
     const st = this.snapStep;
     const gx = (v) => (!st || opts.noGrid ? v : Math.round(v / st) * st);
-    const q = new this.ps.Point(x !== null ? x : gx(pt.x), y !== null ? y : gx(pt.y));
-    if (x !== null || y !== null) this.showSnap(q, '参考线'); else this.showSnap(null);
+    const onGuide = x !== null || y !== null;
+    // 和其它图形的边 / 中线对齐（绿色辅助线）
+    let ax = null; let ay = null;
+    if (this.snapPoints && !opts.noPoints && !opts.noAlign) {
+      this.alignTargets(opts.exclude).forEach((b) => {
+        if (x === null) [b.left, b.center.x, b.right].forEach((v) => { if (Math.abs(pt.x - v) < tol && (ax === null || Math.abs(pt.x - v) < Math.abs(pt.x - ax.v))) ax = { v, b }; });
+        if (y === null) [b.top, b.center.y, b.bottom].forEach((v) => { if (Math.abs(pt.y - v) < tol && (ay === null || Math.abs(pt.y - v) < Math.abs(pt.y - ay.v))) ay = { v, b }; });
+      });
+    }
+    const q = new this.ps.Point(x !== null ? x : ax ? ax.v : gx(pt.x), y !== null ? y : ay ? ay.v : gx(pt.y));
+    if (onGuide) this.showSnap(q, '参考线'); else this.showSnap(null);
+    this.lastSnapKind = onGuide ? '参考线' : (ax || ay) ? '对齐' : null;
+    if (ax || ay) {
+      const g = new this.ps.Group({ parent: this.overlay });
+      const ext = 6 / this.zoom;
+      if (ax) this.greenLine(g, [ax.v, Math.min(ax.b.top, q.y) - ext], [ax.v, Math.max(ax.b.bottom, q.y) + ext]);
+      if (ay) this.greenLine(g, [Math.min(ay.b.left, q.x) - ext, ay.v], [Math.max(ay.b.right, q.x) + ext, ay.v]);
+      this.snapGuide = g;
+    }
     return q;
   }
 
   showSnap(p, kind) {
     if (this.snapMark) { this.snapMark.remove(); this.snapMark = null; }
+    if (this.snapGuide) { this.snapGuide.remove(); this.snapGuide = null; }
     const tag = this.$('.sk-snaptag');
     if (!p) { if (tag) tag.classList.add('hidden'); return; }
     const r = 5 / this.zoom;
@@ -929,6 +949,144 @@ export class SketchEditor {
       tag.style.top = `${v.y - 22}px`;
       tag.classList.remove('hidden');
     }
+  }
+
+
+  // ================================================================ 智能辅助线（绿色）
+  // 拖动 / 画图 / 选中时：和别的图形左右边、上下边、中线对齐，边贴边，圆和圆 / 圆和直边相切 → 自动吸附并画绿色辅助线
+
+  alignTargets(exclude) {
+    return this.content.children.filter((it) => it.data && it.data.mode && !it.data.drawing && it.visible
+      && !(exclude && exclude.has(it))).map((it) => it.bounds);
+  }
+
+  circleOf(it) {
+    if (!it || it.className !== 'Path' || !it.closed || it.segments.length !== 4) return null;
+    if (it.segments.some((sg) => sg.handleIn.isZero())) return null;
+    const b = it.bounds;
+    if (Math.abs(b.width - b.height) > 1e-3 * Math.max(1, b.width)) return null;
+    return { c: b.center, r: b.width / 2 };
+  }
+
+  greenLine(parent, a, b, dash) {
+    const l = new this.ps.Path.Line({ from: a, to: b, parent, strokeColor: SMART, strokeWidth: 1, strokeScaling: false });
+    if (dash) l.dashArray = [4, 3];
+    l.data.ui = true;
+    return l;
+  }
+
+  // 轴向对齐：返回最接近的 dx / dy（在 tol 内），没有则为 null
+  alignDelta(box, targets, tol) {
+    let dx = null; let dy = null;
+    const bx = [box.left, box.center.x, box.right]; const by = [box.top, box.center.y, box.bottom];
+    targets.forEach((t) => {
+      [t.left, t.center.x, t.right].forEach((v) => bx.forEach((u) => { const d = v - u; if (Math.abs(d) < tol && (dx === null || Math.abs(d) < Math.abs(dx))) dx = d; }));
+      [t.top, t.center.y, t.bottom].forEach((v) => by.forEach((u) => { const d = v - u; if (Math.abs(d) < tol && (dy === null || Math.abs(d) < Math.abs(dy))) dy = d; }));
+    });
+    return { dx, dy };
+  }
+
+  // 一个圆和别的圆 / 直边相切：返回把圆心挪到相切位置的位移
+  tangentDelta(circ, exclude, tol) {
+    let best = null;
+    const take = (v, info) => { if (!best || v.length < best.v.length) best = { v, info }; };
+    this.content.children.forEach((it) => {
+      if (!it.data || !it.data.mode || it.data.drawing || !it.visible || (exclude && exclude.has(it))) return;
+      if (!it.bounds.expand(circ.r * 2 + tol * 2).contains(circ.c)) return;
+      const oc = this.circleOf(it);
+      if (oc) {
+        const dv = circ.c.subtract(oc.c); const dist = dv.length;
+        if (dist < 1e-6) return;
+        [circ.r + oc.r, Math.abs(circ.r - oc.r)].forEach((R) => {
+          if (R < 1e-6 || Math.abs(dist - R) >= tol) return;
+          take(dv.normalize(R - dist), { kind: 'cc', o: oc });
+        });
+        return;
+      }
+      this.itemPaths(it).forEach((p) => p.curves.forEach((cv) => {
+        if (!cv.isStraight()) return;
+        const a = cv.point1; const b = cv.point2; const ab = b.subtract(a); const L2 = ab.dot(ab);
+        if (L2 < 1e-9) return;
+        const t = circ.c.subtract(a).dot(ab) / L2;
+        if (t <= 0 || t >= 1) return;
+        const q = a.add(ab.multiply(t)); const dv = circ.c.subtract(q); const dist = dv.length;
+        if (dist < 1e-6 || Math.abs(dist - circ.r) >= tol) return;
+        take(dv.normalize(circ.r - dist), { kind: 'cl', a, b });
+      }));
+    });
+    return best;
+  }
+
+  // 画出当前已经精确成立的对齐 / 贴边 / 相切关系（不吸附，只显示）；返回关系名称列表
+  drawSmart(box, exclude, parent, circ) {
+    const eps = 0.005;
+    const kinds = new Set();
+    const ext = 6 / this.zoom;
+    const lines = new Map();
+    const bx = [['l', box.left], ['c', box.center.x], ['r', box.right]];
+    const by = [['l', box.top], ['c', box.center.y], ['r', box.bottom]];
+    const note = (k1, k2) => (k1 === 'c' && k2 === 'c' ? '居中' : (k1 !== k2 && k1 !== 'c' && k2 !== 'c') ? '贴边' : '对齐');
+    this.alignTargets(exclude).forEach((t) => {
+      const tx = [['l', t.left], ['c', t.center.x], ['r', t.right]];
+      const ty = [['l', t.top], ['c', t.center.y], ['r', t.bottom]];
+      bx.forEach(([k1, u]) => tx.forEach(([k2, v]) => {
+        if (Math.abs(u - v) > eps) return;
+        const key = 'x' + v.toFixed(3); const o = lines.get(key) || { axis: 'x', v, lo: Math.min(box.top, t.top), hi: Math.max(box.bottom, t.bottom) };
+        o.lo = Math.min(o.lo, t.top, box.top); o.hi = Math.max(o.hi, t.bottom, box.bottom); lines.set(key, o); kinds.add(note(k1, k2));
+      }));
+      by.forEach(([k1, u]) => ty.forEach(([k2, v]) => {
+        if (Math.abs(u - v) > eps) return;
+        const key = 'y' + v.toFixed(3); const o = lines.get(key) || { axis: 'y', v, lo: Math.min(box.left, t.left), hi: Math.max(box.right, t.right) };
+        o.lo = Math.min(o.lo, t.left, box.left); o.hi = Math.max(o.hi, t.right, box.right); lines.set(key, o); kinds.add(note(k1, k2));
+      }));
+    });
+    lines.forEach((o) => {
+      if (o.axis === 'x') this.greenLine(parent, [o.v, o.lo - ext], [o.v, o.hi + ext]);
+      else this.greenLine(parent, [o.lo - ext, o.v], [o.hi + ext, o.v]);
+    });
+    if (circ) {
+      const tg = this.tangentDelta(circ, exclude, eps);
+      if (tg) {
+        kinds.add('相切');
+        let tp;
+        if (tg.info.kind === 'cc') {
+          const o = tg.info.o; const dir = circ.c.subtract(o.c).normalize();
+          const inner = Math.abs(circ.c.getDistance(o.c) - Math.abs(circ.r - o.r)) < Math.abs(circ.c.getDistance(o.c) - (circ.r + o.r));
+          tp = inner ? (o.r > circ.r ? o.c.add(dir.multiply(o.r)) : circ.c.add(dir.multiply(circ.r))) : o.c.add(dir.multiply(o.r));
+          this.greenLine(parent, o.c, circ.c, true);
+        } else {
+          const { a, b } = tg.info; const ab = b.subtract(a);
+          tp = a.add(ab.multiply(circ.c.subtract(a).dot(ab) / ab.dot(ab)));
+          this.greenLine(parent, circ.c, tp, true);
+          const u = ab.normalize(12 / this.zoom);
+          this.greenLine(parent, tp.subtract(u), tp.add(u));
+        }
+        const m = new this.ps.Path.Circle({ center: tp, radius: 3.5 / this.zoom, parent, fillColor: SMART });
+        m.data.ui = true;
+      }
+    }
+    return [...kinds];
+  }
+
+  // 拖动时：先端点吸附；没有吸到点时，按图形外框对齐 / 圆相切吸附
+  smartMove(d, rawDelta, gridDelta) {
+    if (['端点', '交点', '中点', '圆心', '中心'].includes(this.lastSnapKind) || !this.snapPoints) return gridDelta;
+    const tol = 7 / this.zoom;
+    if (d.circ) {
+      const c = d.circ.c.add(rawDelta);
+      const tg = this.tangentDelta({ c, r: d.circ.r }, this.sel, tol);
+      if (tg && tg.info.kind === 'cc') return rawDelta.add(tg.v);
+      if (tg) {   // 和直边相切：沿着这条边还可以继续对齐（例如贴着板边同时上下居中）
+        const v = rawDelta.add(tg.v);
+        const box = d.box0.clone(); box.center = d.box0.center.add(v);
+        const { dx, dy } = this.alignDelta(box, d.targets, tol);
+        const dir = tg.info.b.subtract(tg.info.a).normalize();
+        return v.add(dir.multiply(dir.dot(new this.ps.Point(dx || 0, dy || 0))));
+      }
+    }
+    const box = d.box0.clone(); box.center = d.box0.center.add(rawDelta);
+    const { dx, dy } = this.alignDelta(box, d.targets, tol);
+    return new this.ps.Point(dx !== null ? rawDelta.x + dx : gridDelta.x, dy !== null ? rawDelta.y + dy : gridDelta.y);
   }
 
   // ================================================================ 标尺 / 参考线
@@ -1287,6 +1445,8 @@ export class SketchEditor {
       new ps.Path.Rectangle({ rectangle: this.keyItem.bounds.expand(2 / this.zoom), parent: this.overlay,
         strokeColor: '#1f6feb', strokeWidth: 2.5, strokeScaling: false });
     }
+    const one = this.sel.size === 1 ? [...this.sel][0] : null;
+    this.smartKinds = this.drawSmart(b, this.sel, this.overlay, one ? this.circleOf(one) : null);
     this.drawArrayPreview();
   }
 
@@ -1415,12 +1575,15 @@ export class SketchEditor {
     const pt = e.point;
     this.showCoords(pt);
     if (d.kind === 'move') {
-      const target = this.snap(d.anchor.add(pt.subtract(d.start)), { exclude: this.sel });
-      const delta = target.subtract(d.anchor).subtract(d.moved);
+      if (this.snapGuide) { this.snapGuide.remove(); this.snapGuide = null; }
+      const raw = pt.subtract(d.start);
+      const target = this.snap(d.anchor.add(raw), { exclude: this.sel, noAlign: true });
+      const want = this.smartMove(d, raw, target.subtract(d.anchor));
+      const delta = want.subtract(d.moved);
       if (!delta.isZero()) { this.sel.forEach((it) => it.translate(delta)); d.moved = d.moved.add(delta); }
       this.drawSelection();
       this.updateNumeric();
-      this.status(`移动 ΔX ${fmt(d.moved.x)}  ΔY ${fmt(d.moved.y)} mm`);
+      this.status(`移动 ΔX ${fmt(d.moved.x)}  ΔY ${fmt(d.moved.y)} mm${this.smartKinds && this.smartKinds.length ? '  ·  ' + this.smartKinds.join(' / ') : ''}`);
     } else if (d.kind === 'scale') this.scaleDrag(d, pt, ev);
     else if (d.kind === 'rotate') this.rotateDrag(d, pt, ev);
     else if (d.kind === 'marquee') {
@@ -1528,7 +1691,8 @@ export class SketchEditor {
         this.sel = new Set(copies);
       }
       const b = this.selBounds();
-      this.drag = { kind: 'move', start: pt, anchor: this.nearestCorner(b, pt), moved: new this.ps.Point(0, 0), label: '已移动' };
+      this.drag = { kind: 'move', start: pt, anchor: this.nearestCorner(b, pt), moved: new this.ps.Point(0, 0), label: '已移动',
+        box0: b.clone(), targets: this.alignTargets(this.sel), circ: this.sel.size === 1 ? this.circleOf([...this.sel][0]) : null };
       return;
     }
     this.drag = { kind: 'marquee', from: pt };
@@ -1894,12 +2058,16 @@ export class SketchEditor {
     d.preview.strokeScaling = false;
     this.overlay.addChild(d.preview);
     const b = d.preview.bounds;
-    this.status(this.tool === 'polygon' ? `半径 ${fmt(p.getDistance(d.from))} mm` : `${fmt(b.width)} × ${fmt(b.height)} mm`);
+    if (d.smart) d.smart.remove();
+    d.smart = new this.ps.Group({ parent: this.overlay });
+    const kinds = this.drawSmart(b, null, d.smart, this.circleOf(d.preview));
+    this.status((this.tool === 'polygon' ? `半径 ${fmt(p.getDistance(d.from))} mm` : `${fmt(b.width)} × ${fmt(b.height)} mm`) + (kinds.length ? '  ·  ' + kinds.join(' / ') : ''));
   }
 
   shapeFinish(d) {
     if (!d.preview) return;
     const shape = d.preview;
+    if (d.smart) { d.smart.remove(); d.smart = null; }
     shape.remove();
     const it = this.addItem({ mode: this.opts.mode, paths: [] });
     it.remove();
