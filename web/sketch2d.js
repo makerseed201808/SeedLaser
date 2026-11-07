@@ -23,8 +23,8 @@ const SELECT = '#0ea5e9';
 const TOOLS = [
   { id: 'select', key: 'v', icon: '➤', name: '选择', tip: '点选 / 框选，拖动移动；拖控制点缩放、旋转（V）' },
   { id: 'node', key: 'a', icon: '◇', name: '节点', tip: '拖动节点和控制柄；双击线段加节点，双击节点切换尖角 / 平滑，Delete 删节点（A）' },
-  { id: 'line', key: 'l', icon: '╱', name: '直线', tip: '逐点单击画折线；点起点闭合，双击 / 回车结束，Shift 锁 45°（L）' },
-  { id: 'pen', key: 'p', icon: '✒', name: '曲线', tip: '单击 = 尖角点，按住拖动 = 平滑曲线点；点起点闭合，回车结束（P）' },
+  { id: 'line', key: 'l', icon: '╱', name: '直线', tip: '逐点单击画折线；点起点闭合，右键 / 双击 / 回车结束，Shift 锁 45°（L）' },
+  { id: 'pen', key: 'p', icon: '✒', name: '曲线', tip: '单击 = 尖角点，按住拖动 = 平滑曲线点；点起点闭合，右键 / 回车结束（P）' },
   { id: 'rect', key: 'r', icon: '▭', name: '矩形', tip: '拖动画矩形，Shift 正方形，Alt 从中心（R）' },
   { id: 'ellipse', key: 'e', icon: '◯', name: '椭圆', tip: '拖动画椭圆，Shift 正圆，Alt 从中心（E）' },
   { id: 'polygon', key: 'g', icon: '⬡', name: '多边形', tip: '从中心拖出多边形 / 星形，边数在右侧设置（G）' },
@@ -1352,6 +1352,8 @@ export class SketchEditor {
     this.closeRotLabel();
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
     this.closeRadial();
+    // 画直线 / 曲线时按右键 = 结束这条线（和回车、双击一样），不弹菜单也不平移
+    if (ev.button === 2 && this.drawing) { this.finishDrawing(); this.drag = null; return; }
     if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView, start: this.downView, right: ev.button === 2 }; return; }
     const pt = e.point;
     if (this.tool === 'select' && !this.hitHandle(pt) && !this.hitItem(pt)) {
@@ -3249,7 +3251,7 @@ export class SketchEditor {
         ['Delete', '删除（节点工具下删节点）'], ['Ctrl/⌘ + A', '全选'], ['Ctrl/⌘ + G', '编组'], ['Ctrl/⌘ + Shift + G', '取消编组'], ['Ctrl/⌘ + I', '导入']]],
       ['移动与视图', [['方向键', '移动（按吸附步长）'], ['Shift + 方向键', '移动 10 mm'], ['F', '适合窗口'], ['滚轮', '缩放'],
         ['空格 + 拖动 / 中键 / 右键拖动', '平移画布'], ['右键单击', '圆形快捷菜单（中间 = 重复上一个命令）'], ['从标尺拖出', '参考线（拖回标尺删除）']]],
-      ['绘制时', [['Shift', '锁 45° / 正方形 / 正圆 / 等比缩放'], ['Alt', '从中心画 / 拖动复制'], ['回车 / 双击', '结束路径'], ['Esc', '取消 / 取消选择']]],
+      ['绘制时', [['Shift', '锁 45° / 正方形 / 正圆 / 等比缩放'], ['Alt', '从中心画 / 拖动复制'], ['右键 / 回车 / 双击', '结束路径'], ['Esc', '取消 / 取消选择']]],
     ];
     const { el } = this.modal(`<h3>快捷键</h3><div class="sk-keys">${groups.map(([t, rows]) => `<div><h4>${t}</h4>${rows.map(([k, d]) =>
       `<div class="sk-key"><kbd>${k}</kbd><span>${d}</span></div>`).join('')}</div>`).join('')}</div>
