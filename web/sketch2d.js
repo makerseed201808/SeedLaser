@@ -37,7 +37,8 @@ const RADIAL_KEY = 'seedboxes.radialMenu';
 const WOOD = '#ead3ac';
 const SELECT = '#0ea5e9';
 const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='white' stroke-width='4.5'/><path d='M19 4v4h-4' stroke='white' stroke-width='4.5'/><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='%230ea5e9' stroke-width='2'/><path d='M19 4v4h-4' stroke='%230ea5e9' stroke-width='2'/></g></svg>") 12 12, alias`;   // 旋转手柄的光标（带白边的圆形箭头）
-const SMART = '#16a34a';          // 智能辅助线（对齐 / 贴边 / 相切）
+const SMART = '#16a34a';
+const MEASURE = '#f97316';        // 测量线（橙色）          // 智能辅助线（对齐 / 贴边 / 相切）
 
 const TOOLS = [
   { id: 'select', key: 'v', icon: '➤', name: '选择', tip: '点选 / 框选，拖动移动；拖控制点缩放、旋转（V）' },
@@ -52,7 +53,7 @@ const TOOLS = [
   { id: 'mortise', key: 'k', icon: '▤', name: '插槽', tip: '在板面上开一排插槽孔，让另一块板的指接 A 边插进来（T 型连接）；拖出插槽中线，或先在右侧选配对边再单击（K）' },
   { id: 'bridge', key: 'b', icon: '⫶', name: '水口', tip: '在切割线上点一下加水口：留一小段不切，零件切完还连在板上不会掉，取下时用刀片划断；再点一次删除（B）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
-  { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '拖动测量距离和角度（M）' },
+  { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '测量：点到点 / 点到线 / 线到线（间距、夹角）/ 圆（半径、圆心距），方式在右侧选（M）' },
   // 下面是「功能面板」：画布上照常可以选择 / 移动，右侧只显示对应的参数卡片
   { id: 'p-align', panel: 'align', sep: true, icon: '⫴', name: '对齐', tip: '对齐与分布：先选中图形（Shift 多选或框选），再点右侧的对齐方式' },
   { id: 'p-bool', panel: 'bool', icon: '◑', name: '运算', tip: '形状运算（并集 / 差集 / 交集 / 异或）和偏移：先选中图形' },
@@ -306,6 +307,7 @@ export class SketchEditor {
     this.content = L('content');
     this.marks = L('marks');
     this.guideLayer = L('guides');
+    this.measureLayer = L('measure');      // 测量结果：留到下一次测量 / 换工具 / Esc
     this.overlay = L('overlay');
     this.content.activate();
     this.zoom = 4;
@@ -1508,6 +1510,7 @@ export class SketchEditor {
     this.status(t ? t.tip : '');
     this.canvas.style.cursor = id === 'select' ? 'default' : id === 'trim' ? 'crosshair' : id === 'node' ? 'pointer' : 'crosshair';
     this.$('.sk-measure').classList.add('hidden');
+    this.clearMeasure();
     this.refresh();
   }
 
@@ -1591,7 +1594,7 @@ export class SketchEditor {
       this.drag = { kind: 'mortise', from: this.snap(pt) };
       return;
     }
-    if (t === 'measure') { this.drag = { kind: 'measure', from: this.snap(pt) }; }
+    if (t === 'measure') this.measureDown(e, pt);
   }
 
   onDrag(e) {
@@ -1627,7 +1630,7 @@ export class SketchEditor {
     else if (d.kind === 'node') this.nodeDrag(d, pt, ev);
     else if (d.kind === 'penHandle') this.penHandleDrag(d, pt);
     else if (d.kind === 'trim') this.trimAt(pt);
-    else if (d.kind === 'measure') this.measureDrag(d, this.snap(pt), ev);
+    else if (d.kind === 'measure') { if (this.dragStarted(d, ev)) this.measureDrag(d, this.snap(pt), ev); }
     else if (d.kind === 'mortise') {
       let p = this.snap(pt);
       if (ev.shiftKey) p = this.constrain45(d.from, p);
@@ -1678,6 +1681,7 @@ export class SketchEditor {
     } else if (d.kind === 'shape') this.shapeFinish(d);
     else if (d.kind === 'penHandle') { /* 点已加入 */ }
     else if (d.kind === 'trim') { if (d.changed) this.commit('已修剪'); }
+    else if (d.kind === 'measure') { if (d.live && d.last) { this.meas.a = null; this.showMeasurePP(d.from, d.last); } }
     else if (d.kind === 'mortise') { if (this.rubber) { this.rubber.remove(); this.rubber = null; } if (d.to) this.placeMortise(d.from, d.to); }
     this.showSnap(null);
   }
@@ -1693,7 +1697,8 @@ export class SketchEditor {
       const [f, t2] = this.mortiseEnds(this.snap(e.point));
       this.rubber = this.mortisePreview(f, t2);
     }
-    else if (['rect', 'ellipse', 'polygon', 'text', 'measure'].includes(this.tool)) this.snap(e.point);
+    else if (this.tool === 'measure') this.measureHover(e.point, e.event);
+    else if (['rect', 'ellipse', 'polygon', 'text'].includes(this.tool)) this.snap(e.point);
   }
 
   // 选择工具：鼠标移到手柄上换成对应的光标（旋转 = 旋转箭头，边 / 角 = 双向箭头），移到选中的图形上 = 移动
@@ -2760,14 +2765,204 @@ export class SketchEditor {
 
   // ---------------------------------------------------------------- 测量
 
-  measureDrag(d, p, ev) {
-    if (d.line) d.line.remove();
-    if (ev.shiftKey) p = this.constrain45(d.from, p);
-    d.line = new this.ps.Path.Line({ from: d.from, to: p, parent: this.overlay, strokeColor: '#f97316', strokeWidth: 1.5, strokeScaling: false });
-    const v = p.subtract(d.from);
+  // 四种方式：pp 点到点（拖动或点两下）/ pl 点到线（垂直距离）/ ll 线到线（平行间距、最近距离、夹角）/ cc 圆（半径直径、圆心距）
+  get measMode() { return this.opts.measureMode || 'pp'; }
+
+  clearMeasure() {
+    if (this.measureLayer) this.measureLayer.removeChildren();
+    this.meas = { a: null, has: false };
+    const box = this.$ && this.$('.sk-measure');
+    if (box) box.classList.add('hidden');
+  }
+
+  measureBox(html) {
     const box = this.$('.sk-measure');
     box.classList.remove('hidden');
-    box.innerHTML = `距离 <b>${fmt(v.length)}</b> mm · ΔX ${fmt(v.x)} · ΔY ${fmt(v.y)} · 角度 ${fmt(((v.angle % 360) + 360) % 360)}°`;
+    box.innerHTML = html;
+    this.meas.text = box.textContent;
+    const r = this.$('.sk-meas-result');
+    if (r) r.innerHTML = html;
+  }
+
+  mDraw() {   // 新建一组测量图形（清掉上一组）
+    this.measureLayer.removeChildren();
+    return new this.ps.Group({ parent: this.measureLayer });
+  }
+
+  mLine(g, a, b, dash) {
+    const l = new this.ps.Path.Line({ from: a, to: b, parent: g, strokeColor: MEASURE, strokeWidth: 1.5, strokeScaling: false });
+    if (dash) l.dashArray = [4, 3];
+    return l;
+  }
+
+  mDot(g, p) { new this.ps.Path.Circle({ center: p, radius: 3 / this.zoom, parent: g, fillColor: MEASURE }); }
+
+  mHi(g, curve) {   // 高亮选中的边
+    const c = curve.clone ? null : null;
+    const path = new this.ps.Path({ segments: [curve.segment1.clone(), curve.segment2.clone()], parent: g,
+      strokeColor: MEASURE, strokeWidth: 4, strokeScaling: false, opacity: 0.45 });
+    path.firstSegment.handleIn = null; path.lastSegment.handleOut = null;
+    return path;
+  }
+
+  // 鼠标下的一条边（线段 / 弧），任何图层的图形都可以量
+  pickCurve(pt) {
+    const res = this.content.hitTest(pt, { stroke: true, curves: true, tolerance: 7 / this.zoom, match: (h) => !!this.topItem(h.item) });
+    return res && res.location ? res.location.curve : null;
+  }
+
+  // 一条边所在的圆：整圆图形直接取；弧线用三点求圆
+  circleOfCurve(curve) {
+    const it = this.topItem(curve.path);
+    const whole = it && this.circleOf(it.className === 'Path' ? it : curve.path);
+    if (whole) return whole;
+    if (curve.isStraight()) return null;
+    const a = curve.getPointAtTime(0); const b = curve.getPointAtTime(0.5); const c = curve.getPointAtTime(1);
+    const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if (Math.abs(d) < 1e-9) return null;
+    const sq = (q) => q.x * q.x + q.y * q.y;
+    const cx = (sq(a) * (b.y - c.y) + sq(b) * (c.y - a.y) + sq(c) * (a.y - b.y)) / d;
+    const cy = (sq(a) * (c.x - b.x) + sq(b) * (a.x - c.x) + sq(c) * (b.x - a.x)) / d;
+    const ctr = new this.ps.Point(cx, cy);
+    return { c: ctr, r: ctr.getDistance(a), arc: true };
+  }
+
+  // 两条边之间最近的两点（相交时距离为 0）
+  curveGap(A, B) {
+    const ints = A.getIntersections(B);
+    if (ints.length) return { d: 0, p: ints[0].point, q: ints[0].point };
+    let best = null;
+    const tryAt = (t) => { const p = A.getPointAtTime(t); const q = B.getNearestPoint(p); const d = p.getDistance(q); if (!best || d < best.d) best = { d, p, q, t }; };
+    for (let i = 0; i <= 64; i++) tryAt(i / 64);
+    for (let k = 0; k < 3; k++) { const t0 = best.t; for (let i = -16; i <= 16; i++) tryAt(Math.min(1, Math.max(0, t0 + i / (64 * Math.pow(16, k + 1))))); }
+    [B.getPointAtTime(0), B.getPointAtTime(1)].forEach((q) => { const p = A.getNearestPoint(q); const d = p.getDistance(q); if (d < best.d) best = { d, p, q }; });
+    return best;
+  }
+
+  measureDown(e, pt) {
+    if (!this.meas) this.clearMeasure();
+    const m = this.meas; const mode = this.measMode;
+    if (mode === 'pp') {
+      const p = this.snap(pt);
+      if (m.a) { const a = m.a; m.a = null; this.showMeasurePP(a, p); return; }
+      m.a = p;
+      this.drag = { kind: 'measure', from: p, v0: [e.event.offsetX, e.event.offsetY] };
+      this.status('拖到第二个点松开；或松开后再点第二个点');
+      return;
+    }
+    if (mode === 'pl') {
+      if (!m.a) { m.a = this.snap(pt); const g = this.mDraw(); this.mDot(g, m.a); this.status('再点一条线（或图形的一条边）'); return; }
+      const c = this.pickCurve(pt);
+      if (!c) { this.status('没点到线：请点在一条线上'); return; }
+      const a = m.a; m.a = null; this.showMeasurePL(a, c);
+      return;
+    }
+    const c = this.pickCurve(pt);
+    if (!c) { this.status('没点到线：请点在一条线上'); return; }
+    if (mode === 'll') {
+      if (!m.a) { m.a = c; const g = this.mDraw(); this.mHi(g, c); this.status('再点第二条线'); return; }
+      const a = m.a; m.a = null; this.showMeasureLL(a, c);
+      return;
+    }
+    // cc
+    const circ = this.circleOfCurve(c);
+    if (!circ) { this.status('这条不是圆或圆弧'); return; }
+    if (!m.a) { m.a = circ; this.showMeasureCircle(circ); return; }
+    const a = m.a; m.a = null; this.showMeasureCC(a, circ);
+  }
+
+  measureHover(pt, ev) {
+    const m = this.meas || {}; const mode = this.measMode;
+    if (mode === 'pp' || (mode === 'pl' && !m.a)) {
+      const p = this.snap(pt);
+      if (mode === 'pp' && m.a && !this.drag) this.measureDrag({ from: m.a }, p, ev);
+      return;
+    }
+    this.showSnap(null);
+    if (this.mHover) { this.mHover.remove(); this.mHover = null; }
+    const c = this.pickCurve(pt);
+    if (c) { this.mHover = this.mHi(this.overlay, c); this.mHover.opacity = 0.3; }
+  }
+
+  // 拖动 / 第二个点跟着鼠标时的实时显示
+  measureDrag(d, p, ev) {
+    if (ev && ev.shiftKey) p = this.constrain45(d.from, p);
+    d.last = p;
+    this.showMeasurePP(d.from, p, true);
+  }
+
+  showMeasurePP(a, p, live) {
+    const g = this.mDraw();
+    this.mLine(g, a, p); this.mDot(g, a); this.mDot(g, p);
+    const v = p.subtract(a);
+    this.meas.has = !live;
+    this.measureBox(`<b>点到点</b> 距离 <b>${fmt(v.length)}</b> mm · ΔX ${fmt(Math.abs(v.x))} · ΔY ${fmt(Math.abs(v.y))} · 角度 ${fmt(((v.angle % 360) + 360) % 360)}°`);
+    if (!live) this.status('点到点：完成。再点一下开始新的测量；Esc 清除');
+  }
+
+  showMeasurePL(a, c) {
+    const g = this.mDraw();
+    this.mHi(g, c);
+    let q; let ext = false;
+    if (c.isStraight()) {
+      const p1 = c.point1; const ab = c.point2.subtract(p1);
+      const t = a.subtract(p1).dot(ab) / ab.dot(ab);
+      q = p1.add(ab.multiply(t));
+      if (t < 0 || t > 1) { ext = true; this.mLine(g, t < 0 ? p1 : c.point2, q, true); }
+    } else q = c.getNearestPoint(a);
+    this.mLine(g, a, q); this.mDot(g, a); this.mDot(g, q);
+    this.meas.has = true;
+    this.measureBox(`<b>点到线</b> 垂直距离 <b>${fmt(a.getDistance(q))}</b> mm${ext ? '（垂足在线的延长线上）' : ''}`);
+    this.status('点到线：完成。再点一个点开始新的测量；Esc 清除');
+  }
+
+  showMeasureLL(A, B) {
+    const g = this.mDraw();
+    this.mHi(g, A); this.mHi(g, B);
+    const gap = this.curveGap(A, B);
+    let html = '<b>线到线</b> ';
+    if (A.isStraight() && B.isStraight()) {
+      const u = A.point2.subtract(A.point1); const w = B.point2.subtract(B.point1);
+      let ang = Math.abs(u.getDirectedAngle(w)) % 180; if (ang > 90) ang = 180 - ang;
+      if (ang < 0.05) {            // 平行：量两条线之间的垂直间距
+        const m0 = A.getPointAtTime(0.5); const ab = w; const t = m0.subtract(B.point1).dot(ab) / ab.dot(ab);
+        const q = B.point1.add(ab.multiply(t));
+        this.mLine(g, m0, q); this.mDot(g, m0); this.mDot(g, q);
+        html += `平行，间距 <b>${fmt(m0.getDistance(q))}</b> mm`;
+        if (gap.d > m0.getDistance(q) + 0.01) html += ` · 两段最近 ${fmt(gap.d)} mm`;
+      } else {
+        this.mLine(g, gap.p, gap.q); this.mDot(g, gap.p); this.mDot(g, gap.q);
+        html += gap.d < 1e-6 ? '相交' : `最近距离 <b>${fmt(gap.d)}</b> mm`;
+        html += ` · 夹角 <b>${fmt(ang)}°</b>（${fmt(180 - ang)}°）`;
+      }
+    } else {
+      this.mLine(g, gap.p, gap.q); this.mDot(g, gap.p); this.mDot(g, gap.q);
+      html += gap.d < 1e-6 ? '相交（距离 0）' : `最近距离 <b>${fmt(gap.d)}</b> mm`;
+    }
+    this.meas.has = true;
+    this.measureBox(html);
+    this.status('线到线：完成。再点一条线开始新的测量；Esc 清除');
+  }
+
+  showMeasureCircle(c) {
+    const g = this.mDraw();
+    new this.ps.Path.Circle({ center: c.c, radius: c.r, parent: g, strokeColor: MEASURE, strokeWidth: 3, opacity: 0.45, strokeScaling: false });
+    this.mDot(g, c.c);
+    this.mLine(g, c.c, c.c.add(new this.ps.Point(c.r, 0)), true);
+    this.meas.has = true;
+    this.measureBox(`<b>${c.arc ? '圆弧' : '圆'}</b> 半径 <b>${fmt(c.r)}</b> mm · 直径 <b>${fmt(c.r * 2)}</b> mm · 圆心 (${fmt(c.c.x)}, ${fmt(c.c.y)})`);
+    this.status('再点另一个圆量圆心距；或换个圆重新量；Esc 清除');
+  }
+
+  showMeasureCC(a, b) {
+    const g = this.mDraw();
+    [a, b].forEach((c) => { new this.ps.Path.Circle({ center: c.c, radius: c.r, parent: g, strokeColor: MEASURE, strokeWidth: 3, opacity: 0.45, strokeScaling: false }); this.mDot(g, c.c); });
+    this.mLine(g, a.c, b.c);
+    const d = a.c.getDistance(b.c);
+    const edge = d - a.r - b.r;
+    this.meas.has = true;
+    this.measureBox(`<b>两个圆</b> 圆心距 <b>${fmt(d)}</b> mm · ${edge >= 0 ? `边缘间隙 <b>${fmt(edge)}</b> mm` : d + Math.min(a.r, b.r) <= Math.max(a.r, b.r) ? '一个在另一个里面' : '两圆相交'} · 半径 ${fmt(a.r)} / ${fmt(b.r)}`);
+    this.status('两个圆：完成。再点一个圆开始新的测量；Esc 清除');
   }
 
   // ---------------------------------------------------------------- 双击
@@ -2970,12 +3165,26 @@ export class SketchEditor {
     const paths = [];
     this.sel.forEach((it) => paths.push(...this.serializeItem(it).paths));
     const mode = [...this.sel][0].data.mode;
-    const r = await this.api.sketch_offset(paths, dist, this.opts.offsetJoin);
-    if (r.error) { this.toast(r.error, 'error'); return; }
+    let r;
+    try { r = await this.api.sketch_offset(paths, dist, this.opts.offsetJoin); } catch (e) { r = { error: `偏移失败：${e && e.message || e}` }; }
+    if (!r || r.error) { this.toast((r && r.error) || '偏移失败', 'error'); return; }
     if (!r.rings.length) { this.toast('偏移后没有剩下图形（内缩太多？）', 'error'); return; }
     const it = this.addItem({ mode, paths: r.rings.map((ring) => this.polyPath(ring, true)) });
     this.sel = new Set([it]);
     this.commit(`已偏移 ${dist} mm`);
+    // 新图形闪一下；偏移量在屏幕上太小（几乎和原图形重合）时提示放大
+    this.flashItem(it);
+    const tiny = Math.abs(dist) * this.zoom < 8;
+    this.toast(`已${dist > 0 ? '外扩' : '内缩'} ${fmt(Math.abs(dist))} mm：生成了新图形（已选中），原图形保留${tiny ? '。离原图形很近，放大才看得清' : ''}`);
+  }
+
+  flashItem(it) {
+    const g = it.clone({ insert: false });
+    g.strokeColor = SMART; g.strokeWidth = 4; g.fillColor = null; g.opacity = 0.8; g.strokeScaling = false;
+    this.measureLayer.addChild(g);
+    let n = 0;
+    const tick = () => { n += 1; g.visible = n % 2 === 0; if (n < 6) setTimeout(tick, 180); else g.remove(); };
+    setTimeout(tick, 180);
   }
 
   // ---------------------------------------------------------------- 阵列（矩形 / 直线 / 环形）
@@ -3689,6 +3898,15 @@ export class SketchEditor {
         <div class="sk-row"><label>每个图形<input data-o="bridgeN" type="number" min="1" step="1" value="${this.opts.bridgeN || 2}"> 个</label>
           <button data-bridge="auto">自动加</button><button data-bridge="clear">清除</button></div>
         <p class="sk-small">在切割线上单击加一个；点橙色标记删除。「自动加」作用于选中的图形（没选时作用于所有镂空）。切完用刀片划断水口即可取下。<br>建议：每个零件 2 个、放在相对的直边上；不要放在卡榫 / 插槽边上，留下的小凸起会让榫插不进去。</p>`;
+    } else if (t === 'measure') {
+      const mm = this.measMode;
+      const tips = { pp: '拖动，或先后点两个点（会吸附端点、中点、圆心）。Shift = 水平 / 垂直 / 45°。',
+        pl: '先点一个点，再点一条线：量点到这条线的垂直距离（线不够长时按延长线算）。',
+        ll: '先后点两条线：平行时量间距（比如槽宽、板厚）；不平行时量最近距离和夹角。',
+        cc: '点一个圆或圆弧：半径、直径、圆心；再点另一个圆：圆心距和边缘间隙。' };
+      html = `<h4>测量</h4><div class="sk-seg">${[['pp', '点到点'], ['pl', '点到线'], ['ll', '线到线'], ['cc', '圆']].map(([k, n]) =>
+        `<button data-mm="${k}" class="${mm === k ? 'on' : ''}">${n}</button>`).join('')}</div>
+        <p class="sk-small">${tips[mm]}</p><div class="sk-meas-result sk-small">${this.meas && this.meas.has ? this.$('.sk-measure').innerHTML : '还没有测量结果'}</div>`;
     } else if (t === 'trim') html = '<h4>修剪</h4><p class="sk-small">鼠标移到线上会标红将被删掉的一段（到最近的交点为止），单击或拖过即删除。没有交点的整条路径会被整个删掉。</p>';
     if ((t === 'joint' || t === 'mortise') && !this.findEdit()) html = this.staleJointsHtml() + html;
     box.innerHTML = html;
@@ -3699,6 +3917,12 @@ export class SketchEditor {
       if (!textSel) return;
       this.pickPathFor = textSel.data.id;
       this.status('在画布上点一条线（或图形的边），文字会沿着它排列');
+    }));
+    box.querySelectorAll('[data-mm]').forEach((b) => b.addEventListener('click', () => {
+      this.opts.measureMode = b.dataset.mm;
+      this.clearMeasure();
+      this.renderToolOpts();
+      this.status(TOOLS.find((q) => q.id === 'measure').tip);
     }));
     box.querySelectorAll('[data-bridge]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.bridge === 'auto') this.autoBridges();
@@ -3890,6 +4114,7 @@ export class SketchEditor {
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
     else if (ev.key === 'Escape' && this.radialCfg) { this.closeRadialConfig(); }
+    else if (ev.key === 'Escape' && this.tool === 'measure' && (this.meas && (this.meas.a || this.meas.has))) { this.clearMeasure(); this.status('已清除测量'); }
     else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
