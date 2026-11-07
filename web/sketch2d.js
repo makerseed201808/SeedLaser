@@ -115,8 +115,8 @@ export class SketchEditor {
     const h = this.host;
     h.innerHTML = `
       <div class="sk-top">
-        <button class="sk-back" data-act="close">← 完成 · 返回</button>
-        <div class="sk-title"><b class="sk-name">—</b><span class="sk-sub"></span></div>
+        <button class="sk-filebtn" data-filemenu title="新建、打开、保存、另存为、导入、导出">文件 ▾</button>
+        <div class="sk-title"><b class="sk-name">—</b><span class="sk-file" title="当前文件（● = 有改动还没保存）"></span></div>
         <div class="sk-group">
           <button data-act="undo" title="撤销（Ctrl+Z）">↶</button>
           <button data-act="redo" title="重做（Ctrl+Shift+Z）">↷</button>
@@ -126,9 +126,6 @@ export class SketchEditor {
           <button data-act="paste" title="粘贴（Ctrl+V）">粘贴</button>
           <button data-act="dup" title="原位复制一份（Ctrl+D）">复制一份</button>
           <button data-act="delete" title="删除（Delete）">删除</button>
-        </div>
-        <div class="sk-group">
-          <button data-act="import" title="导入 SVG / DXF 矢量图，或把图片描摹成矢量（Ctrl+I）">📥 导入</button>
         </div>
         <div class="sk-group">
           <button data-act="keys" title="快捷键一览（?）">⌨ 快捷键</button>
@@ -144,6 +141,7 @@ export class SketchEditor {
         <span class="sk-spacer"></span>
         <button class="sk-lock" data-act="lockOutline" title="锁定后外轮廓（卡榫边）不会被误选、误改">🔒 外轮廓已锁定</button>
         <button data-act="reset" title="丢弃这块板的所有修改，恢复生成器画出的原样">恢复原板</button>
+        <button class="sk-back" data-act="close">完成 ✓</button>
       </div>
       <div class="sk-numeric">
         <span class="sk-num-label">位置 / 尺寸</span>
@@ -183,6 +181,10 @@ export class SketchEditor {
             <p class="sk-small">选中图形后点图层（或下方色块）即可改加工方式；新画的图形使用当前图层。</p>
           </section>
           <section class="sk-card sk-toolopts"></section>
+          <section class="sk-card" data-panel="info" data-key="info">
+            <h4>图形信息</h4>
+            <div class="sk-info"></div>
+          </section>
           <section class="sk-card" data-panel="align" data-key="align">
             <h4>对齐与分布</h4>
             <div class="sk-row"><label>对齐到<select data-opt="alignTo">
@@ -259,6 +261,7 @@ export class SketchEditor {
       <div class="sk-bottom">
         <div class="sk-palette">${Object.entries(MODES).map(([k, m]) => `<button data-mode="${k}" title="${m.name}：${m.hint}" style="background:${m.color}">${m.name}</button>`).join('')}</div>
         <div class="sk-status"></div>
+        <span class="sk-sub"></span>
         <div class="sk-coords"></div>
       </div>`;
     this.canvas = h.querySelector('.sk-canvas');
@@ -289,6 +292,7 @@ export class SketchEditor {
       this.lastPalette = null;
     });
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
+    h.querySelector('[data-filemenu]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleFileMenu(); });
     h.querySelectorAll('[data-opt]').forEach((el) => el.addEventListener('change', () => this.optChanged(el)));
     h.querySelectorAll('[data-num]').forEach((el) => {
       el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { this.numericApply(el.dataset.num, el.value); el.blur(); } });
@@ -372,7 +376,9 @@ export class SketchEditor {
     const oldLabels = this.$('.sk-plabels');
     if (oldLabels) oldLabels.innerHTML = '';
     this.$('[data-act=reset]').classList.toggle('hidden', this.sheetMode);
-    this.$('.sk-back').textContent = this.sheetMode ? '生成 3D · 去装配 →' : '← 完成 · 返回';
+    this.$('.sk-back').textContent = this.sheetMode ? '3D 装配 →' : '完成 ✓';
+    this.$('.sk-back').title = this.sheetMode ? '按画好的板件生成 3D，去装配和检查' : '保存修改，回到 3D';
+    this.$('.sk-name').classList.toggle('hidden', this.sheetMode);   // 设计画板：标题位置只显示文件名
     this.content.removeChildren();
     this.sel.clear();
     const banner = this.$('.sk-banner');
@@ -582,7 +588,78 @@ export class SketchEditor {
 
   emitChange() {
     clearTimeout(this._emitT);
-    this._emitT = setTimeout(() => { if (this.onChange) this.onChange(this.serializeForSave()); }, 250);
+    this._emitT = setTimeout(() => { this._emitT = null; if (this.onChange) this.onChange(this.serializeForSave()); if (window.SeedApp && window.SeedApp.changed) window.SeedApp.changed(); }, 250);
+  }
+
+  // 保存 / 导出前：把还在等待（防抖）的改动立刻交出去
+  flushChange() {
+    if (!this._emitT) return;
+    clearTimeout(this._emitT);
+    this._emitT = null;
+    if (this.onChange) this.onChange(this.serializeForSave());
+  }
+
+  // ---------------------------------------------------------------- 文件菜单（命令交给主程序 SeedApp.file 处理）
+  fileCmd(cmd, arg) {
+    this.closeFileMenu();
+    if (cmd === 'import') { this.startImport(); return; }
+    this.flushChange();
+    if (window.SeedApp && window.SeedApp.file) window.SeedApp.file(cmd, arg);
+  }
+
+  async toggleFileMenu() {
+    if (this.fileMenu) { this.closeFileMenu(); return; }
+    const app = window.SeedApp || {};
+    const mac = /Mac/i.test(navigator.platform || navigator.userAgent);
+    const K = (k, shift) => (mac ? `${shift ? '⇧' : ''}⌘${k}` : `Ctrl+${shift ? 'Shift+' : ''}${k}`);
+    const fmts = (app.formats ? app.formats() : []).filter((f) => ['svg', 'dxf', 'pdf', 'lbrn2'].includes(f.value));
+    const box = document.createElement('div');
+    box.className = 'sk-filemenu';
+    box.innerHTML = `
+      <button data-fc="new"><span>新建设计</span><kbd>${K('N')}</kbd></button>
+      <button data-fc="open"><span>打开…</span><kbd>${K('O')}</kbd></button>
+      <div class="sk-fm-h">最近打开</div><div class="sk-fm-recent"><em>加载中…</em></div>
+      <hr>
+      <button data-fc="save"><span>保存</span><kbd>${K('S')}</kbd></button>
+      <button data-fc="saveas"><span>另存为…</span><kbd>${K('S', true)}</kbd></button>
+      <hr>
+      <button data-fc="import"><span>导入 SVG / DXF / 图片…</span><kbd>${K('I')}</kbd></button>
+      <div class="sk-fm-h">导出图纸（给激光机）</div>
+      ${(fmts.length ? fmts : [{ value: 'svg', label: 'SVG' }]).map((f) => `<button data-fc="export" data-fa="${f.value}" class="sub"><span>${escAttr(f.label)}</span></button>`).join('')}
+      <hr>
+      <button data-fc="home"><span>回到主页</span></button>`;
+    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    box.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-fc]');
+      if (b) this.fileCmd(b.dataset.fc, b.dataset.fa);
+    });
+    const btn = this.$('[data-filemenu]');
+    const r = btn.getBoundingClientRect(); const hr = this.host.getBoundingClientRect();
+    box.style.left = `${r.left - hr.left}px`;
+    box.style.top = `${r.bottom - hr.top + 4}px`;
+    this.host.appendChild(box);
+    this.fileMenu = box;
+    btn.classList.add('on');
+    this._fmClose = (ev) => { if (!box.contains(ev.target) && ev.target !== btn) this.closeFileMenu(); };
+    setTimeout(() => document.addEventListener('pointerdown', this._fmClose), 0);
+    let list = [];
+    try { list = app.recent ? await app.recent() : []; } catch (e) { list = []; }
+    const rec = box.querySelector('.sk-fm-recent');
+    if (!rec) return;
+    list = (Array.isArray(list) ? list : []).filter((q) => q.exists).slice(0, 6);
+    rec.innerHTML = list.length ? list.map((q) => `<button data-fc="openPath" data-fa="${escAttr(q.path)}" class="sub" title="${escAttr(q.path)}"><span>${escAttr(q.name)}</span></button>`).join('') : '<em>还没有</em>';
+  }
+
+  closeFileMenu() {
+    if (this.fileMenu) { this.fileMenu.remove(); this.fileMenu = null; }
+    if (this._fmClose) { document.removeEventListener('pointerdown', this._fmClose); this._fmClose = null; }
+    const btn = this.$ && this.$('[data-filemenu]');
+    if (btn) btn.classList.remove('on');
+  }
+
+  setFileLabel(text) {
+    const el = this.$ && this.$('.sk-file');
+    if (el && el.textContent !== text) el.textContent = text;
   }
 
   restore(json) {
@@ -686,7 +763,7 @@ export class SketchEditor {
     //   选中 1 个以上：运算、变换、阵列；选中 2 个以上：再加对齐
     const n = this.sel.size;
     const editing = this.tool === 'select' || this.tool === 'node';
-    const want = { align: editing && n >= 2, bool: editing && n >= 1, transform: editing && n >= 1, array: editing && n >= 1 };
+    const want = { info: editing && n >= 1, align: editing && n >= 2, bool: editing && n >= 1, transform: editing && n >= 1, array: editing && n >= 1 };
     this.$$('.sk-side [data-panel]').forEach((c) => c.classList.toggle('hidden', !want[c.dataset.panel]));
     const idle = this.tool === 'select' && n === 0;
     const board = this.$('.sk-boardinfo');
@@ -694,6 +771,7 @@ export class SketchEditor {
     const hint = this.$('.sk-emptyhint');
     if (hint) hint.classList.toggle('hidden', !idle);
     if (this.arrActive && !want.array) { this.arrActive = false; this.drawSelection(); }
+    if (want.info) this.renderInfo();
   }
 
   updateCounts() {
@@ -1290,18 +1368,63 @@ export class SketchEditor {
     const { parts, loose } = this.recognizeParts();
     const names = this.part.names || {};
     const v = this.ps.view;
-    parts.forEach((p, i) => {
-      const at = v.projectToView(new this.ps.Point(p.bounds.left, p.bounds.bottom));
-      const lab = document.createElement('span');
-      lab.className = 'sk-plabel';
-      lab.textContent = `${names[p.item.data.pid] || '新板件 ' + (i + 1)} · ${fmt(p.bounds.width)}×${fmt(p.bounds.height)}`;
-      lab.style.left = `${at.x}px`;
-      lab.style.top = `${at.y}px`;
-      box.appendChild(lab);
-    });
+    // 画布上不再贴「板件 N · 尺寸」标签（影响观感，用户要求）；选中后在右侧「图形信息」里看
+    void names; void v;
     const sub = `材料 ${fmt(this.part.sheet.w)} × ${fmt(this.part.sheet.h)} mm · 板厚 ${fmt(this.part.thickness || 0)} mm · 识别到 ${parts.length} 块板` +
       (loose.length ? ` · ⚠ ${loose.length} 个图形不在任何板里（不会导出）` : '');
     this.$('.sk-sub').textContent = sub;
+  }
+
+  // 右侧「图形信息」：选中 1 个时显示详细参数；多个时显示数量和总范围
+  renderInfo() {
+    const box = this.$('.sk-info');
+    if (!box) return;
+    const items = [...this.sel];
+    const row = (k, v) => `<div class="sk-info-row"><span>${k}</span><b>${v}</b></div>`;
+    const len = (it) => this.itemPaths(it).reduce((a, p) => a + p.length, 0);
+    let html = '';
+    if (items.length === 1) {
+      const it = items[0];
+      const b = it.bounds;
+      const m = MODES[it.data.mode] || MODES.cut;
+      let where = '';
+      if (this.sheetMode) {
+        const { parts, loose } = this.recognizeParts();
+        const names = (this.part && this.part.names) || {};
+        const pname = (p) => names[p.item.data.pid] || `新板件 ${parts.indexOf(p) + 1}`;
+        const own = parts.find((p) => p.item === it);
+        const host = parts.find((p) => p.members.includes(it));
+        if (own) where = `<b class="sk-info-part">${escAttr(pname(own))}</b>（一块板的外轮廓）`;
+        else if (host) where = `在 <b>${escAttr(pname(host))}</b> 上的${it.data.mode === 'cut' ? '孔 / 镂空' : it.data.mode === 'engrave' ? '雕刻' : '描线'}`;
+        else if (loose.includes(it)) where = '<span class="sk-warn-t">不在任何板里（不会导出）</span>';
+      }
+      const paths = this.itemPaths(it);
+      const closed = paths.length && paths.every((p) => p.closed);
+      const circ = this.circleOf(it);
+      const nodes = paths.reduce((a, p) => a + p.segments.length, 0);
+      const shape = it.data.text ? `文字「${escAttr(String(it.data.text.text || '').slice(0, 12))}」`
+        : circ ? '圆' : (it.className === 'Path' && closed && nodes === 4 && paths[0].curves.every((c) => c.isStraight())) ? '四边形'
+          : closed ? `闭合图形（${paths.length > 1 ? paths.length + ' 条轮廓' : nodes + ' 个节点'}）` : `开放路径（${nodes} 个节点）`;
+      const area = closed ? Math.abs(paths.reduce((a, p) => a + p.area, 0)) : 0;
+      html = (where ? `<div class="sk-info-where">${where}</div>` : '') +
+        row('加工', `<i class="sk-dot" style="background:${m.color}"></i>${m.name}`) +
+        row('形状', shape) +
+        (circ ? row('直径', `${fmt(circ.r * 2)} mm`) + row('半径', `${fmt(circ.r)} mm`) : '') +
+        row('宽 × 高', `${fmt(b.width)} × ${fmt(b.height)} mm`) +
+        row('位置（左下角）', `X ${fmt(b.left)} · Y ${fmt(b.top)}`) +
+        (closed ? row('面积', `${fmt(area / 100)} cm²`) : '') +
+        row(it.data.mode === 'cut' ? '切割长度' : '线长', `${fmt(len(it))} mm`) +
+        (it.data.bridges && it.data.bridges.length ? row('水口', `${it.data.bridges.length} 个`) : '');
+    } else {
+      const b = this.selBounds();
+      const by = {};
+      items.forEach((it) => { by[it.data.mode] = (by[it.data.mode] || 0) + 1; });
+      html = row('选中', `${items.length} 个图形`) +
+        row('其中', Object.entries(by).map(([k, n]) => `${(MODES[k] || MODES.cut).name} ${n}`).join(' · ')) +
+        row('总范围', `${fmt(b.width)} × ${fmt(b.height)} mm`) +
+        row('切割总长', `${fmt(items.filter((it) => it.data.mode === 'cut').reduce((a, it) => a + len(it), 0))} mm`);
+    }
+    box.innerHTML = html;
   }
 
   drawDims() {
@@ -4110,6 +4233,10 @@ export class SketchEditor {
     else if (mod && k === 'd') this.duplicate();
     else if (mod && k === 'g') { if (ev.shiftKey) this.ungroupSel(); else this.groupSel(); }
     else if (mod && k === 'i') this.startImport();
+    else if (mod && k === 's') this.fileCmd(ev.shiftKey ? 'saveas' : 'save');
+    else if (mod && k === 'o') this.fileCmd('open');
+    else if (mod && k === 'n') this.fileCmd('new');
+    else if (ev.key === 'Escape' && this.fileMenu) this.closeFileMenu();
     else if (ev.key === '?' || (ev.shiftKey && ev.key === '/')) this.showKeys();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }

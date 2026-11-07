@@ -588,15 +588,15 @@ function openLaserDialog() {
   });
 }
 
-async function doSave() {
+async function doSave(fmtArg) {
   if (!state.current) return;
-  const fmt = $('#format-select').value;
+  const fmt = typeof fmtArg === 'string' ? fmtArg : $('#format-select').value;
   setStatus('准备保存…');
   $('#btn-save').disabled = true;
   try {
     const params = collectParams();
     const project = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
-    const result = await window.pywebview.api.save(state.current, params, fmt, project, state.laser);
+    const result = await window.pywebview.api.save(state.current, params, fmt, project, state.laser, fileBase(true));
     if (result.cancelled) { setStatus('已取消'); return; }
     if (result.error) { toast(result.error, 'error'); setStatus('保存失败'); return; }
     if (result.path) {
@@ -614,10 +614,10 @@ async function doSave() {
 }
 
 // ---- 项目文件（.seedbox.json）----
-async function doSaveProject() {
-  if (!state.current) return;
+// 当前文件：state.projectPath（null = 还没保存过）；state.savedSnap = 上次保存 / 打开时的内容，用来判断有没有改动
+function buildProject() {
   const ws = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
-  const project = {
+  return {
     app: 'SeedLaser',
     version: 1,
     generator: state.current,
@@ -630,13 +630,102 @@ async function doSaveProject() {
     sketches: ws ? ws.sketches : {},
     free: ws ? ws.free : null,
   };
+}
+
+function projectSnap() {
+  if (!state.current) return '';
+  const p = buildProject();
+  return JSON.stringify([p.generator, p.params, p.disabled, p.edits, p.poses, p.sketches, p.free]);
+}
+
+function fileBase(forExport) {
+  if (state.projectPath) return state.projectPath.split(/[\\/]/).pop().replace(/\.seedbox\.json$|\.json$/i, '');
+  if (forExport) return state.current === 'FreeDesign' ? '我的设计' : state.current;
+  return null;
+}
+
+function isDirty() {
+  if (!state.current || state.savedSnap == null) return false;
+  return projectSnap() !== state.savedSnap;
+}
+
+// 新建 / 打开之后，等界面把内容整理好再记下「干净」的状态
+function settleSnap() {
+  const gen = (state.snapGen = (state.snapGen || 0) + 1);
+  state.savedSnap = null;
+  setTimeout(() => { if (gen === state.snapGen) { state.savedSnap = projectSnap(); refreshFileLabel(); } }, 1500);
+}
+
+function refreshFileLabel() {
+  const ws = window.SeedWorkshop;
+  if (!ws || !ws.setFileLabel) return;
+  const name = fileBase(false) || (state.current === 'FreeDesign' ? '未命名设计' : state.current || '');
+  ws.setFileLabel(`${name}${isDirty() ? ' ●' : ''}`);
+  document.title = `${name}${isDirty() ? ' ●' : ''} — SeedLaser`;
+}
+
+async function doSaveProject(asNew) {
+  if (!state.current) return false;
+  if (window.SeedWorkshop && window.SeedWorkshop.flush) window.SeedWorkshop.flush();
+  const project = buildProject();
+  const path = asNew === true || typeof asNew !== 'boolean' ? null : state.projectPath;
   try {
-    const r = await window.pywebview.api.save_project(project);
-    if (r.cancelled) return;
-    if (r.error) { toast(r.error, 'error'); return; }
-    toast(`项目已保存：${r.path}`, 'success');
+    const r = await window.pywebview.api.save_project(project, path || null, fileBase(true));
+    if (r.cancelled) return false;
+    if (r.error) { toast(r.error, 'error'); return false; }
+    state.projectPath = r.path;
+    state.savedSnap = projectSnap();
+    refreshFileLabel();
+    toast(`已保存：${r.path.split(/[\\/]/).pop()}`, 'success');
+    return true;
   } catch (err) {
     toast('保存项目失败: ' + err, 'error');
+    return false;
+  }
+}
+
+// 有没保存的改动时先问一下：保存 / 不保存 / 取消（WKWebView 没有 confirm，自己画一个）
+function askSaveFirst(what) {
+  if (!isDirty()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const box = document.createElement('div');
+    box.className = 'sk-confirm';
+    box.innerHTML = `<div><p>「${escapeHtml(fileBase(false) || '未命名设计')}」有改动还没保存。<br>${what}之前要先保存吗？</p>
+      <div class="row"><button data-r="cancel">取消</button><button data-r="discard">不保存</button><button data-r="save" class="primary">保存</button></div></div>`;
+    document.body.appendChild(box);
+    box.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-r]');
+      if (!b) return;
+      box.remove();
+      if (b.dataset.r === 'cancel') resolve(false);
+      else if (b.dataset.r === 'discard') resolve(true);
+      else resolve(await doSaveProject(false));
+    });
+  });
+}
+
+// 二维画板「文件 ▾」菜单
+async function fileCommand(cmd, arg) {
+  if (cmd === 'save') { await doSaveProject(false); return; }
+  if (cmd === 'saveas') { await doSaveProject(true); return; }
+  if (cmd === 'export') { await doSave(arg); return; }
+  if (cmd === 'new') {
+    if (!(await askSaveFirst('新建'))) return;
+    state.projectPath = null;
+    if (window.SeedWorkshop) window.SeedWorkshop.wantSheet();
+    await selectGenerator('FreeDesign');
+    settleSnap();
+    return;
+  }
+  if (cmd === 'open' || cmd === 'openPath') {
+    if (!(await askSaveFirst('打开别的文件'))) return;
+    await doOpenProject(cmd === 'openPath' ? arg : undefined);
+    return;
+  }
+  if (cmd === 'home') {
+    if (!(await askSaveFirst('回到主页'))) return;
+    showView('home');
+    renderRecent();
   }
 }
 
@@ -651,7 +740,9 @@ async function doOpenProject(path) {
   if (!r || r.cancelled) return;
   if (r.error) { toast(r.error, 'error'); if (state.view === 'home') renderRecent(); return; }
   const p = r.project;
+  if (p.generator === 'FreeDesign' && window.SeedWorkshop) window.SeedWorkshop.wantSheet();   // 设计项目：直接进二维画板
   await selectGenerator(p.generator);
+  state.projectPath = r.path || null;
   const form = $('#param-form');
   Object.entries(p.params || {}).forEach(([k, v]) => {
     const el = form.querySelector(`[name="${CSS.escape(k)}"]`);
@@ -665,8 +756,9 @@ async function doOpenProject(path) {
     if (opt) $('#format-select').value = p.format;
   }
   if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits, poses: p.poses, sketches: p.sketches, free: p.free });
-  toast('项目已载入', 'success');
+  toast(`已打开：${fileBase(false) || '项目'}`, 'success');
   doPreview();
+  settleSnap();
 }
 
 // ---- 主页：最近项目、示例 ----
@@ -696,7 +788,7 @@ async function startExample(ex) {
 function bindEvents() {
   $('#btn-preview').addEventListener('click', doPreview);
   $('#btn-laser').addEventListener('click', openLaserDialog);
-  $('#free-entry').addEventListener('click', () => { if (window.SeedWorkshop) window.SeedWorkshop.wantSheet(); selectGenerator('FreeDesign'); });
+  $('#free-entry').addEventListener('click', async () => { state.projectPath = null; if (window.SeedWorkshop) window.SeedWorkshop.wantSheet(); await selectGenerator('FreeDesign'); settleSnap(); });
   $('#btn-save').addEventListener('click', doSave);
   $('#btn-save-project').addEventListener('click', doSaveProject);
   $('#btn-open-project').addEventListener('click', doOpenProject);
@@ -727,7 +819,14 @@ window.SeedApp = {
   doPreview,
   hasPreview: () => !!state.hasPreview,
   select: (name) => selectGenerator(name),
+  file: (cmd, arg) => fileCommand(cmd, arg),
+  recent: () => window.pywebview.api.recent_projects(),
+  formats: () => [...$('#format-select').options].map((o) => ({ value: o.value, label: o.textContent })),
+  isDirty,
+  changed: () => setTimeout(refreshFileLabel, 50),      // 画板有改动：马上刷新标题上的 ●
 };
+setInterval(refreshFileLabel, 3000);
+window.addEventListener('beforeunload', (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
 
 // ---- 启动 ----
 (async () => {

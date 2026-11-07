@@ -789,23 +789,46 @@ class Api:
         except Exception:
             return []
 
-    def save_project(self, project: dict[str, Any]) -> dict[str, Any]:
-        import json
+    # ---- 文件对话框（统一入口；浏览器调试 / 自动测试时没有窗口，用 dev_set_pick 预先给出路径）----
+    def dev_set_pick(self, path: str | None) -> dict[str, Any]:
+        """只在没有窗口（调试服务器）时有效：下一次文件对话框直接返回这个路径（None = 取消）."""
+        if self._window is not None:
+            return {"error": "只能在调试模式使用"}
+        self._test_pick = [path]
+        return {"ok": True}
+
+    def _pick(self, save: bool, filename: str = "", file_types: tuple = ()) -> Any:
         if self._window is None:
-            return {"error": "窗口未初始化"}
-        try:
-            _fd = getattr(webview, "FileDialog", None)
-            picked = self._window.create_file_dialog(
-                _fd.SAVE if _fd else webview.SAVE_DIALOG,
-                save_filename=f"{project.get('generator', 'project')}.seedbox.json",
-                file_types=("SeedLaser 项目 (*.json)", "All files (*.*)"),
-            )
-        except Exception as exc:
-            return {"error": f"保存对话框失败: {exc}"}
-        if not picked:
-            return {"cancelled": True}
+            q = getattr(self, "_test_pick", None)
+            if q:
+                return q.pop(0)
+            raise RuntimeError("窗口未初始化")
+        _fd = getattr(webview, "FileDialog", None)
+        if save:
+            mode = _fd.SAVE if _fd else webview.SAVE_DIALOG
+            picked = self._window.create_file_dialog(mode, save_filename=filename, file_types=file_types)
+        else:
+            mode = _fd.OPEN if _fd else webview.OPEN_DIALOG
+            picked = self._window.create_file_dialog(mode, file_types=file_types)
         if isinstance(picked, (list, tuple)):
-            picked = picked[0]
+            picked = picked[0] if picked else None
+        return picked
+
+    def save_project(self, project: dict[str, Any], path: str | None = None, name: str | None = None) -> dict[str, Any]:
+        """保存项目。给了 path（「保存」，已经有文件）就直接写；否则弹另存为对话框，name 是建议的文件名."""
+        import json
+        picked = path
+        if not picked:
+            base = (name or project.get("name") or ("我的设计" if project.get("generator") == "FreeDesign" else project.get("generator", "project")))
+            base = re.sub(r"\.seedbox\.json$|\.json$", "", str(base))
+            try:
+                picked = self._pick(True, f"{base}.seedbox.json", ("SeedLaser 项目 (*.json)", "All files (*.*)"))
+            except Exception as exc:
+                return {"error": f"保存对话框失败: {exc}"}
+            if not picked:
+                return {"cancelled": True}
+            if not str(picked).endswith(".json"):
+                picked = f"{picked}.seedbox.json"
         try:
             with open(picked, "w", encoding="utf-8") as f:
                 json.dump(project, f, ensure_ascii=False, indent=2)
@@ -815,21 +838,12 @@ class Api:
         return {"path": picked}
 
     def open_project(self) -> dict[str, Any]:
-        import json
-        if self._window is None:
-            return {"error": "窗口未初始化"}
         try:
-            _fd = getattr(webview, "FileDialog", None)
-            picked = self._window.create_file_dialog(
-                _fd.OPEN if _fd else webview.OPEN_DIALOG,
-                file_types=("SeedLaser 项目 (*.json)", "All files (*.*)"),
-            )
+            picked = self._pick(False, "", ("SeedLaser 项目 (*.json)", "All files (*.*)"))
         except Exception as exc:
             return {"error": f"打开对话框失败: {exc}"}
         if not picked:
             return {"cancelled": True}
-        if isinstance(picked, (list, tuple)):
-            picked = picked[0]
         return self.open_project_path(picked)
 
     def open_project_path(self, path: str) -> dict[str, Any]:
@@ -860,9 +874,9 @@ class Api:
         return out
 
     def save(self, name: str, params: dict[str, Any], fmt: str,
-             project: dict[str, Any] | None = None, laser: dict[str, Any] | None = None) -> dict[str, Any]:
-        if self._window is None:
-            return {"error": "窗口未初始化"}
+             project: dict[str, Any] | None = None, laser: dict[str, Any] | None = None,
+             filename: str | None = None) -> dict[str, Any]:
+        """导出图纸（SVG / DXF / PDF / LBRN2 …）。filename = 建议的文件名（不含扩展名）."""
         ext_map = {
             "svg": "svg", "svg_Ponoko": "svg", "ps": "ps",
             "pdf": "pdf", "dxf": "dxf", "gcode": "nc",
@@ -871,20 +885,11 @@ class Api:
         ext = ext_map.get(fmt, fmt)
         try:
             file_types = (f"{fmt.upper()} (*.{ext})", "All files (*.*)")
-            # pywebview 5.x+ 推荐 FileDialog.SAVE，旧常量 SAVE_DIALOG 作兜底
-            _file_dialog = getattr(webview, "FileDialog", None)
-            save_mode = _file_dialog.SAVE if _file_dialog else webview.SAVE_DIALOG
-            picked = self._window.create_file_dialog(
-                save_mode,
-                save_filename=f"{name}.{ext}",
-                file_types=file_types,
-            )
+            picked = self._pick(True, f"{filename or name}.{ext}", file_types)
         except Exception as exc:
             return {"error": f"保存对话框失败: {exc}"}
         if not picked:
             return {"cancelled": True}
-        if isinstance(picked, (list, tuple)):
-            picked = picked[0]
         result = self._render(name, params, fmt=fmt, to_file=picked, project=project)
         if "error" in result:
             return result

@@ -793,6 +793,7 @@ async function openSheet() {
     onClose: async (res) => {
       clearTimeout(sheetTimer);
       applySheet(res);
+      if (W.quietClose) return;          // 换设计（新建 / 打开）时关画板：只写回内容，不去 3D
       attachView($('#view3d-canvas'));
       const fromDesign = W.stage === 'design';
       if (fromDesign) { W.stage = 'assemble'; updateStageBar(); setMode('3d'); }
@@ -805,8 +806,10 @@ async function openSheet() {
   attachView(sketchEd.previewHost);
 }
 
-function closeEditor() {
-  if (sketchEd && sketchEd.opened) sketchEd.close();
+function closeEditor(quiet) {
+  W.quietClose = !!quiet;
+  try { if (sketchEd && sketchEd.opened) sketchEd.close(); } finally { W.quietClose = false; }
+  clearTimeout(sheetTimer);
   ED.part = null;
 }
 
@@ -2587,6 +2590,7 @@ window.SeedWorkshop = {
   importToDesign() { return importToDesign(); },
   openSheet() { return openSheet(); },
   reset(name) {
+    closeEditor(true);      // 先关画板：把画板内容写回当前项目（必须在换成新项目之前），不触发去 3D
     // 从「设计」去快速建模：先把当前设计留着，之后「放进当前设计」时接着用
     if (W.name === 'FreeDesign' && name !== 'FreeDesign' && hasContent()) {
       W.freeStash = JSON.parse(JSON.stringify(W.project));
@@ -2643,6 +2647,8 @@ window.SeedWorkshop = {
     if (W.mode === '3d') loadModel();
   },
   hasContent,
+  flush() { if (sketchEd && sketchEd.opened) sketchEd.flushChange(); },
+  setFileLabel(t) { if (sketchEd) sketchEd.setFileLabel(t); },
   paramsChanged: debounce(() => {
     W.stale = true;
     W.paramsDirty = true;

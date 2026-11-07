@@ -38,7 +38,7 @@ async def main():
         await pg.mouse.move(x0, y0); await pg.mouse.down(); await pg.mouse.move(x0 + 100, y0 + 60, steps=5); await pg.mouse.up()
         await pg.keyboard.press('v')
         assert await pg.evaluate(f"{ED}.sel.size") == 1
-        assert await pg.evaluate(SHOWN) == ['array', 'bool', 'transform'], await pg.evaluate(SHOWN)
+        assert await pg.evaluate(SHOWN) == ['array', 'bool', 'info', 'transform'], await pg.evaluate(SHOWN)
         # 默认折叠：阵列、路径、编组
         col = "(k)=>document.querySelector(`.sk-side [data-key=${k}]`).classList.contains('collapsed')"
         assert await pg.evaluate(f"({col})('array')") and await pg.evaluate(f"({col})('t-path')") and not await pg.evaluate(f"({col})('bool')")
@@ -50,7 +50,7 @@ async def main():
         assert await pg.evaluate(f"({col})('bool')")
         # 全选（2 个）：多出对齐
         await pg.keyboard.press('Control+a')
-        assert await pg.evaluate(SHOWN) == ['align', 'array', 'bool', 'transform'], await pg.evaluate(SHOWN)
+        assert await pg.evaluate(SHOWN) == ['align', 'array', 'bool', 'info', 'transform'], await pg.evaluate(SHOWN)
         await pg.screenshot(path=OUT + 'props_two.png')
         await pg.reload()
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
