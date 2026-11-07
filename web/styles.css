@@ -1033,3 +1033,10 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-radial-center { position: absolute; left: -32px; top: -32px; width: 64px; height: 64px; border-radius: 50% !important; padding: 0 !important;
   background: #fff !important; border: 1px solid #93c5fd !important; font-size: 10.5px; line-height: 1.3; }
 .sk-radial-center b { font-size: 11px; }
+
+.sk-rotlabel { position: absolute; z-index: 6; transform: translateX(-50%); background: #0f172a; color: #fff; border-radius: 6px;
+  padding: 3px 9px; font-size: 12px; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.sk-rotlabel b { font-size: 13px; }
+.sk-rotlabel.edit { pointer-events: auto; background: #fff; color: #1f2933; border: 1px solid #93c5fd; display: flex; align-items: center; gap: 4px; }
+.sk-rotlabel.edit input { width: 64px; }
+.sk-rotlabel.edit .sk-small { color: #8a95a3; margin-left: 4px; }

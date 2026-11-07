@@ -599,6 +599,7 @@ export class SketchEditor {
   // 右侧卡片：只显示当前工具对应的那一张（工具参数卡片有内容时也显示）
   updateCards() {
     if (!this.$) return;
+    if (this.rotLabel && !this.sel.size) this.closeRotLabel();
     this.$$('.sk-side [data-panel]').forEach((c) => c.classList.toggle('hidden', c.dataset.panel !== this.panel));
     const board = this.$('.sk-boardinfo');
     if (board) board.classList.toggle('hidden', !!this.panel || this.tool !== 'select' || this.sel.size > 0);
@@ -1290,6 +1291,7 @@ export class SketchEditor {
     const ev = e.event;
     this.closeOverlap();
     this.closeRotateBox();
+    this.closeRotLabel();
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
     this.closeRadial();
     if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView, start: this.downView, right: ev.button === 2 }; return; }
@@ -1416,6 +1418,9 @@ export class SketchEditor {
     if (d.kind === 'rotate' && !d.moved) {           // 单击手柄：不算一次修改，改为输入角度
       this.undoStack.pop();
       this.askRotate(d.center);
+    } else if (d.kind === 'rotate') {                 // 拖完：角度框留在上方，可以直接改成精确值
+      this.commit(d.label);
+      this.showRotLabel(d.center, -d.applied, true);
     } else if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'node') this.commit(d.label || '已修改');
     else if (d.kind === 'marquee') {
       if (d.box) {
@@ -1524,6 +1529,7 @@ export class SketchEditor {
     const delta = a - d.applied;
     if (delta) { this.sel.forEach((it) => it.rotate(-delta, d.center)); d.applied = a; }   // 向右拖 = 顺时针
     this.drawSelection();
+    this.showRotLabel(d.center, -a, false);
     this.status(`${a >= 0 ? '顺时针' : '逆时针'} ${fmt(Math.abs(a))}°（左右拖动微调；Shift = 15° 一档；松开手柄不拖 = 输入角度）`);
   }
 
@@ -1579,6 +1585,57 @@ export class SketchEditor {
 
   closeRadial() {
     if (this.radialBox) { this.radialBox.remove(); this.radialBox = null; }
+  }
+
+  // 旋转角度标签：拖动时实时显示；松开后变成输入框，改数字回车 = 把这次旋转改成精确角度（正数 = 逆时针）
+  showRotLabel(center, ccw, editable) {
+    let box = this.rotLabel;
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'sk-rotlabel';
+      box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+      this.$('.sk-dims').parentNode.appendChild(box);
+      this.rotLabel = box;
+    }
+    const b = this.selBounds();
+    if (!b) { this.closeRotLabel(); return; }
+    const v = this.ps.view;
+    const p1 = v.projectToView(b.topLeft); const p2 = v.projectToView(b.bottomRight);
+    box.style.left = `${(p1.x + p2.x) / 2}px`;
+    box.style.top = `${Math.max(4, Math.min(p1.y, p2.y) - 74)}px`;   // 留出旋转手柄的位置
+    const dir = Math.abs(ccw) < 1e-9 ? '' : ccw > 0 ? '逆时针' : '顺时针';
+    if (!editable) {
+      box.classList.remove('edit');
+      box.innerHTML = `<b>${fmt(Math.abs(ccw))}°</b> ${dir}`;
+      return;
+    }
+    this.rotEdit = { center, ccw };
+    box.classList.add('edit');
+    box.innerHTML = `旋转<input type="number" step="0.1" value="${fmt(ccw)}">°<span class="sk-small">正 = 逆时针，回车生效</span>`;
+    const inp = box.querySelector('input');
+    inp.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') { this.closeRotLabel(); return; }
+      if (ev.key !== 'Enter') return;
+      const want = Number(inp.value);
+      const r = this.rotEdit;
+      if (!Number.isFinite(want) || !r || !this.sel.size) return;
+      const delta = want - r.ccw;
+      if (Math.abs(delta) > 1e-9) {
+        this.pushUndo();
+        this.sel.forEach((it) => { this.convertTextIfRotated(it); it.rotate(delta, r.center); });
+        r.ccw = want;
+        this.commit(`已旋转到 ${fmt(Math.abs(want))}° ${want >= 0 ? '逆时针' : '顺时针'}`, true);
+      }
+      this.showRotLabel(r.center, want, true);
+      const again = this.rotLabel && this.rotLabel.querySelector('input');
+      if (again) { again.focus(); again.select(); }
+    });
+  }
+
+  closeRotLabel() {
+    if (this.rotLabel) { this.rotLabel.remove(); this.rotLabel = null; }
+    this.rotEdit = null;
   }
 
   // 单击旋转手柄（没有拖动）：弹出小框输入角度

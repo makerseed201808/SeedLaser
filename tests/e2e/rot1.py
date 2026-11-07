@@ -42,12 +42,22 @@ async def main():
         await pg.wait_for_timeout(200)
         a2 = await pg.evaluate(ANG)
         assert abs((a2 - a1) + 20) < 0.01, (a1, a2)
+        # 拖完上方留下角度输入框：显示 -20（正 = 逆时针），改成 -45 回车 → 相对拖动前顺时针 45°
+        assert await pg.input_value('.sk-rotlabel input') == '-20'
+        await pg.screenshot(path=OUT + 'rot_label.png')
+        await pg.fill('.sk-rotlabel input', '-45'); await pg.press('.sk-rotlabel input', 'Enter')
+        await pg.wait_for_timeout(200)
+        a3 = await pg.evaluate(ANG)
+        assert abs((a3 - a1) + 45) < 0.01, (a1, a3)
+        await pg.keyboard.press('Escape')
+        await pg.keyboard.press('Control+z'); await pg.wait_for_timeout(200)
+        assert abs(await pg.evaluate(ANG) - a2) < 0.01          # 撤销输入框的修改 → 回到拖动结果
         await pg.keyboard.press('Control+z'); await pg.wait_for_timeout(200)
         assert abs(await pg.evaluate(ANG) - a1) < 0.01          # 撤销一步回到拖动前
         await pg.keyboard.press('Control+z'); await pg.wait_for_timeout(200)
         assert abs(await pg.evaluate(ANG) - a0) < 0.01          # 再撤销回到最初（单击弹框不算一步）
         await b.close()
     assert not errs, errs
-    print('PASS rot1：单击弹框输入 30° 逆时针；右拖 40px 顺时针 20°；撤销正确')
+    print('PASS rot1：单击弹框输入 30° 逆时针；右拖 40px 顺时针 20°；拖完在角度框改成 -45°；撤销正确')
 
 asyncio.run(main())
