@@ -1,0 +1,53 @@
+import asyncio, os, json
+from playwright.async_api import async_playwright
+OUT=os.environ.get('E2E_OUT', '/tmp/seedboxes-e2e/')
+async def main():
+    os.makedirs(OUT, exist_ok=True)
+    async with async_playwright() as p:
+        b = await p.chromium.launch(args=['--use-gl=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'])
+        pg = await b.new_page(viewport={'width':1500,'height':900})
+        logs=[]
+        pg.on('console', lambda m: logs.append(f'{m.type}: {m.text}'))
+        pg.on('pageerror', lambda e: logs.append(f'PAGEERROR: {e}'))
+        await pg.add_init_script("localStorage.setItem('seedboxes.skTour','1')")
+        try:
+            await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
+            await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
+            await pg.click('#free-entry')
+            await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
+            await pg.wait_for_timeout(800)
+            cv = await pg.locator('.sk-canvas').bounding_box()
+            x0, y0 = cv["x"]+120, cv["y"]+400
+            async def rect(ax, ay, bx, by):
+                await pg.keyboard.press('r')
+                await pg.mouse.move(ax, ay); await pg.mouse.down(); await pg.mouse.move(bx, by, steps=6); await pg.mouse.up()
+                await pg.wait_for_timeout(200)
+            await rect(x0, y0, x0+200, y0+150)
+            await rect(x0+300, y0, x0+500, y0+150)
+            await pg.keyboard.press('e')
+            await pg.mouse.move(x0+70, y0+50); await pg.mouse.down(); await pg.mouse.move(x0+120, y0+100, steps=5); await pg.mouse.up()
+            await pg.wait_for_timeout(300)
+            print('labels', await pg.evaluate("[...document.querySelectorAll('.sk-plabel')].map(e=>e.textContent)"))
+            print('sub', await pg.evaluate("document.querySelector('.sk-sub').textContent"))
+            await pg.keyboard.press('j'); await pg.wait_for_timeout(200)
+            await pg.mouse.move(x0+200, y0+75); await pg.wait_for_timeout(100); await pg.mouse.click(x0+200, y0+75)
+            await pg.wait_for_timeout(300)
+            print('status1', await pg.evaluate("document.querySelector('.sk-status').textContent"))
+            await pg.mouse.move(x0+300, y0+75); await pg.wait_for_timeout(100); await pg.mouse.click(x0+300, y0+75)
+            await pg.wait_for_timeout(300)
+            print('status2', await pg.evaluate("document.querySelector('.sk-status').textContent"))
+            await pg.fill('[data-sheet=w]','500'); await pg.press('[data-sheet=w]','Enter'); await pg.wait_for_timeout(600)
+            await pg.screenshot(path=OUT+'sheet_2d.png')
+            await pg.click('.sk-back'); await pg.wait_for_timeout(4000)
+            print('free', await pg.evaluate("JSON.stringify(window.SeedWorkshop.getProject().free.parts)"))
+            print('sheet', await pg.evaluate("JSON.stringify(window.SeedWorkshop.getProject().free.sheet)"))
+            await pg.screenshot(path=OUT+'sheet_3d.png')
+            await pg.click('.pp-free-new [data-k=auto]'); await pg.wait_for_timeout(5000)
+            await pg.screenshot(path=OUT+'sheet_asm.png')
+            print('poses', await pg.evaluate("Object.keys(window.SeedWorkshop.getProject().poses||{})"))
+            await pg.click('#tab-2d'); await pg.click('#btn-preview'); await pg.wait_for_timeout(3000)
+            await pg.screenshot(path=OUT+'sheet_export.png')
+        finally:
+            print('\n'.join(l for l in logs if 'rror' in l)[:3000])
+            await b.close()
+asyncio.run(main())
