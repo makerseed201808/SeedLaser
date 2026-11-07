@@ -32,7 +32,7 @@ cat > "$PLIST" <<EOF
   <array><string>/bin/bash</string><string>$DIR/autopush.sh</string><string>$REPO</string></array>
   <key>WatchPaths</key>
   <array><string>$REPO/.git/logs/HEAD</string><string>$REPO/.git/refs/tags</string></array>
-  <key>StartInterval</key><integer>1800</integer>
+  <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>
   <key>ThrottleInterval</key><integer>20</integer>
   <key>StandardOutPath</key><string>$LOG</string>

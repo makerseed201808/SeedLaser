@@ -3357,6 +3357,33 @@ export class SketchEditor {
     this.toast(`已${dist > 0 ? '外扩' : '内缩'} ${fmt(Math.abs(dist))} mm：生成了新图形（已选中），原图形保留${tiny ? '。离原图形很近，放大才看得清' : ''}`);
   }
 
+  // 从 3D 预览定位：id = 板件 pid，或 'loose:<图形 id>'（不在板里的图形）。选中它、移到画面中间、闪一下
+  locate(id) {
+    let it = null; let label = '';
+    if (id.startsWith('loose:')) {
+      const iid = id.slice(6);
+      it = this.content.children.find((c) => c.data && c.data.id === iid);
+      label = '不在板里的图形';
+    } else {
+      const { parts } = this.recognizeParts();
+      const p = parts.find((q) => q.item.data.pid === id);
+      if (p) { it = p.item; label = (this.part && this.part.names && this.part.names[id]) || '板件'; }
+    }
+    if (!it) { this.status('在画板上没找到这个图形'); return; }
+    this.setTool('select');
+    this.sel = new Set(this.groupOf(it));
+    this.keyItem = it;
+    const v = this.ps.view;
+    const b = it.bounds;
+    const vw = v.viewSize.width / this.zoom; const vh = v.viewSize.height / this.zoom;
+    const z = b.width > vw * 0.8 || b.height > vh * 0.8
+      ? Math.min(v.viewSize.width / (b.width * 1.4 || 1), v.viewSize.height / (b.height * 1.4 || 1)) : this.zoom;
+    this.setView(z, b.center.x, b.center.y);
+    this.refresh();
+    this.flashItem(it);
+    this.status(`已定位：${label}（在 3D 预览里点板件或线条，就能在画板上找到它）`);
+  }
+
   flashItem(it) {
     const g = it.clone({ insert: false });
     g.strokeColor = SMART; g.strokeWidth = 4; g.fillColor = null; g.opacity = 0.8; g.strokeScaling = false;
@@ -4262,7 +4289,7 @@ export class SketchEditor {
         ${this.staleJointsHtml()}
         <p class="sk-small">每个<b>最外层的闭合切割轮廓</b>就是一块板；画在它里面的孔、雕刻和文字都属于这块板。</p>
         <p class="sk-small">两块板要拼在一起：用「卡榫」工具先点 A 板的一条边，再点 B 板的一条边，自动配成一对，3D 里会按它自动拼装。</p>
-        <p class="sk-small">画好后点左上角「生成 3D · 去装配」。导出的图纸和画板上的位置一样。</p>`;
+        <p class="sk-small">画好后点右上角「3D 装配 →」。右下角的 3D 预览是整张图的总览：点里面的板件或线条，就能在画板上定位它。导出的图纸和画板上的位置一样。</p>`;
       const thick = box.querySelector('[data-thick]');
       thick.addEventListener('change', () => {
         const v = Math.min(30, Math.max(0.5, Number(thick.value) || 3));

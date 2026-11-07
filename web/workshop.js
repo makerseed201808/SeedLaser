@@ -3,7 +3,7 @@
 // 编辑（edit）存在「从外面看」坐标系：原点 = 内部矩形左下角，单位 mm，y 向上。
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
-import { SketchEditor, sketchPolys } from './sketch2d.js';
+import { SketchEditor, sketchPolys, flattenPath } from './sketch2d.js';
 import { FIT_SQ, FIT_STEPS, FIT_LADDER, ladderSlots, fitResult, stepLabel } from './fit-calc.js';
 
 const api = () => window.pywebview.api;
@@ -192,7 +192,15 @@ class View3D {
     this.raycaster.setFromCamera(ndc, this.camera);
     const meshes = [...this.objects.values()].map((o) => o.mesh);
     const hits = this.raycaster.intersectObjects(meshes, false);
-    return hits.length ? hits[0].object.userData.partId : null;
+    if (hits.length) return hits[0].object.userData.partId;
+    // 不在板里的线（画在台面上）：按屏幕上约 6 像素的范围拾取
+    if (this.overlay && this.overlay.children.length) {
+      const d = this.camera.position.distanceTo(this.controls.target);
+      this.raycaster.params.Line = { threshold: d * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 2 / (r.height || 1) * 6 };
+      const lh = this.raycaster.intersectObjects(this.overlay.children.filter((o) => o.userData.itemId), false);
+      if (lh.length) return `loose:${lh[0].object.userData.itemId}`;
+    }
+    return null;
   }
 
   pick(ev) {
@@ -205,11 +213,30 @@ class View3D {
     this.objects.clear();
   }
 
-  setModel(model) {
+  setModel(model, overlay) {
     this.clear();
     model.parts.forEach((p, i) => this.buildPart(p, model.thickness, i));
+    this.setOverlay(overlay);
     this.refreshStates();
     this.fit(model);
+  }
+
+  // 台面上的二维线条（自由设计里不在任何板件里的图形）：[{ id, pts: [[x,y]...], color }]，画板坐标 = 台面坐标
+  setOverlay(list) {
+    if (this.overlay) { this.root.remove(this.overlay); disposeTree(this.overlay); this.overlay = null; }
+    if (!list || !list.length) return;
+    const g = new THREE.Group();
+    list.forEach((L) => {
+      const geo = new THREE.BufferGeometry().setFromPoints(L.pts.map(([x, y]) => new THREE.Vector3(x, y, 0.3)));
+      const mat = L.dash ? new THREE.LineDashedMaterial({ color: L.color, dashSize: L.dash, gapSize: L.dash * 0.6 })
+        : new THREE.LineBasicMaterial({ color: L.color });
+      const line = new THREE.Line(geo, mat);
+      if (L.dash) line.computeLineDistances();
+      line.userData.itemId = L.id;
+      g.add(line);
+    });
+    this.overlay = g;
+    this.root.add(g);
   }
 
   buildPart(p, t, i) {
@@ -332,6 +359,7 @@ class View3D {
     // 拼装模式只对准拼好的部分（旁边散放的零件、校准尺不参与取景）
     const core = model.assembled ? new Set(model.parts.filter((p) => p.face || (p.id || '').startsWith('inner')).map((p) => p.id)) : null;
     this.objects.forEach((o, id) => { if (!core || core.has(id)) box.expandByObject(o.mesh); });
+    if (!model.assembled && this.overlay) box.expandByObject(this.overlay);     // 二维总览：散落的线也要框进来
     if (box.isEmpty()) this.objects.forEach((o) => box.expandByObject(o.mesh));
     if (box.isEmpty()) return;
     const size = box.getSize(new THREE.Vector3());
@@ -340,7 +368,9 @@ class View3D {
     const fovV = THREE.MathUtils.degToRad(this.camera.fov / 2);
     const fovH = Math.atan(Math.tan(fovV) * this.camera.aspect);
     const dist = radius / Math.sin(Math.min(fovV, fovH)) * 1.2;
-    const dir = model.assembled ? new THREE.Vector3(0.75, 0.62, 1.0) : new THREE.Vector3(0.2, 1.4, 0.9);
+    // 二维画板右下角的预览 = 图纸总览：接近俯视
+    const dir = this.topDown ? new THREE.Vector3(0, 1, 0.32)
+      : model.assembled ? new THREE.Vector3(0.75, 0.62, 1.0) : new THREE.Vector3(0.2, 1.4, 0.9);
     dir.normalize();
     this.camera.position.copy(center).addScaledVector(dir, dist);
     this.camera.near = dist / 100;
@@ -352,6 +382,7 @@ class View3D {
     if (this.grid) { this.scene.remove(this.grid); disposeTree(this.grid); }
     const all = new THREE.Box3();
     this.objects.forEach((o) => all.expandByObject(o.mesh));
+    if (this.overlay) all.expandByObject(this.overlay);
     const allSize = all.getSize(new THREE.Vector3());
     const span = Math.ceil(Math.max(size.x, size.z, allSize.x, allSize.z) * 1.6 / 10) * 10;
     this.grid = new THREE.GridHelper(span, Math.max(4, span / 10), 0xd8d3c6, 0xe7e3d8);
@@ -516,12 +547,17 @@ async function loadModel() {
   if (seq !== W.loadSeq) return;
   if (!view) {
     view = new View3D($('#view3d-canvas'));
-    view.onPick = (id, ev) => select(id, ev && ev.shiftKey);
+    view.onPick = (id, ev) => {
+      // 二维画板开着（右下角是 3D 预览）：点板件 / 线 = 在画板上定位它
+      if (sketchEd && sketchEd.opened && sketchEd.sheetMode) { if (id) sketchEd.locate(id); return; }
+      if (id && id.startsWith('loose:')) return;
+      select(id, ev && ev.shiftKey);
+    };
     view.onEdit = (id) => (isFree() ? setStage('design') : openEditor(id));
     poser = new Poser(view);
     poser.applyMouseMapping(W.pose.on);
   }
-  view.setModel(m);
+  view.setModel(m, looseOverlay());
   W.multi.clear();
   if (W.selected && !m.parts.some((q) => q.id === W.selected)) W.selected = null;
   if (W.selected) W.multi.add(W.selected);
@@ -647,9 +683,30 @@ async function openEditor(id) {
 }
 
 // 3D 视图的画布在主界面和草图编辑器的预览框之间移动（同一个 three.js 场景，实时同步）
+// 自由设计：不在任何板件里的图形，画在 3D 台面上（和画板位置一致），点它可以在画板上定位
+const OVERLAY_COLORS = { cut: 0x111827, engrave: 0x16a34a, score: 0xdc2626 };
+function looseOverlay() {
+  if (!isFree() || !W.project.free) return null;
+  const out = [];
+  const sh = W.project.free.sheet;
+  if (sh && sh.w && sh.h) {      // 材料边框（虚线），看得出零件在材料上的位置
+    out.push({ id: null, pts: [[0, 0], [sh.w, 0], [sh.w, sh.h], [0, sh.h], [0, 0]], color: 0x7c8ba1, dash: Math.max(sh.w, sh.h) / 60 });
+  }
+  (W.project.free.loose || []).forEach((it) => {
+    (it.paths || []).forEach((p) => {
+      const pts = flattenPath(p);
+      if (pts.length < 2) return;
+      if (p.closed) pts.push(pts[0]);
+      out.push({ id: it.id, pts, color: OVERLAY_COLORS[it.mode] || OVERLAY_COLORS.cut });
+    });
+  });
+  return out;
+}
+
 function attachView(el) {
   if (!view || !el || view.host === el) return;
   view.host = el;
+  view.topDown = el.id !== 'view3d-canvas';       // 画板里的小预览：俯视总览
   view.ro.observe(el);
   el.appendChild(view.renderer.domElement);
   view.resize();
