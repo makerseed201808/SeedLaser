@@ -36,6 +36,7 @@ async def main():
             await pg.mouse.move(x0+300, y0+75); await pg.wait_for_timeout(100); await pg.mouse.click(x0+300, y0+75)
             await pg.wait_for_timeout(300)
             print('status2', await pg.evaluate("document.querySelector('.sk-status').textContent"))
+            await pg.keyboard.press('v'); await pg.keyboard.press('Escape')   # 材料尺寸在「板件信息」里：选择工具、没选中时显示
             await pg.fill('[data-sheet=w]','500'); await pg.press('[data-sheet=w]','Enter'); await pg.wait_for_timeout(600)
             await pg.screenshot(path=OUT+'sheet_2d.png')
             await pg.click('.sk-back'); await pg.wait_for_timeout(4000)

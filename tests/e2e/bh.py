@@ -13,6 +13,7 @@ async def main():
         await pg.click('#free-entry')
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
         await pg.wait_for_timeout(800)
+        await pg.evaluate("(()=>{const e=window.__seedDebug.sketchEd;e.sel=new Set([e.content.children[0]]);e.refresh()})()")
         await pg.click('[data-tool=p-bool]')
         card = pg.locator('[data-bh=unite]').locator('xpath=ancestor::*[contains(@class,"sk-card")][1]')
         for k in ['unite','subtract','intersect','exclude']:

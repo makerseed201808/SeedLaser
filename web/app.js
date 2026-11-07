@@ -515,7 +515,7 @@ function formatBytes(n) {
 // ---- 保存 ----
 // ---- 加工参数（每个图层的速度 / 功率 / 遍数）----
 const LASER_LAYERS = [
-  { key: 'cut', name: '切割', color: '黑色 / 蓝色', swatch: '#1f6feb', hint: '外轮廓（黑）和内孔（蓝）' },
+  { key: 'cut', name: '切割', color: '黑色 / 蓝色', swatch: '#111827', hint: '外轮廓（黑）和内孔（蓝）；编辑器里统一显示为黑色' },
   { key: 'engrave', name: '雕刻', color: '绿色', swatch: '#16a34a', hint: '填充雕刻' },
   { key: 'score', name: '描线', color: '品红', swatch: '#dc2626', hint: '沿线浅刻（编辑器里显示为红色，导出文件仍是品红）' },
 ];
