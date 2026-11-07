@@ -27,7 +27,7 @@ async def main():
         await pg.click('#free-entry'); await pg.wait_for_selector('#sk-host:not(.hidden)'); await pg.wait_for_timeout(1800)
         assert await pg.is_visible('#sk-host .sk-filebtn')
         assert (await pg.inner_text('#sk-host .sk-back')).startswith('3D 装配'), await pg.inner_text('#sk-host .sk-back')
-        assert '材料' in await pg.inner_text('#sk-host .sk-bottom .sk-sub')
+        assert '材料' in await pg.inner_text('#sk-host .sk-ctx-data')
         assert not await pg.is_visible('#sk-host .sk-name')
         assert await label() == '未命名设计', await label()
         n0 = await count()

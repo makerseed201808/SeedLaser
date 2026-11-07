@@ -1171,3 +1171,26 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-info-part { color: #1f6feb; }
 .sk-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .sk-warn-t { color: #c2410c; }
+
+/* 菜单栏 v2：文件 / 编辑 / 帮助 菜单 + 图标按钮；第二行是上下文栏 */
+.sk-menubtn { font-weight: 600; padding: 4px 9px !important; }
+.sk-menubtn.on { background: #eef4ff !important; border-color: #1f6feb !important; color: #1f6feb; }
+.sk-ico { min-width: 28px; padding: 3px 7px !important; font-size: 14px; line-height: 18px; }
+.sk-danger:hover { color: #dc2626; border-color: #fca5a5 !important; }
+.sk-zoom { min-width: 44px; text-align: center; font-size: 12px; color: #4a5562; font-variant-numeric: tabular-nums; cursor: pointer; }
+.sk-glabel { font-size: 12px; color: #6b7785; }
+.sk-group select { font-size: 12px; padding: 2px 4px; }
+.sk-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #4a5562; cursor: pointer; white-space: nowrap; }
+.sk-filemenu button:disabled { opacity: .4; cursor: default; }
+.sk-filemenu button:disabled:hover { background: transparent !important; color: inherit; }
+.sk-numeric { min-height: 36px; box-sizing: border-box; }
+.sk-ctx-idle, .sk-ctx-sel { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sk-ctx-idle.hidden, .sk-ctx-sel.hidden { display: none; }
+.sk-ctx-data { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.sk-chip { display: inline-flex; align-items: center; gap: 5px; background: #fff; border: 1px solid #e3e8ef; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.sk-chip > i { font-style: normal; color: #8a96a3; }
+.sk-chip b { font-weight: 600; color: #1f2933; font-variant-numeric: tabular-nums; }
+.sk-chip.warn { border-color: #fdba74; color: #c2410c; background: #fff7ed; }
+.sk-ctx-count { font-size: 12px; color: #1f6feb; white-space: nowrap; }
+.sk-top .sk-menubtn.on { background: #eef4ff !important; border-color: #1f6feb !important; color: #1f6feb !important; }
+.sk-dims { overflow: hidden; }

@@ -115,47 +115,52 @@ export class SketchEditor {
     const h = this.host;
     h.innerHTML = `
       <div class="sk-top">
-        <button class="sk-filebtn" data-filemenu title="新建、打开、保存、另存为、导入、导出">文件 ▾</button>
+        <button class="sk-menubtn sk-filebtn" data-filemenu title="新建、打开、保存、另存为、导入、导出">文件 ▾</button>
+        <button class="sk-menubtn" data-menu="edit" title="撤销、复制、粘贴、删除、编组……">编辑 ▾</button>
         <div class="sk-title"><b class="sk-name">—</b><span class="sk-file" title="当前文件（● = 有改动还没保存）"></span></div>
         <div class="sk-group">
-          <button data-act="undo" title="撤销（Ctrl+Z）">↶</button>
-          <button data-act="redo" title="重做（Ctrl+Shift+Z）">↷</button>
+          <button class="sk-ico" data-act="undo" title="撤销（⌘Z）">↶</button>
+          <button class="sk-ico" data-act="redo" title="重做（⇧⌘Z）">↷</button>
         </div>
-        <div class="sk-group">
-          <button data-act="copy" title="复制（Ctrl+C）">复制</button>
-          <button data-act="paste" title="粘贴（Ctrl+V）">粘贴</button>
-          <button data-act="dup" title="原位复制一份（Ctrl+D）">复制一份</button>
-          <button data-act="delete" title="删除（Delete）">删除</button>
+        <div class="sk-group" title="视图">
+          <button class="sk-ico" data-act="fit" title="适合窗口：显示整块材料（F）">⤢</button>
+          <button class="sk-ico" data-zoom="out" title="缩小（滚轮也可以缩放）">−</button>
+          <span class="sk-zoom" title="缩放比例（100% ≈ 屏幕上的实际大小）">100%</span>
+          <button class="sk-ico" data-zoom="in" title="放大">+</button>
         </div>
-        <div class="sk-group">
-          <button data-act="keys" title="快捷键一览（?）">⌨ 快捷键</button>
-          <button data-act="tour" title="重新看一遍新手引导">新手引导</button>
-        </div>
-        <div class="sk-group">
-          <button data-act="fit" title="显示整块板（F）">适合窗口</button>
-          <label class="sk-snap">吸附
-            <select data-opt="snap"><option value="0">关</option><option value="0.5">0.5 mm</option>
-              <option value="1" selected>1 mm</option><option value="5">5 mm</option></select></label>
-          <label class="sk-check"><input type="checkbox" data-opt="snapPoints" checked>吸附端点</label>
+        <div class="sk-group" title="吸附">
+          <span class="sk-glabel">吸附</span>
+          <select data-opt="snap" title="网格吸附步长"><option value="0">网格 关</option><option value="0.5">网格 0.5</option>
+            <option value="1" selected>网格 1 mm</option><option value="5">网格 5 mm</option></select>
+          <label class="sk-toggle" title="吸附端点、中点、交点、圆心，以及绿色对齐辅助线"><input type="checkbox" data-opt="snapPoints" checked><span>端点 / 对齐</span></label>
         </div>
         <span class="sk-spacer"></span>
+        <button class="sk-menubtn" data-menu="help" title="快捷键、新手引导">? 帮助 ▾</button>
         <button class="sk-lock" data-act="lockOutline" title="锁定后外轮廓（卡榫边）不会被误选、误改">🔒 外轮廓已锁定</button>
         <button data-act="reset" title="丢弃这块板的所有修改，恢复生成器画出的原样">恢复原板</button>
         <button class="sk-back" data-act="close">完成 ✓</button>
       </div>
       <div class="sk-numeric">
-        <span class="sk-num-label">位置 / 尺寸</span>
-        <label>X<input data-num="x" type="number" step="0.1"></label>
-        <label>Y<input data-num="y" type="number" step="0.1"></label>
-        <label>宽<input data-num="w" type="number" step="0.1" min="0.1"></label>
-        <label>高<input data-num="h" type="number" step="0.1" min="0.1"></label>
-        <button class="sk-ratio on" data-act="ratio" title="锁定宽高比">🔗</button>
-        <label>旋转<input data-num="rot" type="number" step="1" value="0"></label><span class="sk-unit">°</span>
-        <i class="sk-sep sk-num-sep"></i>
-        <span class="sk-num-label">对齐</span>
-        <span class="sk-aligns">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}">${alignIcon(k)}</button>`).join('')}
-          <i class="sk-sep"></i>${['dh', 'dv'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}（选 3 个以上）">${alignIcon(k)}</button>`).join('')}</span>
-        <span class="sk-num-hint">回车生效（X / Y 为左下角）</span>
+        <span class="sk-ctx-idle">
+          <span class="sk-ctx-data"></span>
+          <span class="sk-num-hint">选中图形后，这里显示位置和尺寸</span>
+        </span>
+        <span class="sk-ctx-sel hidden">
+          <b class="sk-ctx-count"></b>
+          <i class="sk-sep sk-num-sep"></i>
+          <label title="左下角 X（回车生效）">X<input data-num="x" type="number" step="0.1"></label>
+          <label title="左下角 Y（回车生效）">Y<input data-num="y" type="number" step="0.1"></label>
+          <label title="宽（回车生效）">宽<input data-num="w" type="number" step="0.1" min="0.1"></label>
+          <button class="sk-ratio on" data-act="ratio" title="锁定宽高比">🔗</button>
+          <label title="高（回车生效）">高<input data-num="h" type="number" step="0.1" min="0.1"></label>
+          <label title="旋转角度，正数 = 逆时针（回车生效）">旋转<input data-num="rot" type="number" step="1" value="0"></label><span class="sk-unit">°</span>
+          <i class="sk-sep sk-num-sep"></i>
+          <span class="sk-aligns" title="对齐：只选 1 个时对齐到整块材料">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}">${alignIcon(k)}</button>`).join('')}
+            <i class="sk-sep"></i>${['dh', 'dv'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}（选 3 个以上）">${alignIcon(k)}</button>`).join('')}</span>
+          <i class="sk-sep sk-num-sep"></i>
+          <button class="sk-ico" data-act="dup" title="复制一份（⌘D）">⧉</button>
+          <button class="sk-ico sk-danger" data-act="delete" title="删除（Delete）">🗑</button>
+        </span>
       </div>
       <div class="sk-main">
         <div class="sk-tools">${TOOLS.map((t) => `${t.sep ? '<i class="sk-tools-sep"></i>' : ''}<button data-tool="${t.id}" title="${t.tip}"><span class="i">${t.icon}</span>${t.name}</button>`).join('')}</div>
@@ -261,7 +266,7 @@ export class SketchEditor {
       <div class="sk-bottom">
         <div class="sk-palette">${Object.entries(MODES).map(([k, m]) => `<button data-mode="${k}" title="${m.name}：${m.hint}" style="background:${m.color}">${m.name}</button>`).join('')}</div>
         <div class="sk-status"></div>
-        <span class="sk-sub"></span>
+        <span class="sk-sub hidden"></span>
         <div class="sk-coords"></div>
       </div>`;
     this.canvas = h.querySelector('.sk-canvas');
@@ -293,6 +298,12 @@ export class SketchEditor {
     });
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
     h.querySelector('[data-filemenu]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleFileMenu(); });
+    h.querySelectorAll('[data-menu]').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleMenu(b.dataset.menu); }));
+    h.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => {
+      const v = this.ps.view;
+      this.zoomAt(new this.ps.Point(v.viewSize.width / 2, v.viewSize.height / 2), b.dataset.zoom === 'in' ? 1.25 : 0.8);
+    }));
+    h.querySelector('.sk-zoom').addEventListener('click', () => this.fit());
     h.querySelectorAll('[data-opt]').forEach((el) => el.addEventListener('change', () => this.optChanged(el)));
     h.querySelectorAll('[data-num]').forEach((el) => {
       el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { this.numericApply(el.dataset.num, el.value); el.blur(); } });
@@ -608,7 +619,7 @@ export class SketchEditor {
   }
 
   async toggleFileMenu() {
-    if (this.fileMenu) { this.closeFileMenu(); return; }
+    if (this.fileMenu) { const was = this.openMenuId; this.closeFileMenu(); if (was === 'file') return; }
     const app = window.SeedApp || {};
     const mac = /Mac/i.test(navigator.platform || navigator.userAgent);
     const K = (k, shift) => (mac ? `${shift ? '⇧' : ''}⌘${k}` : `Ctrl+${shift ? 'Shift+' : ''}${k}`);
@@ -639,6 +650,7 @@ export class SketchEditor {
     box.style.top = `${r.bottom - hr.top + 4}px`;
     this.host.appendChild(box);
     this.fileMenu = box;
+    this.openMenuId = 'file';
     btn.classList.add('on');
     this._fmClose = (ev) => { if (!box.contains(ev.target) && ev.target !== btn) this.closeFileMenu(); };
     setTimeout(() => document.addEventListener('pointerdown', this._fmClose), 0);
@@ -653,8 +665,46 @@ export class SketchEditor {
   closeFileMenu() {
     if (this.fileMenu) { this.fileMenu.remove(); this.fileMenu = null; }
     if (this._fmClose) { document.removeEventListener('pointerdown', this._fmClose); this._fmClose = null; }
-    const btn = this.$ && this.$('[data-filemenu]');
-    if (btn) btn.classList.remove('on');
+    if (this.$) this.$$('.sk-menubtn.on').forEach((b) => b.classList.remove('on'));
+    this.openMenuId = null;
+  }
+
+  // 「编辑 ▾」「? 帮助 ▾」下拉菜单（样式和文件菜单一样）
+  toggleMenu(id) {
+    const was = this.openMenuId;
+    this.closeFileMenu();
+    if (was === id) return;
+    const mac = /Mac/i.test(navigator.platform || navigator.userAgent);
+    const K = (k, shift) => (mac ? `${shift ? '⇧' : ''}⌘${k}` : `Ctrl+${shift ? 'Shift+' : ''}${k}`);
+    const it = (act, label, key, dis) => `<button data-mact="${act}" ${dis ? 'disabled' : ''}><span>${label}</span><kbd>${key || ''}</kbd></button>`;
+    const n = this.sel.size;
+    const html = id === 'edit'
+      ? it('undo', '撤销', K('Z')) + it('redo', '重做', K('Z', true)) + '<hr>' +
+        it('copy', '复制', K('C'), !n) + it('paste', '粘贴', K('V')) + it('dup', '复制一份', K('D'), !n) + it('delete', '删除', 'Delete', !n) + '<hr>' +
+        it('selectAll', '全选', K('A')) + it('group', '编组', K('G'), n < 2) + it('ungroup', '取消编组', K('G', true), !n)
+      : it('keys', '快捷键一览', '?') + it('tour', '新手引导');
+    const box = document.createElement('div');
+    box.className = 'sk-filemenu';
+    box.innerHTML = html;
+    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    box.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-mact]');
+      if (!b || b.disabled) return;
+      this.closeFileMenu();
+      const a = b.dataset.mact;
+      if (a === 'selectAll') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); return; }
+      this.act(a, b);
+    });
+    const btn = this.$(`[data-menu=${id}]`);
+    const r = btn.getBoundingClientRect(); const hr = this.host.getBoundingClientRect();
+    box.style.left = `${Math.min(r.left - hr.left, hr.width - 260)}px`;
+    box.style.top = `${r.bottom - hr.top + 4}px`;
+    this.host.appendChild(box);
+    this.fileMenu = box;
+    this.openMenuId = id;
+    btn.classList.add('on');
+    this._fmClose = (ev) => { if (!box.contains(ev.target) && ev.target !== btn) this.closeFileMenu(); };
+    setTimeout(() => document.addEventListener('pointerdown', this._fmClose), 0);
   }
 
   setFileLabel(text) {
@@ -897,6 +947,8 @@ export class SketchEditor {
     this.drawRulers();
     this.drawSelection();
     if (this.marks) this.drawMarks();
+    const zl = this.$ && this.$('.sk-zoom');
+    if (zl) zl.textContent = `${Math.round(this.zoom / (96 / 25.4) * 100)}%`;   // 100% ≈ 屏幕上的实际大小（96 dpi）
   }
 
   center() {
@@ -2930,8 +2982,12 @@ export class SketchEditor {
 
   // 鼠标下的一条边（线段 / 弧），任何图层的图形都可以量
   pickCurve(pt) {
-    const res = this.content.hitTest(pt, { stroke: true, curves: true, tolerance: 7 / this.zoom, match: (h) => !!this.topItem(h.item) });
-    return res && res.location ? res.location.curve : null;
+    // segments: paper.js 在正好点中圆的节点时，stroke 命中会漏掉，所以节点也算
+    const res = this.content.hitTest(pt, { stroke: true, curves: true, segments: true, tolerance: 7 / this.zoom, match: (h) => !!this.topItem(h.item) });
+    if (!res) return null;
+    if (res.location) return res.location.curve;
+    if (res.segment) return res.segment.curve || (res.segment.previous && res.segment.previous.curve) || null;
+    return null;
   }
 
   // 一条边所在的圆：整圆图形直接取；弧线用三点求圆
@@ -3858,7 +3914,7 @@ export class SketchEditor {
     const steps = [
       { sel: '.sk-tools', title: '① 画图工具', text: '直线、曲线、矩形、圆、文字……点一下就能用，鼠标停在按钮上会显示用法和快捷键。' },
       { sel: '.sk-palette', title: '② 加工方式', text: '黑色 = 切穿，绿色 = 雕刻，红色 = 描线。先选中图形，再点颜色就能改。' },
-      { sel: '.sk-numeric', title: '③ 精确尺寸', text: '选中图形后在这里输入位置、宽高、角度；后面一排是对齐按钮。也可以直接点图上的长度数字修改；单击图形上方的蓝点可以输入旋转角度。' },
+      { sel: '.sk-numeric', title: '③ 上下文栏', text: '没选中时显示材料、板厚、板件数；选中图形后变成位置、宽高、角度、对齐和复制 / 删除。也可以直接点图上的长度数字修改；单击图形上方的蓝点可以输入旋转角度。' },
       { sel: '.sk-side', title: '④ 属性面板', text: '右侧跟着你选中的内容变：画图时是工具设置；选中图形后出现运算、变换、阵列，选中 2 个以上还有对齐。点区块标题可以折叠。左边下面那组按钮能直接跳到对应区块。' },
       { sel: '.sk-3d', title: '⑤ 3D 实时预览', text: '每改一次，3D 都会更新，并检查和相邻的板会不会撞在一起（红色 = 穿透）。' },
       { sel: '.sk-back', title: '⑥ 完成', text: '画好了点这里回到主界面；修改会自动保存到项目里。' },
@@ -3909,9 +3965,28 @@ export class SketchEditor {
     }
     const b = this.sel.size ? this.selBounds() : null;
     const set = (k, v) => { const el = this.$(`[data-num=${k}]`); if (document.activeElement !== el) el.value = v; };
-    this.$$('.sk-numeric input').forEach((el) => { el.disabled = !b; });
-    if (!b) { ['x', 'y', 'w', 'h'].forEach((k) => set(k, '')); set('rot', 0); return; }
+    // 上下文栏：没选中 = 材料 / 板厚 / 板件数 / 新图形的加工方式；选中 = 数量 + 位置尺寸 + 对齐 + 复制 / 删除
+    this.$('.sk-ctx-idle').classList.toggle('hidden', !!b);
+    this.$('.sk-ctx-sel').classList.toggle('hidden', !b);
+    if (!b) { ['x', 'y', 'w', 'h'].forEach((k) => set(k, '')); set('rot', 0); this.renderCtxData(); return; }
+    this.$('.sk-ctx-count').textContent = `选中 ${this.sel.size} 个`;
     set('x', fmt(b.left)); set('y', fmt(b.top)); set('w', fmt(b.width)); set('h', fmt(b.height)); set('rot', 0);
+  }
+
+  renderCtxData() {
+    const el = this.$('.sk-ctx-data');
+    if (!el || !this.part) return;
+    const m = MODES[this.opts.mode] || MODES.cut;
+    const chip = (k, v) => `<span class="sk-chip"><i>${k}</i><b>${v}</b></span>`;
+    let html = '';
+    if (this.sheetMode && this.part.sheet) {
+      const { parts, loose } = this.recognizeParts();
+      html = chip('材料', `${fmt(this.part.sheet.w)} × ${fmt(this.part.sheet.h)} mm`) + chip('板厚', `${fmt(this.part.thickness || 0)} mm`) +
+        chip('板件', `${parts.length} 块`) + (loose.length ? `<span class="sk-chip warn" title="不在任何板里的图形不会导出">⚠ ${loose.length} 个图形不在板里</span>` : '');
+    } else if (this.part.sub) html = `<span class="sk-chip"><b>${escAttr(this.part.sub)}</b></span>`;
+    html += chip('图形', `${this.content.children.filter((c) => c.data && c.data.mode).length} 个`) +
+      `<span class="sk-chip" title="新画的图形用这个加工方式（左下角可以换）"><i>新图形</i><b><i class="sk-dot" style="background:${m.color}"></i>${m.name}</b></span>`;
+    el.innerHTML = html;
   }
 
   numericApply(k, val) {
