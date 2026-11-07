@@ -17,6 +17,23 @@ const RADIAL_REPEAT = {
   dup: '复制一份', delete: '删除', unite: '并集', subtract: '差集', intersect: '交集', mirCopyH: '左右镜像复制', mirCopyV: '上下镜像复制',
   flipH: '水平镜像', flipV: '垂直镜像', rotL: '左转 90°', rotR: '右转 90°', fillet: '圆角', chamfer: '倒角', group: '编组', paste: '粘贴', offset: '偏移',
 };
+// 右键圆形快捷菜单可以放的命令（用户在「自定义」里挑）。sel = 需要先选中图形
+const RADIAL_CATALOG = [
+  { g: '画图工具', items: [['t:select', '选择', '➤'], ['t:node', '节点', '◇'], ['t:line', '直线', '╱'], ['t:pen', '曲线', '✒'], ['t:rect', '矩形', '▭'],
+    ['t:ellipse', '椭圆', '◯'], ['t:polygon', '多边形', '⬡'], ['t:text', '文字', 'T'], ['t:joint', '卡榫', '⊓'], ['t:mortise', '插槽', '▤'],
+    ['t:bridge', '水口', '⫶'], ['t:trim', '修剪', '✂'], ['t:measure', '测量', '📏']] },
+  { g: '编辑', items: [['a:undo', '撤销', '↶'], ['a:redo', '重做', '↷'], ['a:copy', '复制', '⎘', 1], ['a:paste', '粘贴', '📋'], ['a:dup', '复制一份', '⧉', 1],
+    ['a:delete', '删除', '🗑', 1], ['a:group', '编组', '▣', 1], ['a:ungroup', '取消编组', '▢', 1], ['a:breakApart', '拆分', '⋔', 1]] },
+  { g: '形状运算', items: [['a:unite', '并集', '⬭', 1], ['a:subtract', '差集', '◐', 1], ['a:intersect', '交集', '◑', 1], ['a:exclude', '异或', '◒', 1], ['a:offset', '偏移', '⧈', 1]] },
+  { g: '变换', items: [['x:rotate', '旋转…', '⟲', 1], ['a:rotL', '左转 90°', '↺', 1], ['a:rotR', '右转 90°', '↻', 1], ['a:flipH', '水平镜像', '⇆', 1], ['a:flipV', '垂直镜像', '⇅', 1],
+    ['a:mirCopyH', '镜像复制', '⇋', 1], ['a:mirCopyV', '上下镜像复制', '⥮', 1], ['a:fillet', '圆角', '◜', 1], ['a:chamfer', '倒角', '◸', 1]] },
+  { g: '面板 / 视图', items: [['p:align', '对齐', '⫴'], ['p:array', '阵列', '⁙'], ['p:transform', '变换面板', '⟲'], ['a:fit', '适合窗口', '⤢']] },
+];
+const RADIAL_DEF = {
+  idle: ['t:line', 't:rect', 't:ellipse', 't:text', 't:joint', 'a:paste', 'a:undo', 'a:fit'],
+  sel: ['a:dup', 'a:subtract', 'a:unite', 'a:mirCopyH', 'x:rotate', 'a:fillet', 'p:array', 'a:delete'],
+};
+const RADIAL_KEY = 'seedboxes.radialMenu';
 const WOOD = '#ead3ac';
 const SELECT = '#0ea5e9';
 const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='white' stroke-width='4.5'/><path d='M19 4v4h-4' stroke='white' stroke-width='4.5'/><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='%230ea5e9' stroke-width='2'/><path d='M19 4v4h-4' stroke='%230ea5e9' stroke-width='2'/></g></svg>") 12 12, alias`;   // 旋转手柄的光标（带白边的圆形箭头）
@@ -1810,21 +1827,34 @@ export class SketchEditor {
 
   // ---------------------------------------------------------------- 右键圆形快捷菜单（类似 Fusion 的标记菜单）
   // 有选中图形：常用编辑命令；没选中：常用画图工具。中间 = 重复上一个命令
-  radialItems() {
-    const tool = (id, label, icon) => ({ label, icon, run: () => this.setTool(id) });
-    const act = (a, label, icon) => ({ label, icon, run: () => this.act(a) });
-    if (this.sel.size) {
-      return [
-        act('dup', '复制一份', '⧉'), act('subtract', '差集', '◐'), act('unite', '并集', '⬭'), act('mirCopyH', '镜像复制', '⇋'),
-        { label: '旋转…', icon: '⟲', run: () => this.askRotate(this.selBounds().center) },
-        act('fillet', '圆角', '◜'), { label: '阵列', icon: '⁙', run: () => this.revealPanel('array') },
-        act('delete', '删除', '🗑'),
-      ];
+  radialConfig() {
+    let c = null;
+    try { c = JSON.parse(localStorage.getItem(RADIAL_KEY) || 'null'); } catch (e) { c = null; }
+    const ok = (a) => Array.isArray(a) && a.length === 8;
+    return { idle: c && ok(c.idle) ? c.idle : [...RADIAL_DEF.idle], sel: c && ok(c.sel) ? c.sel : [...RADIAL_DEF.sel] };
+  }
+
+  saveRadialConfig(c) {
+    try { localStorage.setItem(RADIAL_KEY, JSON.stringify(c)); } catch (e) { /* 存不了就只在这次有效 */ }
+  }
+
+  radialCmd(id) {
+    for (const g of RADIAL_CATALOG) {
+      const f = g.items.find((q) => q[0] === id);
+      if (f) {
+        const [kind, name] = id.split(':');
+        const run = kind === 't' ? () => this.setTool(name) : kind === 'p' ? () => this.revealPanel(name)
+          : id === 'x:rotate' ? () => { const b = this.selBounds(); if (b) this.askRotate(b.center); } : () => this.act(name);
+        return { id, label: f[1], icon: f[2], needSel: !!f[3], run };
+      }
     }
-    return [
-      tool('line', '直线', '╱'), tool('rect', '矩形', '▭'), tool('ellipse', '椭圆', '◯'), tool('text', '文字', 'T'),
-      tool('joint', '卡榫', '⊓'), act('paste', '粘贴', '📋'), act('undo', '撤销', '↶'), act('fit', '适合窗口', '⤢'),
-    ];
+    return null;
+  }
+
+  // 有选中图形：「选中时」那一组；没选中：「没选中时」那一组。空位不显示
+  radialItems() {
+    const c = this.radialConfig();
+    return (this.sel.size ? c.sel : c.idle).map((id) => (id ? this.radialCmd(id) : null)).filter(Boolean);
   }
 
   openRadial(viewPt) {
@@ -1836,11 +1866,12 @@ export class SketchEditor {
     const n = items.length;
     box.innerHTML = '<div class="sk-radial-ring"></div>' + items.map((it, i) => {
       const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;           // 从正上方开始顺时针
-      return `<button class="sk-radial-item" data-i="${i}" style="left:${Math.round(Math.cos(a) * R)}px;top:${Math.round(Math.sin(a) * R)}px">` +
+      return `<button class="sk-radial-item" data-i="${i}" ${it.needSel && !this.sel.size ? 'disabled title="先选中图形"' : ''} style="left:${Math.round(Math.cos(a) * R)}px;top:${Math.round(Math.sin(a) * R)}px">` +
         `<span>${it.icon}</span>${it.label}</button>`;
     }).join('') + (this.lastCmd
       ? `<button class="sk-radial-center" data-i="c" title="重复上一个命令">重复<br><b>${this.lastCmd.label}</b></button>`
-      : '<button class="sk-radial-center" data-i="c" title="切换到选择工具">选择</button>');
+      : '<button class="sk-radial-center" data-i="c" title="切换到选择工具">选择</button>')
+      + '<button class="sk-radial-cfg-btn" data-i="cfg" title="自己挑选这个圆盘里放哪些命令">⚙ 自定义</button>';
     // 靠近画布边缘时往里挪，整个圆盘都能看到
     const W0 = this.canvas.clientWidth; const H0 = this.canvas.clientHeight; const M = 166;   // 圆盘半径 142 + 标尺 20
     box.style.left = `${Math.min(Math.max(viewPt.x, M), Math.max(M, W0 - M))}px`;
@@ -1851,6 +1882,7 @@ export class SketchEditor {
       const i = b.dataset.i;
       this.closeRadial();
       if (i === 'c') { if (this.lastCmd) this.lastCmd.run(); else this.setTool('select'); return; }
+      if (i === 'cfg') { this.openRadialConfig(this.sel.size ? 'sel' : 'idle'); return; }
       items[Number(i)].run();
     }));
     this.$('.sk-dims').parentNode.appendChild(box);
@@ -1860,6 +1892,63 @@ export class SketchEditor {
 
   closeRadial() {
     if (this.radialBox) { this.radialBox.remove(); this.radialBox = null; }
+  }
+
+  // 自定义右键快捷菜单：两组（没选中时 / 选中时）各 8 个位置；点位置，再点右边的命令放进去
+  openRadialConfig(which) {
+    this.closeRadialConfig();
+    const cfg = this.radialConfig();
+    const st = { which: which || 'idle', slot: 0 };
+    const box = document.createElement('div');
+    box.className = 'sk-rcfg';
+    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    box.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    const render = () => {
+      const list = cfg[st.which];
+      const R = 92;
+      const ring = list.map((id, i) => {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / 8;
+        const c = id && this.radialCmd(id);
+        return `<button class="sk-rcfg-slot${i === st.slot ? ' on' : ''}${c ? '' : ' empty'}" data-slot="${i}" style="left:${125 + Math.round(Math.cos(a) * R)}px;top:${125 + Math.round(Math.sin(a) * R)}px">` +
+          (c ? `<span>${c.icon}</span>${c.label}<i data-clear="${i}" title="清空这个位置">×</i>` : '<span>＋</span>空位') + '</button>';
+      }).join('');
+      const used = new Set(list);
+      const cat = RADIAL_CATALOG.map((g) => `<div class="sk-rcfg-g"><h5>${g.g}</h5><div>` + g.items.map(([id, label, icon, ns]) =>
+        `<button data-cmd="${id}" class="${used.has(id) ? 'used' : ''}" title="${ns ? '需要先选中图形' : ''}"><span>${icon}</span>${label}</button>`).join('') + '</div></div>').join('');
+      box.innerHTML = `<div class="sk-rcfg-card">
+        <div class="sk-rcfg-head"><b>自定义右键快捷菜单</b><button data-x="close" title="关闭">✕</button></div>
+        <div class="sk-rcfg-tabs"><button data-w="idle" class="${st.which === 'idle' ? 'on' : ''}">没选中图形时</button><button data-w="sel" class="${st.which === 'sel' ? 'on' : ''}">选中图形时</button></div>
+        <div class="sk-rcfg-body">
+          <div class="sk-rcfg-ring"><div class="sk-rcfg-disc"></div>${ring}<div class="sk-rcfg-center">重复<br>上一个</div></div>
+          <div class="sk-rcfg-cat"><p class="sk-small">先点左边圆盘上的一个位置（蓝框），再点下面的命令放进去；× 清空。改完马上生效。</p>${cat}</div>
+        </div>
+        <div class="sk-rcfg-foot"><button data-x="reset">恢复默认</button><button data-x="close" class="primary">完成</button></div></div>`;
+    };
+    box.addEventListener('click', (ev) => {
+      const t = ev.target.closest('[data-clear],[data-slot],[data-cmd],[data-w],[data-x]');
+      if (!t) return;
+      const list = cfg[st.which];
+      if (t.dataset.clear != null) { list[Number(t.dataset.clear)] = ''; st.slot = Number(t.dataset.clear); }
+      else if (t.dataset.slot != null) st.slot = Number(t.dataset.slot);
+      else if (t.dataset.cmd) {
+        const id = t.dataset.cmd;
+        const had = list.indexOf(id);
+        if (had >= 0 && had !== st.slot) list[had] = list[st.slot];   // 已经在别的位置：两个位置互换
+        list[st.slot] = id;
+        st.slot = (st.slot + 1) % 8;
+      } else if (t.dataset.w) { st.which = t.dataset.w; st.slot = 0; }
+      else if (t.dataset.x === 'reset') { cfg[st.which] = [...RADIAL_DEF[st.which]]; this.status('已恢复默认'); }
+      else if (t.dataset.x === 'close') { this.closeRadialConfig(); return; }
+      this.saveRadialConfig(cfg);
+      render();
+    });
+    render();
+    this.$('.sk-dims').parentNode.appendChild(box);
+    this.radialCfg = box;
+  }
+
+  closeRadialConfig() {
+    if (this.radialCfg) { this.radialCfg.remove(); this.radialCfg = null; }
   }
 
   // 旋转角度标签：拖动时实时显示；松开后变成输入框，改数字回车 = 把这次旋转改成精确角度（正数 = 逆时针）
@@ -3800,6 +3889,7 @@ export class SketchEditor {
     else if (ev.key === '?' || (ev.shiftKey && ev.key === '/')) this.showKeys();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
+    else if (ev.key === 'Escape' && this.radialCfg) { this.closeRadialConfig(); }
     else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
