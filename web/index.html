@@ -113,6 +113,11 @@
           </div>
           <div id="preview-pane" class="preview-pane">
             <div id="preview-toolbar" class="preview-toolbar">
+              <div id="stage-bar" class="stage-bar hidden">
+                <button data-stage="design">① 二维设计</button><span class="stage-arrow">›</span>
+                <button data-stage="assemble">② 3D 装配</button><span class="stage-arrow">›</span>
+                <button data-stage="make">③ 加工作业</button>
+              </div>
               <div class="seg">
                 <button id="tab-2d" class="on">图纸</button>
                 <button id="tab-3d">3D 模型</button>
@@ -129,6 +134,7 @@
               <button data-view="side" class="view-3d-btn hidden wide" title="侧面">侧面</button>
               <button data-view="top" class="view-3d-btn hidden wide" title="俯视">俯视</button>
             </div>
+            <aside id="make-panel" class="parts-panel make-panel"></aside>
             <div id="preview-host" class="preview-host">
               <div class="preview-empty">点击「预览」即可渲染当前参数</div>
             </div>

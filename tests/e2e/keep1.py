@@ -25,7 +25,7 @@ async def main():
         await pg.mouse.move(x0+200, y0+75); await pg.mouse.click(x0+200, y0+75); await pg.wait_for_timeout(200)
         await pg.mouse.move(x0+300, y0+75); await pg.mouse.click(x0+300, y0+75); await pg.wait_for_timeout(300)
         await pg.click('.sk-back'); await pg.wait_for_timeout(4000)
-        await pg.click('.pp-free-new [data-k=auto]'); await pg.wait_for_timeout(5000)
+        await pg.click('#parts-panel [data-k=auto]'); await pg.wait_for_timeout(5000)
         P = "window.SeedWorkshop.getProject()"
         pr = json.loads(await pg.evaluate(f"JSON.stringify({P})"))
         pid = [k for k in pr['poses'] if pr['poses'][k] != [q for q in pr['free']['parts'] if q['id']==k][0].get('x')][-1]; print('poses', list(pr['poses']))
@@ -33,7 +33,7 @@ async def main():
         part0 = [q for q in pr['free']['parts'] if q['id']==pid][0]
         print('posed', pid, part0)
         # back to sheet: move the posed part, rotate the other, and extend posed part left edge
-        await pg.click('.pp-free-new [data-k=sheet]'); await pg.wait_for_timeout(1500)
+        await pg.click('#stage-bar [data-stage=design]'); await pg.wait_for_timeout(1500)
         ed = "window.__seedDebug.sketchEd"
         await pg.evaluate(f"""(()=>{{const e={ed};
           const it=e.content.children.find(c=>c.data.pid==='{pid}');
@@ -56,7 +56,7 @@ async def main():
         print('min x now', min(q[0] for q in bb))
         print('other part sa', [q.get('sa') for q in pr2['free']['parts']])
         await pg.screenshot(path=OUT+'keep_3d.png')
-        await pg.click('#tab-2d'); await pg.click('#btn-preview'); await pg.wait_for_timeout(3000)
+        await pg.click('#stage-bar [data-stage=make]'); await pg.wait_for_timeout(3000)
         await pg.screenshot(path=OUT+'keep_2d.png')
         print(logs[:3])
         await b.close()

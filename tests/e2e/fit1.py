@@ -33,7 +33,8 @@ async def main():
         await pg.click('#free-entry')
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
         await pg.click('.sk-back'); await pg.wait_for_timeout(3000)
-        await pg.evaluate("document.querySelector('.pp-free-new [data-k=fit]').click()"); await pg.wait_for_selector('#fit-modal:not(.hidden)')
+        await pg.click('#stage-bar [data-stage=make]'); await pg.wait_for_timeout(2000)   # 卡扣测试样在「③ 加工作业」里
+        await pg.evaluate("document.querySelector('#make-panel [data-k=fit]').click()"); await pg.wait_for_selector('#fit-modal:not(.hidden)')
         await pg.screenshot(path=OUT + 'fit_dialog.png')
         await pg.evaluate(f"window.__seedDebug.generateFitTest({T0}, {B0})")
         await pg.wait_for_timeout(2500)
@@ -41,7 +42,7 @@ async def main():
         names = {q['id']: q['name'] for q in pr['free']['parts']}
         sk = {names[k]: v for k, v in pr['sketches'].items() if k in names}
         # 填测量结果 → 计算显示
-        await pg.evaluate("document.querySelector('.pp-free-new [data-k=fit]').click()"); await pg.wait_for_selector('#fit-modal:not(.hidden)')
+        await pg.evaluate("document.querySelector('#make-panel [data-k=fit]').click()"); await pg.wait_for_selector('#fit-modal:not(.hidden)')
         await pg.fill('[data-f=tReal]', '2.85'); await pg.fill('[data-f=outer]', '39.9'); await pg.fill('[data-f=inner]', '20.1')
         await pg.select_option('[data-f=best]', '0.05')
         out = await pg.inner_text('.fit-out')

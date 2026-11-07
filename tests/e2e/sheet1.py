@@ -43,10 +43,10 @@ async def main():
             print('free', await pg.evaluate("JSON.stringify(window.SeedWorkshop.getProject().free.parts)"))
             print('sheet', await pg.evaluate("JSON.stringify(window.SeedWorkshop.getProject().free.sheet)"))
             await pg.screenshot(path=OUT+'sheet_3d.png')
-            await pg.click('.pp-free-new [data-k=auto]'); await pg.wait_for_timeout(5000)
+            await pg.click('#parts-panel [data-k=auto]'); await pg.wait_for_timeout(5000)
             await pg.screenshot(path=OUT+'sheet_asm.png')
             print('poses', await pg.evaluate("Object.keys(window.SeedWorkshop.getProject().poses||{})"))
-            await pg.click('#tab-2d'); await pg.click('#btn-preview'); await pg.wait_for_timeout(3000)
+            await pg.click('#stage-bar [data-stage=make]'); await pg.wait_for_timeout(3000)
             await pg.screenshot(path=OUT+'sheet_export.png')
         finally:
             print('\n'.join(l for l in logs if 'rror' in l)[:3000])

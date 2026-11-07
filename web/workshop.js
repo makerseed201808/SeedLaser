@@ -382,6 +382,7 @@ function renderPartsPanel() {
   const panel = $('#parts-panel');
   const m = W.model;
   if (!m) { panel.innerHTML = ''; return; }
+  if (isFree()) { renderAssemblePanel(panel); if (W.stage === 'make') renderMakePanel(); return; }
   const dis = new Set(W.project.disabled);
   const on = m.parts.filter((p) => !dis.has(p.id)).length;
   panel.innerHTML = '';
@@ -516,7 +517,7 @@ async function loadModel() {
   if (!view) {
     view = new View3D($('#view3d-canvas'));
     view.onPick = (id, ev) => select(id, ev && ev.shiftKey);
-    view.onEdit = (id) => openEditor(id);
+    view.onEdit = (id) => (isFree() ? setStage('design') : openEditor(id));
     poser = new Poser(view);
     poser.applyMouseMapping(W.pose.on);
   }
@@ -539,7 +540,8 @@ async function loadModel() {
             '形状仅供参考，以图纸为准。', 'info');
   } else setNote(m.assembled ? '' : '这个生成器暂不支持拼装预览，下面是所有板件平铺的样子（仍可开孔、刻字、禁用）。',
                m.assembled ? '' : 'info');
-  if (W.wantSheet && isFree()) { W.wantSheet = false; openSheet(); }
+  if (W.wantSheet && isFree()) { W.wantSheet = false; W.stage = 'design'; updateStageBar(); openSheet(); }
+  if (isFree() && W.stage === 'make') { renderMakePanel(); if (window.SeedApp) window.SeedApp.doPreview(); }
 }
 
 function rebuildPart(id) {
@@ -790,9 +792,11 @@ async function openSheet() {
       clearTimeout(sheetTimer);
       applySheet(res);
       attachView($('#view3d-canvas'));
+      const fromDesign = W.stage === 'design';
+      if (fromDesign) { W.stage = 'assemble'; updateStageBar(); setMode('3d'); }
       await loadModel();
       renderPartsPanel();
-      if (W.model && W.model.parts.length) toast(`已生成 ${W.model.parts.length} 块板的 3D 模型：拖动板件靠近会自动吸附，或点「按卡榫自动拼装」`, 'ok');
+      if (fromDesign && W.model && W.model.parts.length) toast(`已生成 ${W.model.parts.length} 块板的 3D 模型：拖动板件靠近会自动吸附，或点「按卡榫自动拼装」`, 'ok');
     },
   });
   sketchEd.onThickness = (v) => { setFormNum('thickness', v); };   // 画板里改板厚 = 改左侧参数（导出、3D 都用它）
@@ -814,6 +818,90 @@ function rectSketch(w, h) {
 function freeParts() {
   if (!W.project.free) W.project.free = { parts: [] };
   return W.project.free.parts;
+}
+
+// ------------------------------------------------------------------ 自由设计的三个板块：① 二维设计 → ② 3D 装配 → ③ 加工作业
+// 板件数量 / 使用与否只在「加工作业」里管；设计和装配阶段不显示板件清单
+
+function updateStageBar() {
+  const free = isFree();
+  $('#stage-bar').classList.toggle('hidden', !free);
+  $('#preview-toolbar .seg').classList.toggle('hidden', free);
+  $('#btn-parts').classList.toggle('stage-hide', free);
+  document.querySelectorAll('#stage-bar [data-stage]').forEach((b) => b.classList.toggle('on', free && b.dataset.stage === W.stage));
+  const body = $('.editor-body');
+  body.classList.toggle('stage-assemble', free && W.stage === 'assemble');
+  body.classList.toggle('stage-make', free && W.stage === 'make');
+}
+
+function setStage(st) {
+  if (!isFree()) return;
+  W.stage = st;
+  updateStageBar();
+  if (st === 'design') { openSheet(); return; }
+  if (sketchEd && sketchEd.opened) sketchEd.close();      // 画板 onClose 会保存，并看到 W.stage 已不是 design
+  if (st === 'assemble') {
+    setMode('3d');
+    renderPartsPanel();
+    if (view) setTimeout(() => view.resize(), 0);
+  } else if (st === 'make') {
+    setMode('2d');
+    renderMakePanel();
+    if (window.SeedApp) window.SeedApp.doPreview();
+  }
+}
+
+function renderAssemblePanel(panel) {
+  const rep = W.pose.report || {};
+  const dis = new Set(W.project.disabled);
+  const parts = W.model.parts.filter((p) => !dis.has(p.id));
+  const bad = parts.filter((p) => rep[p.id] && rep[p.id].collide.length);
+  const loose = parts.filter((p) => rep[p.id] && !rep[p.id].collide.length && !rep[p.id].touch.length);
+  panel.classList.add('free');
+  panel.innerHTML = `<div class="pp-head"><span>② 3D 装配</span></div>
+    <div class="asm-actions">
+      <button class="primary" data-k="auto" title="按画板里配对好的卡榫把板自动拼起来">🧩 按卡榫自动拼装</button>
+      <button data-k="sf" title="在完整的 3D 编辑器里移动、旋转板件；靠近时自动吸附">🛠 手动摆放</button>
+      <button data-k="flat" title="所有板平放在台面上（按画板上的位置）">拆开平铺</button>
+    </div>
+    <div class="asm-check">${!W.pose.report ? '<span class="pp-free">拼装后会自动检查有没有穿透</span>'
+      : bad.length ? `<span class="pp-bad">穿透：${bad.map((p) => esc(p.name)).join('、')}</span>`
+      : '<span class="pp-ok">✓ 没有穿透</span>'}${loose.length && W.pose.report ? `<span class="pp-free">还没连上：${loose.map((p) => esc(p.name)).join('、')}</span>` : ''}</div>
+    <p class="asm-tip">要改形状：点上方「① 二维设计」。确认拼对了：点「③ 加工作业」排版导出。</p>`;
+  panel.querySelector('[data-k=auto]').addEventListener('click', () => freeAutoAssemble());
+  panel.querySelector('[data-k=sf]').addEventListener('click', () => openSketchForge());
+  panel.querySelector('[data-k=flat]').addEventListener('click', () => {
+    W.project.poses = {};
+    W.model.parts.forEach((p) => { const o = view && view.objects.get(p.id); if (o) { o.group.matrix.fromArray(p.matrix); o.group.matrixWorldNeedsUpdate = true; } });
+    if (view) view.fit(W.model);
+    projectChanged(); renderPartsPanel(); checkPose();
+  });
+}
+
+// ③ 加工作业：板件清单（是否切这块）、批量名牌、卡扣测试样；排版 / 补偿在左侧表单，导出用右上角「保存到文件」
+function renderMakePanel() {
+  const panel = $('#make-panel');
+  if (!panel) return;
+  if (!isFree() || W.stage !== 'make' || !W.model) { panel.innerHTML = ''; return; }
+  const dis = new Set(W.project.disabled);
+  const parts = W.model.parts;
+  const on = parts.filter((p) => !dis.has(p.id)).length;
+  panel.innerHTML = `<div class="pp-head"><span>③ 加工清单</span><span class="pp-count">${parts.length} 块 · 要切 ${on}</span></div>
+    ${parts.map((p, i) => `<label class="mk-row${dis.has(p.id) ? ' off' : ''}"><input type="checkbox" data-id="${p.id}" ${dis.has(p.id) ? '' : 'checked'}>
+      <span class="pp-chip" style="background:#${WOOD[i % WOOD.length].toString(16)}">${String.fromCharCode(65 + (i % 26))}</span>
+      <span class="mk-name">${esc(p.name)}</span><span class="mk-size">${fmt(p.w)}×${fmt(p.h)}</span></label>`).join('')}
+    <div class="asm-actions">
+      <button data-k="names" title="粘贴一列名字，自动生成一排名牌">📛 批量名牌</button>
+      <button data-k="fit" title="切一组小样，量出这台机器、这种板的切缝、实际板厚和插槽松紧">🧪 卡扣测试样</button>
+    </div>
+    <p class="asm-tip">左侧「排版」填材料尺寸可自动排版、共边切割；右上角「⚙ 加工参数」设速度功率，「保存到文件」导出图纸。</p>`;
+  panel.querySelectorAll('input[data-id]').forEach((cb) => cb.addEventListener('change', () => {
+    setEnabled(cb.dataset.id, cb.checked);
+    renderMakePanel();
+    if (window.SeedApp) window.SeedApp.doPreview();
+  }));
+  panel.querySelector('[data-k=names]').addEventListener('click', () => nameplateDialog());
+  panel.querySelector('[data-k=fit]').addEventListener('click', () => fitTestDialog());
 }
 
 function freePartForm() {
@@ -2408,7 +2496,7 @@ async function closeSketchForge() {
   const st = SF.stats;
   if (!st) return;
   const warn = [];
-  if (st.removed.length) warn.push(`${st.removed.map(nameOf).join('、')} 在 3D 编辑器里被删掉了：这只影响装配场景，图纸里仍然保留，下次打开 3D 编辑器会放回。不想导出这块板，请在板件清单里取消「使用」`);
+  if (st.removed.length) warn.push(`${st.removed.map(nameOf).join('、')} 在 3D 编辑器里被删掉了：这只影响装配场景，图纸里仍然保留，下次打开 3D 编辑器会放回。不想切这块板，请在「③ 加工作业」的加工清单里取消勾选`);
   if (st.reshaped.length) warn.push(`${st.reshaped.map(nameOf).join('、')} 形状被修改，位置未同步`);
   if (st.scaled.length) warn.push(`${st.scaled.map(nameOf).join('、')} 尺寸改动不会影响图纸（请改左侧参数）`);
   checkPose();   // 显示咬合 / 穿透检查结果（没有摆放时清除标记）
@@ -2435,6 +2523,7 @@ window.SeedWorkshop = {
   openSheet() { return openSheet(); },
   reset(name) {
     W.name = name;
+    W.stage = name === 'FreeDesign' ? 'design' : null;
     W.model = null;
     W.project = freshProject();
     W.selected = null;
@@ -2458,6 +2547,8 @@ window.SeedWorkshop = {
         freeParts().push({ id: 'p1', name: '板件 1', w: 100, h: 60 });
         W.project.sketches.p1 = rectSketch(100, 60);
       }
+      if (!W.wantSheet) W.stage = 'assemble';
+      updateStageBar();
       if (W.mode !== '3d') { setMode('3d'); return; }
     }
     if (W.mode === '3d') loadModel();
@@ -2492,6 +2583,7 @@ window.SeedWorkshop = {
 // ------------------------------------------------------------------ 绑定
 
 $('#tab-2d').addEventListener('click', () => setMode('2d'));
+document.querySelectorAll('#stage-bar [data-stage]').forEach((b) => b.addEventListener('click', () => setStage(b.dataset.stage)));
 $('#tab-3d').addEventListener('click', () => setMode('3d'));
 $('#btn-sf').addEventListener('click', () => (SF.open ? closeSketchForge() : openSketchForge()));
 $('#btn-parts').addEventListener('click', () => setPartsPanelVisible($('#parts-panel').classList.contains('gone')));
@@ -2506,7 +2598,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, freeAutoAssemble, openSheet, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
+    SF, sfCommand, sfSync, freeAutoAssemble, openSheet, setStage, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);
