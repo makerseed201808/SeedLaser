@@ -4,6 +4,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import { SketchEditor, sketchPolys } from './sketch2d.js';
+import { FIT_SQ, FIT_STEPS, FIT_LADDER, ladderSlots, fitResult, stepLabel } from './fit-calc.js';
 
 const api = () => window.pywebview.api;
 const $ = (s) => document.querySelector(s);
@@ -824,9 +825,11 @@ function freePartForm() {
     <button data-k="add">添加并编辑</button>
     <button data-k="auto" title="按卡榫配对把板自动拼起来">🧩 按卡榫自动拼装</button>
     <button data-k="flat" title="所有板平放在台面上">平铺</button>
-    <button data-k="names" title="粘贴一列名字，自动生成一排名牌">📛 批量名牌</button>`;
+    <button data-k="names" title="粘贴一列名字，自动生成一排名牌">📛 批量名牌</button>
+    <button data-k="fit" title="切一组小样，量出这台机器、这种板的切缝、实际板厚和插槽松紧">🧪 卡扣测试样</button>`;
   box.querySelector('[data-k=sheet]').addEventListener('click', () => openSheet());
   box.querySelector('[data-k=names]').addEventListener('click', () => nameplateDialog());
+  box.querySelector('[data-k=fit]').addEventListener('click', () => fitTestDialog());
   box.querySelector('[data-k=auto]').addEventListener('click', () => freeAutoAssemble());
   box.querySelector('[data-k=flat]').addEventListener('click', () => {
     W.project.poses = {};
@@ -1954,6 +1957,132 @@ function circleSegs(cx, cy, r) {
   return [[cx + r, cy, 0, -k, 0, k], [cx, cy + r, k, 0, -k, 0], [cx - r, cy, 0, k, 0, -k], [cx, cy - r, -k, 0, k, 0]];
 }
 
+// ------------------------------------------------------------------ 卡扣测试样（实测切缝 / 板厚 / 插槽间隙）
+
+function rectSegs(x0, y0, w, h) {
+  return [[x0, y0, 0, 0, 0, 0], [x0 + w, y0, 0, 0, 0, 0], [x0 + w, y0 + h, 0, 0, 0, 0], [x0, y0 + h, 0, 0, 0, 0]];
+}
+
+function formNum(name) {
+  const el = document.querySelector(`#param-form [name=${name}]`);
+  return el ? Number(el.value) : NaN;
+}
+
+function setFormNum(name, v) {
+  const el = document.querySelector(`#param-form [name=${name}]`);
+  if (!el) return false;
+  el.value = v;
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+async function engraveText(text, size, cx, cy) {
+  const font = (W.fonts && W.fonts[0] || {}).id || '';
+  const r = await api().text_layout({ text, font, size, weld: false });
+  if (r.error) return null;
+  return { id: 'tx' + (uidCounter++).toString(36), mode: 'engrave', text: { text, font, size, x: cx, y: cy, spacing: 0, lineHeight: 1.25, align: 'center', arc: 0, weld: false },
+           paths: r.polys.map((p) => ({ closed: true, segs: p.map(([x, y]) => [x + cx, y + cy, 0, 0, 0, 0]) })) };
+}
+
+async function generateFitTest(t0, b0) {
+  const L = FIT_LADDER;
+  const slots = ladderSlots(t0);
+  const W0 = L.margin * 2 + slots.length * L.pitch;
+  const ladder = [{ id: 'outline', mode: 'cut', role: 'outline', paths: [{ closed: true, segs: rectSegs(0, 0, W0, L.height) }] }];
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i];
+    const cx = L.margin + L.pitch * (i + 0.5);
+    ladder.push({ id: 'slot' + i, mode: 'cut', paths: [{ closed: true, segs: rectSegs(cx - s.width / 2, L.slotY, s.width, L.slotLen) }] });
+    const lab = await engraveText(s.label, 3, cx, L.slotY + L.slotLen + 4);
+    if (lab) ladder.push(lab);
+  }
+  const title = await engraveText(`板厚 ${t0} · 补偿 ${b0}`, 3, W0 / 2, L.height - 4);
+  if (title) ladder.push(title);
+  const O = FIT_SQ.outer, I = FIT_SQ.inner;
+  const square = [{ id: 'outline', mode: 'cut', role: 'outline', paths: [{ closed: true, segs: rectSegs(0, 0, O, O) }] },
+                  { id: 'hole', mode: 'cut', paths: [{ closed: true, segs: rectSegs((O - I) / 2, (O - I) / 2, I, I) }] }];
+  const key = [{ id: 'outline', mode: 'cut', role: 'outline', paths: [{ closed: true, segs: rectSegs(0, 0, 10, 40) }] }];
+  const parts = freeParts();
+  const add = (name, w, h, items) => {
+    const id = 'p' + Date.now().toString(36) + (uidCounter++).toString(36);
+    parts.push({ id, name, w, h });
+    W.project.sketches[id] = { items };
+  };
+  add('测试样 · 插槽阶梯', W0, L.height, ladder);
+  add(`测试样 · 测量方块 ${O}/${I}`, O, O, square);
+  add('测试样 · 插片', 10, 40, key);
+  W.project.free.fitTest = { t0, b0, at: new Date().toISOString().slice(0, 10) };
+  projectChanged();
+  await loadModel();
+}
+
+async function fitTestDialog() {
+  if (!isFree()) { toast('请在「自由设计」里使用卡扣测试样', 'error'); return; }
+  if (!W.fonts) W.fonts = await api().list_fonts();
+  let m = document.getElementById('fit-modal');
+  if (!m) { m = document.createElement('div'); m.id = 'fit-modal'; m.className = 'app-modal'; document.body.appendChild(m); }
+  const t0Now = formNum('thickness') || 3;
+  const b0Now = formNum('burn') || 0;
+  const ft = (W.project.free && W.project.free.fitTest) || null;
+  const meas = W.fitMeas || {};
+  m.innerHTML = `<div class="app-modal-box fit-box">
+    <h3>🧪 卡扣测试样</h3>
+    <p class="muted">同一种板，不同机器、不同批次的切缝和实际厚度都不一样。切一组小样量一下，卡榫和插槽就能做到不松不紧。</p>
+    <h4>① 生成测试样</h4>
+    <p class="sk-small">按当前设置 <b>板厚 ${t0Now} mm · 补偿 ${b0Now} mm</b> 生成 3 块：插槽阶梯（9 条槽，比板厚窄 0.10 到宽 0.30 mm）、测量方块（外 ${FIT_SQ.outer} / 内 ${FIT_SQ.inner} mm）、插片。<b>切的时候不要改这两个参数。</b></p>
+    <button data-f="gen" class="primary">生成测试样（加到板件清单）</button>
+    <h4>② 切好后，填测量结果</h4>
+    ${ft ? `<p class="sk-small">测试样是按 板厚 ${ft.t0} · 补偿 ${ft.b0} 生成的（${ft.at}）。</p>` : '<p class="sk-small">还没生成过测试样；也可以先填，按当前设置计算。</p>'}
+    <div class="np-grid">
+      <label>实测板厚<input data-f="tReal" type="number" step="0.01" min="0" value="${meas.tReal ?? ''}" placeholder="卡尺量 3 处取平均"> mm</label>
+      <label>测量方块·外边<input data-f="outer" type="number" step="0.01" min="0" value="${meas.outer ?? ''}" placeholder="${FIT_SQ.outer}"> mm</label>
+      <label>测量方块·内孔<input data-f="inner" type="number" step="0.01" min="0" value="${meas.inner ?? ''}" placeholder="${FIT_SQ.inner}"> mm</label>
+      <label>最合适的槽<select data-f="best"><option value="">（还没试）</option>
+        ${FIT_STEPS.map((c) => `<option value="${c}" ${meas.best === String(c) ? 'selected' : ''}>${stepLabel(c)}</option>`).join('')}</select></label>
+    </div>
+    <p class="sk-small">「最合适」= 插片用手能按进去、不用敲、插好后拿起来不会掉的那一条槽。</p>
+    <div class="fit-out"></div>
+    <div class="app-modal-actions"><button data-f="close">关闭</button><button data-f="apply" class="primary" disabled>应用到当前设置</button></div></div>`;
+  m.classList.remove('hidden');
+  const q = (k) => m.querySelector(`[data-f=${k}]`);
+  const base = () => ({ t0: ft ? ft.t0 : t0Now, b0: ft ? ft.b0 : b0Now });
+  let res = null;
+  const update = () => {
+    const v = (k) => Number(q(k).value) || 0;
+    W.fitMeas = { tReal: q('tReal').value, outer: q('outer').value, inner: q('inner').value, best: q('best').value };
+    res = fitResult({ ...base(), tReal: v('tReal'), outer: v('outer'), inner: v('inner'), bestStep: q('best').value === '' ? null : Number(q('best').value) });
+    const rows = [];
+    if (res.kerf != null) rows.push(`切缝 <b>${res.kerf}</b> mm → 补偿应设为 <b>${res.burn}</b> mm`);
+    if (v('tReal') > 0) rows.push(`板厚设为 <b>${res.thickness}</b> mm`);
+    if (res.play != null) rows.push(`插槽间隙 <b>${res.play}</b> mm（${res.play < 0 ? '略小于板厚，靠木板压紧' : '比板厚宽一点'}）`);
+    q('apply').disabled = !rows.length;
+    m.querySelector('.fit-out').innerHTML = (rows.length ? `<div class="fit-res">${rows.join('<br>')}</div>` : '') +
+      res.warn.map((w) => `<p class="fit-warn">⚠ ${w}</p>`).join('');
+  };
+  ['tReal', 'outer', 'inner', 'best'].forEach((k) => q(k).addEventListener('input', update));
+  update();
+  q('close').addEventListener('click', () => m.classList.add('hidden'));
+  q('gen').addEventListener('click', async () => {
+    q('gen').disabled = true;
+    await generateFitTest(t0Now, b0Now);
+    m.classList.add('hidden');
+    toast('已生成 3 块测试样。切的时候不要改板厚和补偿；切好后再点「🧪 卡扣测试样」填测量结果', 'success');
+  });
+  q('apply').addEventListener('click', () => {
+    if (!res) return;
+    const done = [];
+    if (res.burn != null && setFormNum('burn', res.burn)) done.push(`补偿 ${res.burn}`);
+    if (Number(q('tReal').value) > 0 && setFormNum('thickness', res.thickness)) done.push(`板厚 ${res.thickness}`);
+    if (res.play != null) {
+      try { localStorage.setItem('seedboxes.jointPlay', String(res.play)); } catch (e) { /* 只在本机生效 */ }
+      if (sketchEd) sketchEd.opts.jointPlay = res.play;
+      done.push(`插槽间隙 ${res.play}`);
+    }
+    m.classList.add('hidden');
+    toast(`已应用：${done.join('，')} mm。已经画好的卡榫 / 插槽要重新生成才会按新值`, 'success');
+  });
+}
+
 async function nameplateDialog() {
   if (!W.fonts) W.fonts = await api().list_fonts();
   let m = document.getElementById('names-modal');
@@ -2376,7 +2505,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, freeAutoAssemble, openSheet, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
+    SF, sfCommand, sfSync, freeAutoAssemble, openSheet, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);

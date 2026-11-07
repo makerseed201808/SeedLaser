@@ -51,6 +51,11 @@ const newId = () => 's' + Date.now().toString(36) + (uid++).toString(36);
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const fmt = (v) => (Math.round(v * 100) / 100).toString();
 
+// 卡扣测试样校准出的插槽间隙（workshop.js 的测试样对话框写入）
+function savedJointPlay() {
+  try { const v = Number(localStorage.getItem('seedboxes.jointPlay')); return Number.isFinite(v) ? v : 0; } catch (e) { return 0; }
+}
+
 export class SketchEditor {
   constructor(host, { api, toast }) {
     this.host = host;
@@ -66,7 +71,7 @@ export class SketchEditor {
                   offset: 2, offsetJoin: 'round', arrRows: 2, arrCols: 3, arrDx: 20, arrDy: 20,
                   arrType: 'line', arrCount: 5, arrDist: 15, arrAngle: 0, arrCenter: 'board', arrCx: 0, arrCy: 0,
                   arrSweep: 360, arrRotate: true, arrPreview: true, alignTo: 'sel', cornerR: 3, bridgeW: 1, bridgeN: 2,
-                  jointCount: 0, jointType: 'a', jointDepth: 0, jointMode: 'count', jointTab: 0, jointGap: 0, jointPlay: 0 };
+                  jointCount: 0, jointType: 'a', jointDepth: 0, jointMode: 'count', jointTab: 0, jointGap: 0, jointPlay: savedJointPlay() };
     this.undoStack = [];
     this.redoStack = [];
     this.clip = null;
@@ -2132,7 +2137,7 @@ export class SketchEditor {
     const L = to.getDistance(from);
     if (L < 1) return null;
     const t = this.jointDepth();
-    const play = Math.max(0, Number(this.opts.jointPlay) || 0);
+    const play = Math.max(-0.3, Number(this.opts.jointPlay) || 0);   // 负数 = 过盈（木板可压紧）
     const iv = ivForce || this.jointIntervals(L);
     const u = to.subtract(from).normalize();
     const v = new this.ps.Point(-u.y, u.x);
@@ -3104,7 +3109,7 @@ export class SketchEditor {
       } else {
         html = `<h4>${editing ? '修改插槽' : '插槽（T 型连接）'}</h4>` + sizeRows + `
           <div class="sk-row"><label>孔宽<input data-o="jointDepth" type="number" min="0.1" step="0.1" value="${depth}"> mm</label>
-            <label>间隙<input data-o="jointPlay" type="number" min="0" step="0.05" value="${o.jointPlay || 0}"> mm</label></div>
+            <label title="插槽比板厚宽多少；用「🧪 卡扣测试样」实测得到">间隙<input data-o="jointPlay" type="number" min="-0.3" step="0.05" value="${o.jointPlay || 0}"> mm</label></div>
           <div class="sk-row"><label class="sk-check"><input data-o="mortiseVertical" type="checkbox" ${o.mortiseVertical ? 'checked' : ''}>竖向放置</label></div>`;
       }
       if (editing) {

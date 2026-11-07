@@ -18,4 +18,7 @@ tests/e2e/run.sh keep1      # 单个
 | tx1 | 修改文字后直接点画布生效；文字自身不标红 | `red lens 0`，`['种子创客']` |
 | bool1 | 单选差集 = 刀 | 只剩一块板，面积 < 6000 |
 | bh | 形状运算按钮悬停示意图 | 无报错，4 张截图 |
+| fit1 | 🧪 卡扣测试样：生成 → 后端按补偿算切割线，断言 9 条槽宽 / 方块尺寸；填测量结果 → 应用 | `PASS fit1`（带断言） |
 | sf5 | 3D 编辑器里删板 → 不改「使用」，再打开自动补回（需要 web_sketchforge 和 WebGL） | `disabled []`，`scene objects after reopen 4 map 4` |
+
+另有前端纯函数单元测试：`node tests/js/fit_calc.test.mjs`（卡扣测试样换算，含「以后切出的插槽 = 测试中最合适那条槽」不变量）。

@@ -1000,3 +1000,7 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-bool-card b { font-size: 12px; }
 .sk-bool-card p { margin: 2px 0 0; line-height: 1.5; }
 .sk-bool-fig { width: 72px; flex: none; }
+
+.fit-box h4 { margin: 12px 0 4px; font-size: 13px; }
+.fit-res { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 6px 10px; font-size: 13px; line-height: 1.7; margin-top: 6px; }
+.fit-warn { color: #b45309; font-size: 12px; margin: 4px 0 0; }
