@@ -11,6 +11,12 @@ const MODES = {
   score: { name: '描线', color: '#dc2626', hint: '沿线浅刻' },
 };
 const OUTLINE_COLOR = '#1c2733';
+
+// 右键圆形快捷菜单里「重复上一个」能重复的命令（act 名 → 显示名）
+const RADIAL_REPEAT = {
+  dup: '复制一份', delete: '删除', unite: '并集', subtract: '差集', intersect: '交集', mirCopyH: '左右镜像复制', mirCopyV: '上下镜像复制',
+  flipH: '水平镜像', flipV: '垂直镜像', rotL: '左转 90°', rotR: '右转 90°', fillet: '圆角', chamfer: '倒角', group: '编组', paste: '粘贴', offset: '偏移',
+};
 const WOOD = '#ead3ac';
 const SELECT = '#0ea5e9';
 
@@ -1285,7 +1291,8 @@ export class SketchEditor {
     this.closeOverlap();
     this.closeRotateBox();
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
-    if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView }; return; }
+    this.closeRadial();
+    if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView, start: this.downView, right: ev.button === 2 }; return; }
     const pt = e.point;
     if (this.tool === 'select' && !this.hitHandle(pt) && !this.hitItem(pt)) {
       const g = this.hitGuide(pt);
@@ -1397,6 +1404,15 @@ export class SketchEditor {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
+    // 右键单击（没有拖动）：弹出圆形快捷菜单；右键拖动仍是平移画布
+    if (d.kind === 'pan' && d.right && d.last.getDistance(d.start) < 4) {
+      if (!this.drawing) {                              // 右键点在没选中的图形上：先选中它（和 Fusion 一样）
+        const hit = this.hitItem(this.ps.view.viewToProject(d.start));
+        if (hit && !this.sel.has(hit)) { this.sel = new Set([hit]); this.expandGroups(); this.refresh(); }
+      }
+      this.openRadial(d.start);
+      return;
+    }
     if (d.kind === 'rotate' && !d.moved) {           // 单击手柄：不算一次修改，改为输入角度
       this.undoStack.pop();
       this.askRotate(d.center);
@@ -1509,6 +1525,60 @@ export class SketchEditor {
     if (delta) { this.sel.forEach((it) => it.rotate(-delta, d.center)); d.applied = a; }   // 向右拖 = 顺时针
     this.drawSelection();
     this.status(`${a >= 0 ? '顺时针' : '逆时针'} ${fmt(Math.abs(a))}°（左右拖动微调；Shift = 15° 一档；松开手柄不拖 = 输入角度）`);
+  }
+
+  // ---------------------------------------------------------------- 右键圆形快捷菜单（类似 Fusion 的标记菜单）
+  // 有选中图形：常用编辑命令；没选中：常用画图工具。中间 = 重复上一个命令
+  radialItems() {
+    const tool = (id, label, icon) => ({ label, icon, run: () => this.setTool(id) });
+    const act = (a, label, icon) => ({ label, icon, run: () => this.act(a) });
+    if (this.sel.size) {
+      return [
+        act('dup', '复制一份', '⧉'), act('subtract', '差集', '◐'), act('unite', '并集', '⬭'), act('mirCopyH', '镜像复制', '⇋'),
+        { label: '旋转…', icon: '⟲', run: () => this.askRotate(this.selBounds().center) },
+        act('fillet', '圆角', '◜'), { label: '阵列', icon: '⁙', run: () => { if (this.panel !== 'array') this.setTool('p-array'); } },
+        act('delete', '删除', '🗑'),
+      ];
+    }
+    return [
+      tool('line', '直线', '╱'), tool('rect', '矩形', '▭'), tool('ellipse', '椭圆', '◯'), tool('text', '文字', 'T'),
+      tool('joint', '卡榫', '⊓'), act('paste', '粘贴', '📋'), act('undo', '撤销', '↶'), act('fit', '适合窗口', '⤢'),
+    ];
+  }
+
+  openRadial(viewPt) {
+    this.closeRadial();
+    const items = this.radialItems();
+    const box = document.createElement('div');
+    box.className = 'sk-radial';
+    const R = 104;
+    const n = items.length;
+    box.innerHTML = '<div class="sk-radial-ring"></div>' + items.map((it, i) => {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;           // 从正上方开始顺时针
+      return `<button class="sk-radial-item" data-i="${i}" style="left:${Math.round(Math.cos(a) * R)}px;top:${Math.round(Math.sin(a) * R)}px">` +
+        `<span>${it.icon}</span>${it.label}</button>`;
+    }).join('') + (this.lastCmd
+      ? `<button class="sk-radial-center" data-i="c" title="重复上一个命令">重复<br><b>${this.lastCmd.label}</b></button>`
+      : '<button class="sk-radial-center" data-i="c" title="切换到选择工具">选择</button>');
+    // 靠近画布边缘时往里挪，整个圆盘都能看到
+    const W0 = this.canvas.clientWidth; const H0 = this.canvas.clientHeight; const M = 166;   // 圆盘半径 142 + 标尺 20
+    box.style.left = `${Math.min(Math.max(viewPt.x, M), Math.max(M, W0 - M))}px`;
+    box.style.top = `${Math.min(Math.max(viewPt.y, M), Math.max(M, H0 - M))}px`;
+    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    box.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      const i = b.dataset.i;
+      this.closeRadial();
+      if (i === 'c') { if (this.lastCmd) this.lastCmd.run(); else this.setTool('select'); return; }
+      items[Number(i)].run();
+    }));
+    this.$('.sk-dims').parentNode.appendChild(box);
+    this.radialBox = box;
+    this.status(this.sel.size ? '快捷菜单：常用编辑命令（Esc 或点别处关闭）' : '快捷菜单：常用画图工具（Esc 或点别处关闭）');
+  }
+
+  closeRadial() {
+    if (this.radialBox) { this.radialBox.remove(); this.radialBox = null; }
   }
 
   // 单击旋转手柄（没有拖动）：弹出小框输入角度
@@ -2349,6 +2419,7 @@ export class SketchEditor {
   // ================================================================ 操作
 
   act(a, btn) {
+    if (RADIAL_REPEAT[a]) this.lastCmd = { label: RADIAL_REPEAT[a], run: () => this.act(a) };
     const m = {
       close: () => (btn && btn.dataset.close === 'path' ? this.closePaths() : this.close()),
       undo: () => this.undo(), redo: () => this.redo(), copy: () => this.copy(), paste: () => this.paste(),
@@ -3062,7 +3133,7 @@ export class SketchEditor {
       ['编辑', [['Ctrl/⌘ + Z', '撤销'], ['Ctrl/⌘ + Shift + Z', '重做'], ['Ctrl/⌘ + C / V', '复制 / 粘贴'], ['Ctrl/⌘ + D', '原位复制一份'],
         ['Delete', '删除（节点工具下删节点）'], ['Ctrl/⌘ + A', '全选'], ['Ctrl/⌘ + G', '编组'], ['Ctrl/⌘ + Shift + G', '取消编组'], ['Ctrl/⌘ + I', '导入']]],
       ['移动与视图', [['方向键', '移动（按吸附步长）'], ['Shift + 方向键', '移动 10 mm'], ['F', '适合窗口'], ['滚轮', '缩放'],
-        ['空格 + 拖动 / 中键 / 右键', '平移画布'], ['从标尺拖出', '参考线（拖回标尺删除）']]],
+        ['空格 + 拖动 / 中键 / 右键拖动', '平移画布'], ['右键单击', '圆形快捷菜单（中间 = 重复上一个命令）'], ['从标尺拖出', '参考线（拖回标尺删除）']]],
       ['绘制时', [['Shift', '锁 45° / 正方形 / 正圆 / 等比缩放'], ['Alt', '从中心画 / 拖动复制'], ['回车 / 双击', '结束路径'], ['Esc', '取消 / 取消选择']]],
     ];
     const { el } = this.modal(`<h3>快捷键</h3><div class="sk-keys">${groups.map(([t, rows]) => `<div><h4>${t}</h4>${rows.map(([k, d]) =>
@@ -3369,7 +3440,7 @@ export class SketchEditor {
     else if (ev.key === '?' || (ev.shiftKey && ev.key === '/')) this.showKeys();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
-    else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
+    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
       const s = ev.shiftKey ? 10 : (this.snapStep || 1);

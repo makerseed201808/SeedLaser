@@ -1022,3 +1022,14 @@ input, textarea, select { font: inherit; user-select: text; }
 
 .sk-side [data-panel].hidden, .sk-boardinfo.hidden { display: none; }
 .sk-tools-sep { display: block; height: 1px; background: #e1e6ed; margin: 4px 2px; flex-shrink: 0; }
+
+.sk-radial { position: absolute; z-index: 7; width: 0; height: 0; }
+.sk-radial-ring { position: absolute; left: -142px; top: -142px; width: 284px; height: 284px; border-radius: 50%;
+  background: rgba(255,255,255,.55); border: 1px solid rgba(15,23,42,.08); box-shadow: 0 8px 28px rgba(15,23,42,.18); backdrop-filter: blur(2px); pointer-events: none; }
+.sk-radial-item { position: absolute; transform: translate(-50%, -50%); min-width: 58px; padding: 4px 6px !important; font-size: 11px; border-radius: 8px;
+  background: #fff !important; border: 1px solid #d3dae3 !important; box-shadow: 0 1px 3px rgba(0,0,0,.08); display: flex; flex-direction: column; align-items: center; gap: 1px; white-space: nowrap; }
+.sk-radial-item span { font-size: 14px; line-height: 16px; }
+.sk-radial-item:hover, .sk-radial-center:hover { background: #eef4ff !important; border-color: #1f6feb !important; color: #1f6feb; }
+.sk-radial-center { position: absolute; left: -32px; top: -32px; width: 64px; height: 64px; border-radius: 50% !important; padding: 0 !important;
+  background: #fff !important; border: 1px solid #93c5fd !important; font-size: 10.5px; line-height: 1.3; }
+.sk-radial-center b { font-size: 11px; }
