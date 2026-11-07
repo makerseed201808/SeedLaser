@@ -185,21 +185,42 @@ export class SketchEditor {
             <div class="sk-array"></div>
           </section>
           <section class="sk-card" data-panel="transform">
-            <h4>变换</h4>
-            <div class="sk-row"><label>圆角 / 倒角<input data-opt="cornerR" type="number" min="0.1" step="0.5" value="3"> mm</label>
+            <h4>圆角 / 倒角</h4>
+            <div class="sk-row"><label>半径<input data-opt="cornerR" type="number" min="0.1" step="0.5" value="3"> mm</label>
               <button data-act="fillet" title="把选中图形的尖角变圆（节点工具下只改当前节点）">圆角</button>
               <button data-act="chamfer" title="把尖角切成斜角">倒角</button></div>
+            <p class="sk-small">作用于选中图形的所有尖角；用「节点」工具选中一个节点时只改这一个角。</p>
+          </section>
+          <section class="sk-card" data-panel="transform">
+            <h4>镜像</h4>
             <div class="sk-btns">
-              <button data-act="flipH">水平镜像</button><button data-act="flipV">垂直镜像</button>
+              <button data-act="flipH" title="左右翻过来">水平镜像</button><button data-act="flipV" title="上下翻过来">垂直镜像</button>
               <button data-act="mirCopyH" title="以板的竖直中线为对称轴，复制出左右对称的另一半">左右镜像复制</button>
               <button data-act="mirCopyV" title="以板的水平中线为对称轴，复制出上下对称的另一半">上下镜像复制</button>
-              <button data-act="rotL">左转 90°</button><button data-act="rotR">右转 90°</button>
+            </div>
+            <p class="sk-small">「镜像」翻转选中的图形本身；「镜像复制」保留原图，再复制出对称的一份（对称轴是板的中线）。</p>
+          </section>
+          <section class="sk-card" data-panel="transform">
+            <h4>旋转</h4>
+            <div class="sk-btns"><button data-act="rotL">左转 90°</button><button data-act="rotR">右转 90°</button></div>
+            <p class="sk-small">任意角度：单击图形上方的蓝点输入角度，或按住蓝点左右拖动微调；也可以在上方「旋转」框输入。</p>
+          </section>
+          <section class="sk-card" data-panel="transform">
+            <h4>路径</h4>
+            <div class="sk-btns">
               <button data-act="close" data-close="path" title="把开放路径首尾相连">闭合路径</button>
               <button data-act="breakApart" title="把组合路径拆成独立图形">拆分</button>
-              <button data-act="group" title="选中的图形编成一组，一起选中、移动（Ctrl+G）">编组</button>
-              <button data-act="ungroup" title="取消编组（Ctrl+Shift+G）">取消编组</button>
               <button data-act="dedupe" title="删除完全重合的重复图形（重复的线会被激光切两遍，边缘容易烧焦）">删除重复图形</button>
             </div>
+            <p class="sk-small">只有闭合的切割路径才会切出一块板；重复的线会被切两遍。</p>
+          </section>
+          <section class="sk-card" data-panel="transform">
+            <h4>编组</h4>
+            <div class="sk-btns">
+              <button data-act="group" title="选中的图形编成一组，一起选中、移动（Ctrl+G）">编组</button>
+              <button data-act="ungroup" title="取消编组（Ctrl+Shift+G）">取消编组</button>
+            </div>
+            <p class="sk-small">编成一组后点任意一个就整组选中、一起移动（Ctrl/⌘+G，取消 Ctrl/⌘+Shift+G）。</p>
           </section>
           <section class="sk-card sk-boardinfo"></section>
         </aside>

@@ -23,14 +23,16 @@ async def main():
         assert await pg.evaluate(SHOWN) == [], '默认不显示功能卡片'
         for tool, panel in [('p-align', 'align'), ('p-bool', 'bool'), ('p-array', 'array'), ('p-transform', 'transform')]:
             await pg.click(f'[data-tool={tool}]')
-            assert await pg.evaluate(SHOWN) == [panel], (tool, await pg.evaluate(SHOWN))
+            shown = await pg.evaluate(SHOWN)
+            assert shown and set(shown) == {panel}, (tool, shown)
+            if panel == 'transform': assert len(shown) == 5, shown   # 变换分成 5 张卡片
             assert await pg.evaluate(f"{ED}.tool") == 'select'
         await pg.screenshot(path=OUT + 'panels_transform.png')
         # 面板打开时画布照常选择
         it = await pg.evaluate(f"(()=>{{const e={ED};const p=e.ps.view.projectToView(e.content.children[0].bounds.leftCenter);const r=e.canvas.getBoundingClientRect();return [p.x+r.left,p.y+r.top]}})()")
         await pg.mouse.click(it[0], it[1])
         assert await pg.evaluate(f"{ED}.sel.size") == 1
-        assert await pg.evaluate(SHOWN) == ['transform'], '选中图形后面板不应消失'
+        assert set(await pg.evaluate(SHOWN)) == {'transform'}, '选中图形后面板不应消失'
         await pg.click('[data-tool=p-transform]')
         assert await pg.evaluate(SHOWN) == [], '再点同一个收起'
         await pg.click('[data-tool=p-array]')
