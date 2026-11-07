@@ -1049,3 +1049,6 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-card.collapsed h4 { margin-bottom: 0; }
 @keyframes skflash { 0% { box-shadow: 0 0 0 3px rgba(31,111,235,.45); } 100% { box-shadow: 0 0 0 0 rgba(31,111,235,0); } }
 .sk-card.sk-flash { animation: skflash 1s ease-out; }
+
+.sk-warn { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; border-radius: 6px; padding: 6px 8px; font-size: 12px; line-height: 1.6; margin: 6px 0; }
+.sk-warn button { margin-top: 4px; display: block; }

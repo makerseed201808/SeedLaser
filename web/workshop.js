@@ -795,6 +795,7 @@ async function openSheet() {
       if (W.model && W.model.parts.length) toast(`已生成 ${W.model.parts.length} 块板的 3D 模型：拖动板件靠近会自动吸附，或点「按卡榫自动拼装」`, 'ok');
     },
   });
+  sketchEd.onThickness = (v) => { setFormNum('thickness', v); };   // 画板里改板厚 = 改左侧参数（导出、3D 都用它）
   attachView(sketchEd.previewHost);
 }
 

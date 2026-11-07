@@ -24,6 +24,7 @@ tests/e2e/run.sh keep1      # 单个
 | panels1 | 右侧功能卡片随左侧「对齐 / 运算 / 阵列 / 变换」显示，画布仍可选择，再点或换工具收起 | `PASS panels1`（带断言） |
 | radial1 | 右键圆形快捷菜单：空白处 = 画图工具，右键图形 = 选中 + 编辑命令，中间重复上一个，Esc 关闭，右键拖动仍平移 | `PASS radial1`（带断言） |
 | line1 | 直线 / 曲线工具按右键结束（不弹快捷菜单），平时右键仍是快捷菜单 | `PASS line1`（带断言） |
+| thick1 | 二维画板改板厚：同步左侧参数；旧板厚做的卡榫提醒并一键重做（一步撤销）；卡榫工具里也提醒 | `PASS thick1`（带断言） |
 | sf5 | 3D 编辑器里删板 → 不改「使用」，再打开自动补回（需要 web_sketchforge 和 WebGL） | `disabled []`，`scene objects after reopen 4 map 4` |
 
 另有前端纯函数单元测试：`node tests/js/fit_calc.test.mjs`（卡扣测试样换算，含「以后切出的插槽 = 测试中最合适那条槽」不变量）。

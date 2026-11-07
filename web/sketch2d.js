@@ -3427,8 +3427,10 @@ export class SketchEditor {
           <button data-bridge="auto">自动加</button><button data-bridge="clear">清除</button></div>
         <p class="sk-small">在切割线上单击加一个；点橙色标记删除。「自动加」作用于选中的图形（没选时作用于所有镂空）。切完用刀片划断连接点即可取下。</p>`;
     } else if (t === 'trim') html = '<h4>修剪</h4><p class="sk-small">鼠标移到线上会标红将被删掉的一段（到最近的交点为止），单击或拖过即删除。没有交点的整条路径会被整个删掉。</p>';
+    if ((t === 'joint' || t === 'mortise') && !this.findEdit()) html = this.staleJointsHtml() + html;
     box.innerHTML = html;
     box.classList.toggle('hidden', !html);
+    this.bindRedoJoints(box);
     box.querySelectorAll('[data-peer]').forEach((b) => b.addEventListener('click', () => this.pickPeer(Number(b.dataset.peer))));
     box.querySelectorAll('[data-o-btn=pickpath]').forEach((b) => b.addEventListener('click', () => {
       if (!textSel) return;
@@ -3512,6 +3514,55 @@ export class SketchEditor {
     this.status(this.tool === 'mortise' ? `单击板面放置 ${fmt(p.L)} mm 长的插槽` : `去点一条 ${fmt(p.L)} mm 长的直边`);
   }
 
+  // 齿深 / 插槽宽和现在板厚不一致的卡榫（板厚改过之后）
+  staleJoints() {
+    const t = this.part.thickness || 3;
+    const out = [];
+    this.content.children.forEach((it) => (it.data && it.data.joints || []).forEach((j) => {
+      if (['a', 'b', 'slot', 'mortise'].includes(j.type) && j.depth && Math.abs(j.depth - t) > 0.01) out.push({ item: it, joint: j });
+    }));
+    return out;
+  }
+
+  staleJointsHtml() {
+    const st = this.staleJoints();
+    if (!st.length) return '';
+    const olds = [...new Set(st.map((q) => fmt(q.joint.depth)))].join(' / ');
+    return `<div class="sk-warn">⚠ 有 <b>${st.length}</b> 处卡榫 / 插槽是按板厚 ${olds} mm 做的，现在板厚是 ${fmt(this.part.thickness || 3)} mm，切出来会插不进或太松。
+      <button data-redo-joints class="primary">按现在的板厚重做</button></div>`;
+  }
+
+  bindRedoJoints(box) {
+    const b = box.querySelector('[data-redo-joints]');
+    if (b) b.addEventListener('click', () => this.redoStaleJoints());
+  }
+
+  // 把板厚不一致的卡榫 / 插槽按现在的板厚重新生成（齿数、齿宽设置不变）；整个操作只算一步撤销
+  redoStaleJoints() {
+    const st = this.staleJoints();
+    if (!st.length) return;
+    const n0 = this.undoStack.length;
+    let ok = 0;
+    const keepDepth = this.opts.jointDepth;
+    st.forEach(({ item, joint }) => {
+      const live = this.content.children.find((c) => c.data && c.data.id === item.data.id);
+      const j = live && (live.data.joints || []).find((q) => q.id === joint.id);
+      if (!j) return;
+      this.startEditJoint({ item: live, joint: j });
+      this.opts.jointDepth = 0;                      // 0 = 跟板厚走
+      const before = JSON.stringify(j);
+      this.applyEditJoint(false);
+      const after = (live.data.joints || []).find((q) => q.id === joint.id);
+      if (after && JSON.stringify(after) !== before) ok++;
+    });
+    this.opts.jointDepth = keepDepth && Math.abs(keepDepth - (this.part.thickness || 3)) > 0.01 ? 0 : keepDepth;
+    if (this.undoStack.length > n0 + 1) this.undoStack.splice(n0 + 1);
+    this.renderBoardInfo();
+    this.refresh();
+    const left = this.staleJoints().length;
+    this.status(`已按板厚 ${fmt(this.part.thickness || 3)} mm 重做 ${ok} 处卡榫 / 插槽` + (left ? `；还有 ${left} 处的边被改动过，没法自动重做，请手动处理` : ''));
+  }
+
   renderBoardInfo() {
     const p = this.part;
     if (this.sheetMode) {
@@ -3520,9 +3571,26 @@ export class SketchEditor {
         <p class="sk-small">材料（激光机台面）尺寸：
           <input type="number" data-sheet="w" value="${fmt(p.sheet.w)}" min="10" step="10" style="width:64px"> ×
           <input type="number" data-sheet="h" value="${fmt(p.sheet.h)}" min="10" step="10" style="width:64px"> mm</p>
-        <p class="sk-small">每个<b>最外层的闭合切割轮廓</b>就是一块板；画在它里面的孔、雕刻和文字都属于这块板。板厚 <b>${fmt(p.thickness || 0)} mm</b>。</p>
+        <p class="sk-small">板厚（材料厚度）：
+          <input type="number" data-thick value="${fmt(p.thickness || 3)}" min="0.5" max="30" step="0.1" style="width:64px"> mm</p>
+        <p class="sk-small">卡榫的齿深、插槽宽度和 3D 里板的厚度都按它来。最好用卡尺量实际厚度（或用「🧪 卡扣测试样」）。</p>
+        ${this.staleJointsHtml()}
+        <p class="sk-small">每个<b>最外层的闭合切割轮廓</b>就是一块板；画在它里面的孔、雕刻和文字都属于这块板。</p>
         <p class="sk-small">两块板要拼在一起：用「卡榫」工具先点 A 板的一条边，再点 B 板的一条边，自动配成一对，3D 里会按它自动拼装。</p>
         <p class="sk-small">画好后点左上角「生成 3D · 去装配」。导出的图纸和画板上的位置一样。</p>`;
+      const thick = box.querySelector('[data-thick]');
+      thick.addEventListener('change', () => {
+        const v = Math.min(30, Math.max(0.5, Number(thick.value) || 3));
+        if (Math.abs(v - (p.thickness || 0)) < 1e-9) return;
+        p.thickness = v;
+        if (this.onThickness) this.onThickness(v);
+        this.renderBoardInfo();
+        this.refresh();
+        const n = this.staleJoints().length;
+        this.status(n ? `板厚改为 ${fmt(v)} mm：有 ${n} 处卡榫 / 插槽还是按旧板厚做的，可在右侧一键重做` : `板厚改为 ${fmt(v)} mm`);
+      });
+      thick.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') thick.blur(); });
+      this.bindRedoJoints(box);
       box.querySelectorAll('[data-sheet]').forEach((inp) => inp.addEventListener('change', () => {
         const v = Math.max(10, Number(inp.value) || 0);
         p.sheet = { ...p.sheet, [inp.dataset.sheet]: v };
@@ -3533,7 +3601,8 @@ export class SketchEditor {
     }
     this.$('.sk-boardinfo').innerHTML = `<h4>这块板</h4>
       <p class="sk-small">${p.sub || ''}</p>
-      <p class="sk-small">板厚 <b>${fmt(p.thickness || 0)} mm</b>。卡榫边改动后，回到 3D 会自动检查能不能拼上（红色 = 穿透）。</p>
+      <p class="sk-small">板厚 <b>${fmt(p.thickness || 0)} mm</b>（在左侧参数里改）。卡榫边改动后，回到 3D 会自动检查能不能拼上（红色 = 穿透）。</p>
+      ${this.staleJointsHtml()}
       <p class="sk-small">灰色虚线是生成器画的原始轮廓；木色区域是切出来的板。</p>`;
   }
 
