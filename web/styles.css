@@ -1014,3 +1014,8 @@ input, textarea, select { font: inherit; user-select: text; }
 
 .sk-num-sep { width: 1px; height: 20px; background: #d3dae3; margin: 0 2px; display: inline-block; }
 .sk-numeric { flex-wrap: wrap; row-gap: 4px; }
+
+.sk-layers-card.hidden { display: none; }
+.sk-layers-card h4 { display: flex; align-items: center; }
+.sk-card-x { margin-left: auto; border: 0 !important; background: transparent !important; color: #8a95a3; padding: 0 4px !important; font-size: 12px; cursor: pointer; }
+.sk-card-x:hover { color: #1f2933; }

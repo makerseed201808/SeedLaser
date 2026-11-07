@@ -144,8 +144,8 @@ export class SketchEditor {
           </div>
         </div>
         <aside class="sk-side">
-          <section class="sk-card">
-            <h4>图层（加工方式）</h4>
+          <section class="sk-card sk-layers-card hidden">
+            <h4>图层（加工方式）<button class="sk-card-x" data-act="hideLayers" title="收起（点左下角的颜色块可再打开）">✕</button></h4>
             <div class="sk-layers">${Object.entries(MODES).map(([k, m]) => `
               <button class="sk-layer" data-mode="${k}"><i style="background:${m.color}"></i><b>${m.name}</b><em>${m.hint}</em><span class="sk-count" data-count="${k}">0</span></button>`).join('')}
             </div>
@@ -219,6 +219,18 @@ export class SketchEditor {
     h.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => this.setTool(b.dataset.tool)));
     h.querySelectorAll('[data-align]').forEach((b) => b.addEventListener('click', () => this.align(b.dataset.align)));
     h.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => this.applyMode(b.dataset.mode)));
+    // 图层卡片默认收起：点左下角的加工方式色块时展开（再点同一个已选中的色块收起）
+    h.querySelectorAll('.sk-palette [data-mode]').forEach((b) => b.addEventListener('click', () => {
+      const card = this.$('.sk-layers-card');
+      const same = this.lastPalette === b.dataset.mode && !card.classList.contains('hidden');
+      card.classList.toggle('hidden', same);
+      this.lastPalette = same ? null : b.dataset.mode;
+    }));
+    h.querySelector('[data-act=hideLayers]').addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      this.$('.sk-layers-card').classList.add('hidden');
+      this.lastPalette = null;
+    });
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
     h.querySelectorAll('[data-opt]').forEach((el) => el.addEventListener('change', () => this.optChanged(el)));
     h.querySelectorAll('[data-num]').forEach((el) => {
