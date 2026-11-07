@@ -11,6 +11,10 @@
 二维编辑器 + 自由设计二维画板 + 3D 装配校验已成型。**产品定位、计划、开发要求和验收标准见 [docs/ROADMAP.md](docs/ROADMAP.md)——开工前必读。**
 之前的工作在 Cowork 云端会话里完成（用浏览器 + Playwright 验证）；端到端冒烟脚本已放进 `tests/e2e/`（`tests/e2e/run.sh`）。
 
+**改名（2026-11-07）**：产品改名 **SeedLaser**（界面、窗口标题、打包产物 SeedLaser.app / SeedLaser.exe、Logo 文字、文档）。**内部保持兼容**：仓库 / 文件夹名、pyproject 包名、项目文件扩展名 `.seedbox.json`、localStorage 键 `seedboxes.*`、postMessage `seedboxes:*`、logo 文件名都没改；打开项目同时认 `app: SeedBoxes / SeedLaser`，新保存写 `SeedLaser`。
+**结构**：主页（#home：新建设计 / 快速建模 / 打开项目 + 最近项目 + 示例）→ 「设计」= FreeDesign 的三个板块（① 二维设计 ② 3D 装配 ③ 加工作业）；原 SeedBoxes 生成器 = 「快速建模」模型库（#welcome / #browse / #editor，左侧栏只在这里显示），模型页「放进设计 →」(workshop.importToDesign) 把板件 + 装配矩阵放进设计（板件局部坐标 = 模型轮廓坐标，poses = 模型 matrix）；在设计里中途去快速建模再放 = 放进当前设计（W.freeStash）。最近项目存 `~/.seedlaser/recent.json`（backend.recent_projects / open_project_path）。
+**画板 id 约定**：composeSheet 给每个图形 id 加「板件id§」前缀保证整张画板唯一，applySheet 存回时去掉（以前各板都叫 outline 会串板）。
+
 **第一次进 session 要做的事**：
 1. `git status` 确认仓库状态
 2. `cat README.md` 了解用户视角
@@ -76,7 +80,7 @@ SeedBoxes/
 │   └── makerseed-logo.svg  种子创客工坊标识
 ├── pyproject.toml          uv 项目（boxes 通过 git URL @release-1.2 引用）
 ├── uv.lock                 依赖锁文件
-├── SeedBoxes.spec          PyInstaller 配置（importlib 检测 BOXES_ROOT）
+├── SeedLaser.spec          PyInstaller 配置（importlib 检测 BOXES_ROOT）
 ├── logo.ico                .exe 图标 + 开发模式窗口图标
 ├── SeedBoxes_logo_vector.svg   主 logo 源
 ├── run_uv.bat / build_uv.bat                       开发 / 打包（Windows）

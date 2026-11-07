@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# SeedBoxes 开发模式启动（macOS / Linux）
+# SeedLaser 开发模式启动（macOS / Linux）
 set -euo pipefail
 cd "$(dirname "$0")"
 
 echo ""
-echo "==== SeedBoxes (开发模式) ===="
+echo "==== SeedLaser (开发模式) ===="
 echo ""
 
 if ! command -v uv >/dev/null 2>&1; then

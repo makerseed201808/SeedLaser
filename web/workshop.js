@@ -1,4 +1,4 @@
-// SeedBoxes 工坊：3D 模型视图 + 板件清单 + 单块板 2D 编辑（开孔 / 刻字）
+// SeedLaser 工坊：3D 模型视图 + 板件清单 + 单块板 2D 编辑（开孔 / 刻字）
 // 坐标约定见 model3d.py：后端给出每块板「名义坐标系」轮廓和 4×4 摆放矩阵（x 右、y 后、z 上）。
 // 编辑（edit）存在「从外面看」坐标系：原点 = 内部矩形左下角，单位 mm，y 向上。
 import * as THREE from './vendor/three/three.module.min.js';
@@ -718,7 +718,8 @@ function composeSheet() {
     }
     const outlineIdx = Math.max(0, sk.items.findIndex((it) => it.role === 'outline'));
     const sa = p.sa || 0;
-    sk.items.forEach((it, i) => items.push({ ...placeItem(it, sa, p.sx, p.sy), role: undefined,
+    // 图形 id 在整张画板里必须唯一（各板的 id 可能都叫 outline）：加上板件前缀，存回时去掉
+    sk.items.forEach((it, i) => items.push({ ...placeItem(it, sa, p.sx, p.sy), id: `${p.id}§${it.id || i}`, role: undefined,
       pid: i === outlineIdx ? p.id : undefined, origin: i === outlineIdx ? [p.sx, p.sy, sa] : undefined }));
   });
   (W.project.free.loose || []).forEach((it) => items.push(it));
@@ -739,6 +740,7 @@ function applySheet(res) {
     const [ox, oy, oa] = rp.origin || [x0, y0, 0];
     const items = rp.items.map((it) => {
       const { pid, origin, ...rest } = unplaceItem(it, oa || 0, ox, oy);
+      if (rest.id && rest.id.startsWith(`${rp.pid}§`)) rest.id = rest.id.slice(rp.pid.length + 1);
       if (it.id === rp.outline) rest.role = 'outline'; else delete rest.role;
       return rest;
     });
@@ -902,6 +904,66 @@ function renderMakePanel() {
   }));
   panel.querySelector('[data-k=names]').addEventListener('click', () => nameplateDialog());
   panel.querySelector('[data-k=fit]').addEventListener('click', () => fitTestDialog());
+}
+
+// ------------------------------------------------------------------ 快速建模 → 设计：把模型的板件（含装配位置）放进二维画板
+
+function polySegs(pts) { return pts.map(([x, y]) => [Math.round(x * 1e3) / 1e3, Math.round(y * 1e3) / 1e3, 0, 0, 0, 0]); }
+
+async function importToDesign() {
+  if (isFree() || !W.name) return;
+  if (!W.model || W.stale) await loadModel();
+  const dis = new Set(W.project.disabled);
+  const src = (W.model ? W.model.parts : []).filter((p) => !dis.has(p.id) && p.id !== 'reference');
+  if (!src.length) { toast('这个模型没有可识别的板件，放不进设计', 'error'); return; }
+  const parts = []; const sketches = {}; const poses = {};
+  src.forEach((p) => {
+    const id = 'p' + Date.now().toString(36) + (uidCounter++).toString(36);
+    // 板件局部坐标 = 模型里的轮廓坐标，这样模型的装配矩阵可以直接当 3D 装配位置用
+    const items = [{ id: 'outline', mode: 'cut', role: 'outline', paths: [{ closed: true, segs: polySegs(p.outer) }] }];
+    (p.holes || []).forEach((h, i) => items.push({ id: 'hole' + i, mode: 'cut', paths: [{ closed: true, segs: polySegs(h) }] }));
+    (p.extra || []).forEach((h, i) => { if (h.length > 2) items.push({ id: 'extra' + i, mode: 'cut', paths: [{ closed: true, segs: polySegs(h) }] }); });
+    (p.etch || []).forEach((h, i) => { if (h.length > 2) items.push({ id: 'etch' + i, mode: 'engrave', paths: [{ closed: true, segs: polySegs(h) }] }); });
+    sketches[id] = { items };
+    const [x0, y0, x1, y1] = p.bbox || [0, 0, p.w, p.h];
+    parts.push({ id, name: p.name, w: Math.round((x1 - x0) * 100) / 100, h: Math.round((y1 - y0) * 100) / 100 });
+    if (W.model.assembled) poses[id] = p.matrix.slice();
+  });
+  const params = window.SeedApp.collectParams();
+  W.pendingImport = { from: W.name, parts, sketches, poses, thickness: Number(params.thickness), burn: Number(params.burn), assembled: !!W.model.assembled };
+  await window.SeedApp.select('FreeDesign');
+}
+
+function applyPendingImport() {
+  const imp = W.pendingImport;
+  W.pendingImport = null;
+  const into = !!W.freeStash;
+  if (into) { W.project = W.freeStash; W.freeStash = null; }
+  W.project.free = W.project.free || { parts: [] };
+  W.project.free.parts = (W.project.free.parts || []).concat(imp.parts);
+  W.project.sketches = { ...(W.project.sketches || {}), ...imp.sketches };
+  W.project.poses = { ...(W.project.poses || {}), ...imp.poses };
+  const p0 = into ? W.freeStashParams : null;
+  W.freeStashParams = null;
+  if (p0) { if (p0.thickness != null) setFormNum('thickness', p0.thickness); if (p0.burn != null) setFormNum('burn', p0.burn); }
+  else { if (imp.thickness) setFormNum('thickness', imp.thickness); if (imp.burn >= 0) setFormNum('burn', imp.burn); }
+  W.wantSheet = true;
+  W.stage = 'design';
+  const warn = p0 && Number(p0.thickness) !== imp.thickness ? `；注意：模型按 ${imp.thickness} mm 板厚生成，当前设计是 ${p0.thickness} mm` : '';
+  toast(`已把「${imp.from}」的 ${imp.parts.length} 块板放进${into ? '当前' : '新'}设计${imp.assembled ? '，3D 装配位置也带过来了' : ''}${warn}`, warn ? 'info' : 'success');
+}
+
+function startExample() {
+  const ex = W.startEx;
+  W.startEx = null;
+  W.wantSheet = false;
+  W.stage = 'make';
+  updateStageBar();
+  setMode('2d');
+  loadModel().then(() => {
+    renderMakePanel();
+    if (ex === 'fit') fitTestDialog(); else nameplateDialog();
+  });
 }
 
 function freePartForm() {
@@ -2458,7 +2520,7 @@ async function openSketchForge() {
       bar.innerHTML = '<button data-sf="assemble" title="所有板回到生成器算好的装配位置">一键装配</button>' +
         '<button data-sf="explode" title="把所有板平放在台面上，练习手动拼装">拆开平铺</button>' +
         '<button data-sf="snap" class="on" title="板拖到正确位置附近时自动对准相邻的板">🧲 磁吸</button>' +
-        '<button data-sf="back" class="sf-back">✓ 完成 · 返回 SeedBoxes</button>';
+        '<button data-sf="back" class="sf-back">✓ 完成 · 返回 SeedLaser</button>';
       bar.querySelector('[data-sf=back]').addEventListener('click', closeSketchForge);
       bar.querySelector('[data-sf=assemble]').addEventListener('click', () => sfAssembleAll());
       bar.querySelector('[data-sf=explode]').addEventListener('click', () => sfExplode());
@@ -2519,9 +2581,17 @@ function hasContent() {
 }
 
 window.SeedWorkshop = {
-  wantSheet() { W.wantSheet = true; },
+  wantSheet() { W.wantSheet = true; W.freeStash = null; },          // 新建设计：不接着上一个
+  startWith(ex) { W.startEx = ex; W.freeStash = null; },
+  hasDesign() { return !!W.freeStash; },
+  importToDesign() { return importToDesign(); },
   openSheet() { return openSheet(); },
   reset(name) {
+    // 从「设计」去快速建模：先把当前设计留着，之后「放进当前设计」时接着用
+    if (W.name === 'FreeDesign' && name !== 'FreeDesign' && hasContent()) {
+      W.freeStash = JSON.parse(JSON.stringify(W.project));
+      W.freeStashParams = window.SeedApp ? window.SeedApp.collectParams() : null;
+    }
     W.name = name;
     W.stage = name === 'FreeDesign' ? 'design' : null;
     W.model = null;
@@ -2542,6 +2612,8 @@ window.SeedWorkshop = {
   },
   formReady() {
     W.stale = true;
+    if (isFree() && W.pendingImport) applyPendingImport();
+    else if (isFree() && W.startEx) { startExample(); return; }
     if (isFree()) {
       if (!freeParts().length) {
         freeParts().push({ id: 'p1', name: '板件 1', w: 100, h: 60 });

@@ -7,21 +7,21 @@
        不加会导致 window.pywebview.api 无法创建（卡在"加载中"）。仍禁止内联脚本。 -->
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self' data:; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src http://127.0.0.1:*;">
-  <title>SeedBoxes</title>
+  <title>SeedLaser</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="app" class="layout">
     <aside class="sidebar">
       <header class="brand">
-        <img class="brand-logo" src="seedboxes-logo.svg" alt="SeedBoxes" />
+        <img class="brand-logo" src="seedboxes-logo.svg" alt="SeedLaser" />
         <div class="brand-text">
-          <div class="brand-title">SeedBoxes</div>
-          <div class="brand-sub">激光切割盒子生成器</div>
+          <div class="brand-title">SeedLaser</div>
+          <div class="brand-sub">快速建模 · 模型库</div>
         </div>
       </header>
       <div class="search-wrap">
-        <input id="search" type="text" placeholder="搜索生成器…" />
+        <input id="search" type="text" placeholder="搜索模型…" />
       </div>
       <nav id="group-list" class="group-list">
         <div class="loading">加载中…</div>
@@ -33,20 +33,60 @@
     </aside>
 
     <main class="content">
+      <!-- 主页 -->
+      <section id="home" class="home hidden">
+        <div class="home-hero">
+          <img class="home-logo" src="seedboxes-logo.svg" alt="" />
+          <div>
+            <h1>SeedLaser</h1>
+            <p>激光切割设计：二维画图 → 3D 装配 → 加工出图</p>
+          </div>
+        </div>
+        <div class="home-cards">
+          <button id="free-entry" class="home-card hc-main">
+            <span class="hc-icon">✏️</span><b>新建设计</b>
+            <em>空白二维画板：自己画板件、做卡榫，再到 3D 里拼起来检查</em>
+          </button>
+          <button id="home-quick" class="home-card">
+            <span class="hc-icon">📦</span><b>快速建模</b>
+            <em>从 170 多个盒子、托盘、收纳模型里选一个，调好尺寸放进设计继续改</em>
+          </button>
+          <button id="home-open" class="home-card">
+            <span class="hc-icon">📂</span><b>打开项目</b>
+            <em>打开以前保存的项目文件（.seedbox.json）</em>
+          </button>
+        </div>
+        <div class="home-lower">
+          <section class="home-sec">
+            <h3>最近项目</h3>
+            <div id="home-recent" class="home-recent"><div class="muted">还没有项目。保存过或打开过的项目会出现在这里。</div></div>
+          </section>
+          <section class="home-sec">
+            <h3>从示例开始</h3>
+            <div class="home-examples">
+              <button data-ex="fit"><span>🧪</span><b>卡扣测试样</b><em>新机器、新板材先切一组，量出切缝和松紧</em></button>
+              <button data-ex="names"><span>📛</span><b>批量名牌</b><em>粘贴一列名字，一次做一排名牌</em></button>
+              <button data-ex="box"><span>📦</span><b>基础收纳盒</b><em>快速建模里的盒子，调尺寸后放进设计</em></button>
+            </div>
+          </section>
+        </div>
+        <p class="welcome-credit">
+          SeedLaser · 快速建模基于开源项目
+          <a href="https://github.com/florianfesti/boxes" target="_blank" rel="noopener">Boxes.py</a>
+          (GPL-3.0) · © <img class="credit-mark" src="makerseed-logo.svg" alt="" /> makerseed 种子创客工坊
+        </p>
+      </section>
+
       <!-- 欢迎页：分组画廊 -->
       <section id="welcome" class="welcome">
         <div class="welcome-head">
-          <h1>选择一个生成器开始</h1>
-          <p>从下面的分组中挑选，或在左侧搜索框中按名称过滤。</p>
+          <button class="bc-pill qm-home" data-go-home title="返回主页"><span class="bc-arrow">←</span><span>主页</span></button>
+          <h1>📦 快速建模 · 模型库</h1>
+          <p>选一个模型、调好尺寸，点右上角「放进设计 →」，这套板件就会出现在二维画板里，可以继续改、装配、出图。左侧可以按名称搜索。</p>
         </div>
-        <button id="free-entry" class="free-entry">
-          <span class="fe-icon">✏️</span>
-          <span class="fe-text"><b>自由设计</b><em>自己画板件（直线、曲线、布尔运算、文字），再到 3D 里拼起来，实时检查有没有干涉</em></span>
-          <span class="fe-go">开始 →</span>
-        </button>
         <div id="group-gallery" class="group-gallery"></div>
         <p class="welcome-credit">
-          SeedBoxes · 基于开源项目
+          SeedLaser 快速建模 · 基于开源项目
           <a href="https://github.com/florianfesti/boxes" target="_blank" rel="noopener">Boxes.py</a>
           (GPL-3.0) 二次开发 · © <img class="credit-mark" src="makerseed-logo.svg" alt="" />
           makerseed 种子创客工坊
@@ -100,6 +140,7 @@
             <select id="format-select" title="输出格式"></select>
             <button id="btn-preview" class="primary">预览</button>
             <button id="btn-save">保存到文件…</button>
+            <button id="btn-to-design" class="primary hidden" title="把这套板件（连同装配位置）放进二维画板，继续改、装配、出图">放进设计 →</button>
           </div>
         </header>
 

@@ -35,13 +35,13 @@ if exist dist rmdir /s /q dist
 
 echo.
 echo [3/3] 运行 PyInstaller ...
-uv run pyinstaller --noconfirm --clean SeedBoxes.spec
+uv run pyinstaller --noconfirm --clean SeedLaser.spec
 if errorlevel 1 goto fail
 
 echo.
 echo ==========================================
 echo  [OK] 打包完成！
-echo  产物位于：dist\SeedBoxes.exe
+echo  产物位于：dist\SeedLaser.exe
 echo ==========================================
 goto end
 

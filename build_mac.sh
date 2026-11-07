@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# SeedBoxes macOS 打包：生成 dist/SeedBoxes.app 和 dist/SeedBoxes-macOS.zip
+# SeedLaser macOS 打包：生成 dist/SeedLaser.app 和 dist/SeedLaser-macOS.zip
 set -euo pipefail
 cd "$(dirname "$0")"
 
 echo ""
-echo "==== SeedBoxes - PyInstaller 打包 (macOS) ===="
+echo "==== SeedLaser - PyInstaller 打包 (macOS) ===="
 echo ""
 
 if [[ "$(uname)" != "Darwin" ]]; then
@@ -40,17 +40,17 @@ rm -rf build dist
 
 echo ""
 echo "[3/4] 运行 PyInstaller ..."
-uv run pyinstaller --noconfirm --clean SeedBoxes.spec
+uv run pyinstaller --noconfirm --clean SeedLaser.spec
 
 echo ""
 echo "[4/4] 打包 zip（ditto 保留 .app 的权限与符号链接）..."
-ditto -c -k --sequesterRsrc --keepParent dist/SeedBoxes.app dist/SeedBoxes-macOS.zip
+ditto -c -k --sequesterRsrc --keepParent dist/SeedLaser.app dist/SeedLaser-macOS.zip
 
 echo ""
 echo "=========================================="
 echo " [OK] 打包完成！"
-echo " 产物：dist/SeedBoxes.app"
-echo "       dist/SeedBoxes-macOS.zip（分发用）"
+echo " 产物：dist/SeedLaser.app"
+echo "       dist/SeedLaser-macOS.zip（分发用）"
 echo " 注意：未签名，首次打开需右键 → 打开（或在"
 echo "       系统设置 → 隐私与安全性 中点「仍要打开」）"
 echo "=========================================="

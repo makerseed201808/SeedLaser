@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
-  <title id="title">SeedBoxes Logo</title>
-  <desc id="desc">Vector logo for SeedBoxes: a blue geometric open box with an orange laser cutting burst and wordmark.</desc>
+  <title id="title">SeedLaser Logo</title>
+  <desc id="desc">Vector logo for SeedLaser: a blue geometric open box with an orange laser cutting burst and wordmark.</desc>
   <defs>
     <linearGradient id="blueTopLeft" x1="340" y1="250" x2="570" y2="450" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#18A8FF"/>
@@ -65,5 +65,5 @@
   </g>
 
   <!-- Wordmark -->
-  <text class="wordmark" x="600" y="1020" text-anchor="middle">SeedBoxes</text>
+  <text class="wordmark" x="600" y="1020" text-anchor="middle">SeedLaser</text>
 </svg>

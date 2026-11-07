@@ -168,7 +168,7 @@
     "Challenges": "挑战", "Challenge 1": "挑战 1", "Challenge 2": "挑战 2", "Start Challenge": "开始挑战",
     "Key Tag": "钥匙牌", "Build a Key Tag": "做一个钥匙牌", "Nameplate": "姓名牌", "Personalized Nameplate": "个性姓名牌",
     "Build a Nameplate": "做一个姓名牌", "Skills used in this challenge": "本挑战用到的技能",
-    "SketchForge design": "SeedBoxes 装配", "Make default": "设为默认", "Hide selected": "隐藏所选",
+    "SketchForge design": "SeedLaser 装配", "Make default": "设为默认", "Hide selected": "隐藏所选",
     "Base": "底座", "Board": "板", "Cancel project rename": "取消重命名", "Cancel project deletion": "取消删除",
     "Could not load project shapes": "无法加载项目形状", "Could not save project shapes": "无法保存项目形状",
     "Could not save project list": "无法保存项目列表", "Could not save thumbnail": "无法保存缩略图",

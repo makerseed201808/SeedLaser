@@ -1,7 +1,8 @@
-<h1 align="center">SeedBoxes</h1>
+<h1 align="center">SeedLaser</h1>
 
 <p align="center">
-  基于开源项目 <a href="https://github.com/florianfesti/boxes">Boxes.py</a> 二次开发的桌面客户端<br/>
+  面向 K12 的激光切割设计软件：二维设计 → 3D 装配 → 加工作业<br/>
+  （原名 SeedBoxes；「快速建模」模型库基于开源项目 <a href="https://github.com/florianfesti/boxes">Boxes.py</a>）<br/>
   中文界面 · 100% 离线 · Windows 单 exe / macOS .app
 </p>
 
@@ -35,20 +36,6 @@ SeedBoxes 是基于 [Boxes.py](https://github.com/florianfesti/boxes)（激光�
 - **多种输出** — SVG / SVG_Ponoko / PostScript / Lightburn (lbrn2) 直接生成；DXF / GCode / PDF 需系统装 `pstoedit` / `ps2pdf`
 - **单文件 .exe** — PyInstaller 打包约 100 MB，复制即用，依赖 Windows 10/11 默认的 WebView2 Runtime
 - **macOS 支持** — 使用系统自带的 WKWebView，可打包为 `SeedBoxes.app`
-- **3D 模型预览** — 预览区切到「3D 模型」：36 个盒、柜、机箱类生成器显示拼好的样子（其中 31 个为自动装配，经碰撞校验确认卡榫咬合），其余显示所有板件平铺
-- **局部修改** — 板件清单里可禁用某块板；「编辑」进入单块板编辑器，开圆孔 / 方孔 / 圆角矩形孔、刻中文字（系统中文字体转轮廓），导出的 SVG / PDF / DXF 等都会带上
-- **手动摆放（仿 Tinkercad）** — 3D 视图点「✋ 摆放」：拖动板件、黑色锥形手柄升降、彩色弧形箭头旋转，吸附网格、方向键微移、撤销；每次放下自动做碰撞校验，穿透的板标红、咬合的板在清单里注明
-- **二维编辑进阶（参考 LightBurn）** — 导入 SVG / DXF、图片描摹；圆角 / 倒角；编组；删除重复图形；连接点（搭桥）；智能吸附（端点 / 交点 / 中点 / 圆心 / 参考线）+ 标尺与参考线；图上直接改边长；多行文字、字距、圆弧文字、沿路径文字、焊接；沿路径阵列、镜像复制；快捷键表与新手引导
-- **加工参数** — 顶部「⚙ 加工参数」按图层设速度 / 功率 / 遍数（带材料参考值），保存图纸时在旁边写一份「_加工参数.txt」
-- **批量名牌** — 自由设计里粘贴名字列表，一键生成一排名牌（圆角外框、挂孔、自动缩放文字、可选装饰边框）
-- **自由设计** — 首页「自由设计」：不用生成器，自己新建板件、画二维草图（含「卡榫」工具：一键把直边做成指接 A / B 或凹槽），再到 3D 编辑器里拼装、检查干涉，导出所有格式
-- **自由设计的磁吸** — 卡榫在草图里会记下位置：指接 A↔B（直角拼接）、指接 A↔凹槽（同平面拼接）、指接 A↔插槽孔（T 型）在 3D 编辑器里靠近就自动对准；编辑器里的「配对」列表直接套用另一块板的段数
-- **自由设计：按卡榫自动拼装 + 排版** — 一键按卡榫配对把板拼起来（碰撞检查挑选不穿透的姿态）；填材料（台面）宽高后，导出时自动排版到若干张材料上（可旋转 90°），显示需要几张和利用率
-- **材料** — 表单顶部选材料（椴木 / 亚克力 / 密度板 / 瓦楞纸），自动填入板厚和激光补偿
-- **3D 编辑器磁吸 / 一键装配 / 拆开平铺** — 生成器盒子的板拖到正确位置附近会自动对准相邻板
-- **二维草图编辑（参考 LightBurn / LaserMaker）** — 3D 视图里点板件的「编辑」：直线、曲线（钢笔）、矩形、椭圆、多边形 / 星形、文字、修剪（橡皮擦）、节点编辑，并集 / 差集 / 交集 / 异或、偏移、阵列（直线 / 环形 / 矩形，带预览）、对齐与等距分布（对齐到选区 / 关键对象 / 整块板）、镜像；切割 / 雕刻 / 划线三个图层；外轮廓（卡榫边）也能改。右下角 3D 实时预览，每次修改后自动检查与相邻板是否穿透
-- **3D 编辑器（SketchForge 改版）** — 3D 视图点「🛠 3D 编辑器」：在完整的 SketchForge 编辑界面（中文）里移动、旋转、对齐、组合板件，点「✓ 完成 · 返回 SeedBoxes」或左上角「主页」后，摆放结果同步回来并自动做咬合检查；「☰ 板件」可隐藏板件清单
-- **项目文件** — 参数、局部修改和手动摆放位置保存为 `.seedbox.json`，随时打开继续改
 
 ---
 
@@ -73,19 +60,6 @@ macOS / Linux：
 > 连不上 GitHub？在能访问 GitHub 的电脑上运行 `scripts/make_boxes_mirror.sh`，把整个文件夹（含 `third_party/`）拷过去，`run_mac.sh` 会自动改用本地镜像。
 >
 > 为什么要单独下载：boxes 通过 git 安装进 `.venv` 时只安装 `boxes` 包本身，上游仓库根目录的 `static/`（作品照片）不会被安装。
-
----
-
-## 浏览器调试模式
-
-不开桌面窗口，用普通浏览器调试前端（可以用浏览器开发者工具）：
-
-```bash
-uv run python scripts/dev_server.py
-# 浏览器打开 http://127.0.0.1:8765/index.html?dev=1
-```
-
-此模式下「保存到文件」「打开 / 保存项目」的系统对话框不可用。
 
 ---
 
@@ -151,26 +125,19 @@ build_uv.bat            :: 重新打包，自动用 .pyd 替代 .py
 SeedBoxes/
 ├── app.py                  PyWebView 入口
 ├── backend.py              JS↔Python 桥接 API（含 i18n / 自渲染兜底 / 边缘字符映射）
-├── freedesign.py           自由设计（特殊生成器 FreeDesign：板件来自项目）
-├── sketch2d.py             二维草图：展平、导出（激光补偿）、3D 轮廓、偏移
-├── model3d.py              3D 模型：零件捕获、组装配方、局部修改注入、中文字转轮廓
 ├── web/                    前端
 │   ├── index.html / app.js / styles.css
-│   ├── workshop.js         3D 视图 + 板件清单 + 单块板编辑器 + 3D 编辑器桥接（ES 模块）
-│   ├── vendor/three/       three.js r169（MIT，离线打包）
 │   ├── seedboxes-logo.svg  主软件 logo
 │   └── makerseed-logo.svg  种子创客工坊标识
 ├── pyproject.toml          uv 项目（boxes 通过 git 引用上游 release-1.2）
 ├── uv.lock                 依赖锁文件
-├── SeedBoxes.spec          PyInstaller 打包配置
+├── SeedLaser.spec          PyInstaller 打包配置
 ├── logo.ico                .exe / .app 图标（多尺寸）
 ├── run_uv.bat / build_uv.bat                       开发 / 打包（Windows）
 ├── run_mac.sh / build_mac.sh                       开发 / 打包（macOS）
 ├── scripts/fetch_boxes_assets.py                   下载上游作品照片 + 翻译到 boxes_assets/
 ├── build_pyd.bat / setup_ext.py / install_msvc.bat 加密路径预备
 ├── README.md / DEVELOPMENT.md / CLAUDE.md          文档
-├── sketchforge/            3D 编辑器改版：补丁、构建脚本、说明
-├── web_sketchforge/        3D 编辑器构建产物（SketchForge-3D 改版，AGPL-3.0）
 └── LICENSE                 GPL-3.0
 ```
 
@@ -183,8 +150,6 @@ SeedBoxes/
 依赖：
 - [boxes](https://github.com/florianfesti/boxes) (GPL-3.0) by Florian Festi — 核心渲染引擎
 - [pywebview](https://github.com/r0x0r/pywebview) (BSD-3-Clause) — 桌面框架
-- [paper.js](http://paperjs.org/) (MIT) — 二维草图编辑（web/vendor/paper）
-- [SketchForge-3D](https://github.com/Formsmith746/SketchForge-3D) (AGPL-3.0-only) — 3D 编辑器；改版构建在 `web_sketchforge/`，对应源码 = 上游提交 `e9cb8e8` + `sketchforge/seedboxes.patch`（见 `sketchforge/README.md`）
 
 如分发本程序，需附带源码或源码获取方式（GPL 要求）。
 

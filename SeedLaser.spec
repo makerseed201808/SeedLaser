@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for SeedBoxes 桌面客户端.
+"""PyInstaller spec for SeedLaser 桌面客户端.
 
-Windows：单文件 dist/SeedBoxes.exe
-macOS  ：dist/SeedBoxes.app（onedir + BUNDLE，PyInstaller 6 对 .app 不推荐 onefile）
+Windows：单文件 dist/SeedLaser.exe
+macOS  ：dist/SeedLaser.app（onedir + BUNDLE，PyInstaller 6 对 .app 不推荐 onefile）
 """
 import os
 import sys
@@ -186,14 +186,14 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 if IS_MAC:
-    # macOS：onedir → COLLECT → BUNDLE 生成 SeedBoxes.app
+    # macOS：onedir → COLLECT → BUNDLE 生成 SeedLaser.app
     # icon 用 logo.ico，PyInstaller 会借助 Pillow 自动转为 .icns
     exe = EXE(
         pyz,
         a.scripts,
         [],
         exclude_binaries=True,
-        name='SeedBoxes',
+        name='SeedLaser',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
@@ -214,17 +214,17 @@ if IS_MAC:
         strip=False,
         upx=False,
         upx_exclude=[],
-        name='SeedBoxes',
+        name='SeedLaser',
     )
     app = BUNDLE(
         coll,
-        name='SeedBoxes.app',
+        name='SeedLaser.app',
         icon='logo.ico',
-        bundle_identifier='com.makerseed.seedboxes',
+        bundle_identifier='com.makerseed.seedlaser',
         version=APP_VERSION,
         info_plist={
-            'CFBundleName': 'SeedBoxes',
-            'CFBundleDisplayName': 'SeedBoxes',
+            'CFBundleName': 'SeedLaser',
+            'CFBundleDisplayName': 'SeedLaser',
             'CFBundleShortVersionString': APP_VERSION,
             'CFBundleDevelopmentRegion': 'zh_CN',
             'NSHighResolutionCapable': True,
@@ -240,7 +240,7 @@ else:
         a.zipfiles,
         a.datas,
         [],
-        name='SeedBoxes',
+        name='SeedLaser',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,

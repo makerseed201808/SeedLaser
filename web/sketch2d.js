@@ -1,4 +1,4 @@
-// SeedBoxes 二维草图编辑器（板件级），交互参考 LightBurn / LaserMaker。
+// SeedLaser 二维草图编辑器（板件级），交互参考 LightBurn / LaserMaker。
 // 依赖 paper.js（web/vendor/paper/paper-core.min.js，MIT，由 index.html 以普通脚本加载 → window.paper）。
 //
 // 坐标：「从外面看」的板面坐标，单位 mm，y 向上（视图矩阵做 y 翻转）。

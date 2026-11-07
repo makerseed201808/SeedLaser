@@ -10,7 +10,7 @@ const state = {
   current: null,
   currentInfo: null,
   zoom: 1.0,
-  view: 'welcome',
+  view: 'home',
   reqId: 0,                // 单调递增请求标识，防止快速切换的回调写入过期视图
 };
 
@@ -36,6 +36,11 @@ function setStatus(msg) { $('#status').textContent = msg; }
 // ---- 视图切换 ----
 function showView(view) {
   state.view = view;
+  // 主页和自由设计不显示左侧模型库；模型库 / 分组 / 模型参数页显示
+  const free = view === 'editor' && state.current === 'FreeDesign';
+  $('#app').classList.toggle('no-sidebar', view === 'home' || free);
+  $('#home').classList.toggle('hidden', view !== 'home');
+  if (view === 'home') renderRecent();
   $('#welcome').classList.toggle('hidden', view !== 'welcome');
   $('#browse').classList.toggle('hidden', view !== 'browse');
   $('#editor').classList.toggle('hidden', view !== 'editor');
@@ -251,7 +256,10 @@ async function selectGenerator(name) {
   $$('#group-list .gen-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.name === name);
   });
-  $('#gen-name').textContent = name === 'FreeDesign' ? '自由设计' : name;
+  $('#gen-name').textContent = name === 'FreeDesign' ? '设计' : name;
+  $('#btn-to-design').classList.toggle('hidden', name === 'FreeDesign');
+  $('#btn-to-design').textContent = window.SeedWorkshop && window.SeedWorkshop.hasDesign() ? '放进当前设计 →' : '放进设计 →';
+  $('#editor-back-home').querySelector('span:last-child').textContent = name === 'FreeDesign' ? '主页' : '模型库';
   $('#gen-desc').textContent = '加载中…';
   const ownerGroup = state.byName.get(name);
   $('#editor-bc-group').textContent = ownerGroup ? ownerGroup.title : '分组';
@@ -610,7 +618,7 @@ async function doSaveProject() {
   if (!state.current) return;
   const ws = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
   const project = {
-    app: 'SeedBoxes',
+    app: 'SeedLaser',
     version: 1,
     generator: state.current,
     params: collectParams(),
@@ -632,16 +640,16 @@ async function doSaveProject() {
   }
 }
 
-async function doOpenProject() {
+async function doOpenProject(path) {
   let r;
   try {
-    r = await window.pywebview.api.open_project();
+    r = typeof path === 'string' ? await window.pywebview.api.open_project_path(path) : await window.pywebview.api.open_project();
   } catch (err) {
     toast('打开项目失败: ' + err, 'error');
     return;
   }
   if (!r || r.cancelled) return;
-  if (r.error) { toast(r.error, 'error'); return; }
+  if (r.error) { toast(r.error, 'error'); if (state.view === 'home') renderRecent(); return; }
   const p = r.project;
   await selectGenerator(p.generator);
   const form = $('#param-form');
@@ -661,6 +669,29 @@ async function doOpenProject() {
   doPreview();
 }
 
+// ---- 主页：最近项目、示例 ----
+async function renderRecent() {
+  const box = $('#home-recent');
+  let list = [];
+  try { list = await window.pywebview.api.recent_projects(); } catch (e) { list = []; }
+  if (!Array.isArray(list) || !list.length) {
+    box.innerHTML = '<div class="muted">还没有项目。保存过或打开过的项目会出现在这里。</div>';
+    return;
+  }
+  const when = (t) => { const d = new Date(t * 1000); return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  box.innerHTML = list.slice(0, 8).map((r, i) => `<button class="recent-item${r.exists ? '' : ' gone'}" data-i="${i}" title="${escapeHtml(r.path)}">
+      <b>${escapeHtml(r.name)}</b>
+      <em>${r.generator === 'FreeDesign' ? `设计${r.parts != null ? ` · ${r.parts} 块板` : ''}` : `快速建模 · ${escapeHtml(r.generator || '')}`}${r.exists ? '' : ' · 文件不在了'}</em>
+      <span>${when(r.time || 0)}</span></button>`).join('');
+  box.querySelectorAll('.recent-item').forEach((b) => b.addEventListener('click', () => doOpenProject(list[Number(b.dataset.i)].path)));
+}
+
+async function startExample(ex) {
+  if (ex === 'box') { await selectGenerator('ABox'); return; }
+  if (window.SeedWorkshop) window.SeedWorkshop.startWith(ex);     // 新设计 → 打开对应对话框
+  await selectGenerator('FreeDesign');
+}
+
 // ---- 事件 ----
 function bindEvents() {
   $('#btn-preview').addEventListener('click', doPreview);
@@ -677,7 +708,12 @@ function bindEvents() {
   $('#btn-zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.1, state.zoom / 1.25); applyZoom(); });
   $('#btn-zoom-reset').addEventListener('click', () => { state.zoom = 1.0; applyZoom(); });
   $('#browse-back').addEventListener('click', () => showView('welcome'));
-  $('#editor-back-home').addEventListener('click', () => showView('welcome'));
+  $('#editor-back-home').addEventListener('click', () => showView(state.current === 'FreeDesign' ? 'home' : 'welcome'));
+  $('#home-quick').addEventListener('click', () => showView('welcome'));
+  $('#home-open').addEventListener('click', doOpenProject);
+  document.querySelectorAll('[data-go-home]').forEach((b) => b.addEventListener('click', () => showView('home')));
+  document.querySelectorAll('#home [data-ex]').forEach((b) => b.addEventListener('click', () => startExample(b.dataset.ex)));
+  $('#btn-to-design').addEventListener('click', () => window.SeedWorkshop && window.SeedWorkshop.importToDesign());
   $('#editor-back-group').addEventListener('click', () => {
     const g = state.byName.get(state.current);
     if (g) browseGroup(g.name); else showView('welcome');
@@ -690,11 +726,13 @@ window.SeedApp = {
   collectParams,
   doPreview,
   hasPreview: () => !!state.hasPreview,
+  select: (name) => selectGenerator(name),
 };
 
 // ---- 启动 ----
 (async () => {
   bindEvents();
   await whenApiReady();
+  showView('home');
   await Promise.all([loadFormats(), loadGroups()]);
 })();

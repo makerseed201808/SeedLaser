@@ -1,4 +1,4 @@
-"""SeedBoxes 桌面客户端入口（Windows / macOS）."""
+"""SeedLaser 桌面客户端入口（Windows / macOS）."""
 from __future__ import annotations
 
 import os
@@ -61,7 +61,7 @@ def get_web_path() -> str:
 def main() -> None:
     api = Api()
     web_dir = get_web_path()
-    title = "SeedBoxes v0.1"
+    title = "SeedLaser v0.1"
     window = webview.create_window(
         title=title,
         url=os.path.join(web_dir, "index.html"),

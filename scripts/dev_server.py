@@ -56,7 +56,7 @@ class Handler(SimpleHTTPRequestHandler):
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"SeedBoxes 调试服务器：http://127.0.0.1:{port}/index.html?dev=1")
+    print(f"SeedLaser 调试服务器：http://127.0.0.1:{port}/index.html?dev=1")
     srv.serve_forever()
 
 

@@ -474,7 +474,7 @@ def _write_laser_sheet(path: str, name: str, params: dict[str, Any], laser: dict
     out = stem + "_加工参数.txt"
     rows = [("切割（外轮廓）", "黑色 #000000", laser["cut"]), ("切割（内孔）", "蓝色 #0000FF", laser["cut"]),
             ("雕刻（填充）", "绿色 #00FF00", laser.get("engrave") or {}), ("描线", "品红 #FF00FF", laser.get("score") or {})]
-    lines = [f"SeedBoxes 加工参数 — {'自由设计' if name == 'FreeDesign' else name}",
+    lines = [f"SeedLaser 加工参数 — {'自由设计' if name == 'FreeDesign' else name}",
              f"图纸：{os.path.basename(path)}    生成时间：{datetime.datetime.now():%Y-%m-%d %H:%M}",
              f"材料厚度：{params.get('thickness', '3')} mm    激光补偿 burn：{params.get('burn', '0.1')} mm"
              + (f"    参考：{laser.get('preset')}" if laser.get("preset") else ""), ""]
@@ -489,6 +489,52 @@ def _write_laser_sheet(path: str, name: str, params: dict[str, Any], laser: dict
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return out
+
+
+# ---------------------------------------------------------------- 最近项目（主页用）
+# 存在用户目录下（~/.seedlaser/recent.json），最多 12 条
+
+_RECENT_MAX = 12
+
+
+def _recent_file() -> str:
+    return os.path.join(os.path.expanduser("~"), ".seedlaser", "recent.json")
+
+
+def _load_recent() -> list[dict[str, Any]]:
+    import json
+    try:
+        with open(_recent_file(), encoding="utf-8") as f:
+            data = json.load(f)
+        return [r for r in data if isinstance(r, dict) and r.get("path")] if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_recent(items: list[dict[str, Any]]) -> None:
+    import json
+    try:
+        os.makedirs(os.path.dirname(_recent_file()), exist_ok=True)
+        with open(_recent_file(), "w", encoding="utf-8") as f:
+            json.dump(items[:_RECENT_MAX], f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass   # 记不住最近项目不影响使用
+
+
+def _remember_recent(path: str, project: dict[str, Any]) -> None:
+    import time
+    path = os.path.abspath(path)
+    gen = project.get("generator") or ""
+    free = project.get("free") or {}
+    n = len(free.get("parts") or []) if gen == "FreeDesign" else None
+    item = {"path": path, "name": os.path.basename(path).replace(".seedbox.json", "").replace(".json", ""),
+            "generator": gen, "parts": n, "time": int(time.time())}
+    _save_recent([item] + [r for r in _load_recent() if os.path.abspath(r.get("path", "")) != path])
+
+
+def _forget_recent(path: str) -> None:
+    path = os.path.abspath(path)
+    _save_recent([r for r in _load_recent() if os.path.abspath(r.get("path", "")) != path])
 
 
 class Api:
@@ -752,7 +798,7 @@ class Api:
             picked = self._window.create_file_dialog(
                 _fd.SAVE if _fd else webview.SAVE_DIALOG,
                 save_filename=f"{project.get('generator', 'project')}.seedbox.json",
-                file_types=("SeedBoxes 项目 (*.json)", "All files (*.*)"),
+                file_types=("SeedLaser 项目 (*.json)", "All files (*.*)"),
             )
         except Exception as exc:
             return {"error": f"保存对话框失败: {exc}"}
@@ -765,6 +811,7 @@ class Api:
                 json.dump(project, f, ensure_ascii=False, indent=2)
         except Exception as exc:
             return {"error": f"保存失败：{exc}"}
+        _remember_recent(picked, project)
         return {"path": picked}
 
     def open_project(self) -> dict[str, Any]:
@@ -775,7 +822,7 @@ class Api:
             _fd = getattr(webview, "FileDialog", None)
             picked = self._window.create_file_dialog(
                 _fd.OPEN if _fd else webview.OPEN_DIALOG,
-                file_types=("SeedBoxes 项目 (*.json)", "All files (*.*)"),
+                file_types=("SeedLaser 项目 (*.json)", "All files (*.*)"),
             )
         except Exception as exc:
             return {"error": f"打开对话框失败: {exc}"}
@@ -783,17 +830,34 @@ class Api:
             return {"cancelled": True}
         if isinstance(picked, (list, tuple)):
             picked = picked[0]
+        return self.open_project_path(picked)
+
+    def open_project_path(self, path: str) -> dict[str, Any]:
+        """按路径打开项目（主页「最近项目」用）。SeedBoxes 时期保存的项目照样能打开。"""
+        import json
         try:
-            with open(picked, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
+        except FileNotFoundError:
+            _forget_recent(path)
+            return {"error": "文件不在了（可能被移动或删除），已从最近项目里去掉"}
         except Exception as exc:
             return {"error": f"无法读取项目文件：{exc}"}
-        if not isinstance(data, dict) or data.get("app") != "SeedBoxes":
-            return {"error": "这不是 SeedBoxes 项目文件"}
+        if not isinstance(data, dict) or data.get("app") not in ("SeedLaser", "SeedBoxes"):
+            return {"error": "这不是 SeedLaser 项目文件"}
         _init_generators()
         if data.get("generator") not in _GENERATORS:
             return {"error": f"项目使用的生成器「{data.get('generator')}」不存在"}
-        return {"project": data, "path": picked}
+        _remember_recent(path, data)
+        return {"project": data, "path": path}
+
+    def recent_projects(self) -> list[dict[str, Any]]:
+        """主页「最近项目」：最近打开 / 保存过的项目，最新的在前。"""
+        out = []
+        for r in _load_recent():
+            p = r.get("path", "")
+            out.append({**r, "exists": bool(p) and os.path.exists(p)})
+        return out
 
     def save(self, name: str, params: dict[str, Any], fmt: str,
              project: dict[str, Any] | None = None, laser: dict[str, Any] | None = None) -> dict[str, Any]:
