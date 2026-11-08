@@ -543,7 +543,7 @@ export class SketchEditor {
     if (it.paths.length === 1) item = mk(it.paths[0]);
     else { item = new ps.CompoundPath({ insert: false }); item.addChildren(it.paths.map(mk)); }
     item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked, lock: !!it.lock, hidden: !!it.hidden, dim: it.dim ? JSON.parse(JSON.stringify(it.dim)) : null,
-                  text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null,
+                  text: it.text ? { ...it.text } : null, code: it.code ? { ...it.code } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null,
                   group: it.group || null, pid: it.pid || null, origin: it.origin ? [...it.origin] : null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
     this.content.addChild(item);
     this.style(item);
@@ -566,6 +566,7 @@ export class SketchEditor {
     if (item.data.hidden) out.hidden = true;          // 用户隐藏（不显示、不选，仍导出）
     if (item.data.dim) out.dim = JSON.parse(JSON.stringify(item.data.dim));   // 尺寸标注：引用的图形 / 节点 + 引出距离
     if (item.data.text) out.text = { ...item.data.text };
+    if (item.data.code) out.code = { ...item.data.code };            // 二维码 / 条形码：内容和尺寸（可重新生成）
     if (item.data.group) out.group = item.data.group;
     if (item.data.pid) out.pid = item.data.pid;
     if (item.data.origin) out.origin = item.data.origin.map(r3);
@@ -2203,8 +2204,13 @@ export class SketchEditor {
       this.drag = { kind: 'shape', from: this.snap(pt), alt: ev.altKey };
       return;
     }
-    if (t === 'text') return this.placeText(this.snap(pt));
-    if (t === 'trim') { this.drag = { kind: 'trim', changed: false }; this.trimAt(pt); return; }
+    if (t === 'text') return (this.opts.textKind === 'qr' || this.opts.textKind === 'bar') ? this.placeCode(this.snap(pt)) : this.placeText(this.snap(pt));
+    if (t === 'trim') {
+      const tm = this.opts.trimMode || 'trim';
+      if (tm === 'break') { this.breakAt(pt); return; }
+      if (tm === 'erase') { this.drag = { kind: 'erase', changed: this.eraseAt(pt), last: pt }; this.drawBoard(); return; }
+      this.drag = { kind: 'trim', changed: false }; this.trimAt(pt); return;
+    }
     if (t === 'joint') { this.jointAt(pt); return; }
     if (t === 'bridge') { this.bridgeAt(pt); return; }
     if (t === 'mortise') {
@@ -2258,6 +2264,15 @@ export class SketchEditor {
     else if (d.kind === 'node') this.nodeDrag(d, pt, ev);
     else if (d.kind === 'penHandle') this.penHandleDrag(d, pt);
     else if (d.kind === 'trim') this.trimAt(pt);
+    else if (d.kind === 'erase') {
+      const w = Math.max(0.2, Number(this.opts.eraseW) || 2);
+      // 沿拖动轨迹每隔半个擦除宽度擦一次（只擦真的点在线上的地方，擦出的缺口两端不会被再擦）
+      const n = Math.max(1, Math.ceil(pt.getDistance(d.last) / (w / 2)));
+      for (let i = 1; i <= n; i++) if (this.eraseAt(d.last.add(pt.subtract(d.last).multiply(i / n)))) d.changed = true;
+      d.last = pt;
+      this.eraseHover(pt);
+      this.drawBoard();
+    }
     else if (d.kind === 'measure') { if (this.dragStarted(d, ev)) this.measureDrag(d, this.snap(pt), ev); }
     else if (d.kind === 'mortise') {
       let p = this.snap(pt);
@@ -2311,6 +2326,7 @@ export class SketchEditor {
     } else if (d.kind === 'shape') this.shapeFinish(d);
     else if (d.kind === 'penHandle') { /* 点已加入 */ }
     else if (d.kind === 'trim') { if (d.changed) this.commit('已修剪'); }
+    else if (d.kind === 'erase') { if (d.changed) this.commit('已擦除'); else this.status('没擦到线：橡皮擦要从线上拖过'); }
     else if (d.kind === 'measure') { if (d.live && d.last) { this.meas.a = null; this.showMeasurePP(d.from, d.last); } }
     else if (d.kind === 'mortise') { if (this.rubber) { this.rubber.remove(); this.rubber = null; } if (d.to) this.placeMortise(d.from, d.to); }
     this.showSnap(null);
@@ -2320,7 +2336,7 @@ export class SketchEditor {
     this.showCoords(e.point);
     if (this.tool === 'select' && !this.pickCenter) this.hoverCursor(e.point);
     if (this.tool === 'line' || this.tool === 'pen') this.pathHover(e.point, e.event);
-    else if (this.tool === 'trim') this.trimHover(e.point);
+    else if (this.tool === 'trim') { const tm = this.opts.trimMode || 'trim'; if (tm === 'erase') this.eraseHover(e.point); else if (tm === 'break') this.breakHover(e.point); else this.trimHover(e.point); }
     else if (this.tool === 'joint') this.jointHover(e.point);
     else if (this.tool === 'dim') this.dimHover(e.point);
     else if (this.tool === 'mortise' && this.opts.jointPeer && this.opts.jointPeer.type === 'a') {
@@ -3111,6 +3127,102 @@ export class SketchEditor {
     }
     if (this.drag && this.drag.kind === 'trim') this.drag.changed = true; else this.commit('已修剪');
     this.drawBoard();
+  }
+
+  // ---------------------------------------------------------------- 打断 / 橡皮擦（C7：修剪工具的另外两种方式）
+
+  // 点击处最近的线：{ path, owner, offset }（要真的点在线上）
+  pathAtPoint(pt, tolPx = 6) {
+    const res = this.strokeAt(pt, tolPx / this.zoom, (h) => { const it = this.topItem(h.item); return it && this.selectable(it) && !it.data.drawing && it.data.mode !== 'dim'; });
+    if (!res || !res.location) return null;
+    const path = res.location.path || res.item;
+    if (!path || path.className !== 'Path') return null;
+    const loc = path.getNearestLocation(pt);
+    return { path, owner: this.topItem(path), offset: loc.offset, point: loc.point };
+  }
+
+  // 开放路径 split 出来的尾段：独立图形时变成一个新图形（编组、图层跟原来的一样）
+  adoptTail(owner, path, tail) {
+    if (!tail || owner !== path) return tail;
+    const it = this.addItem({ mode: owner.data.mode, group: owner.data.group, paths: [] });
+    it.remove();
+    tail.remove();
+    tail.data = { ...it.data };
+    this.content.addChild(tail);
+    this.style(tail);
+    return tail;
+  }
+
+  // 打断：在点击处把线断开。闭合图形变成开放的（起点 = 终点 = 断点）；开放的线断成两个图形
+  breakAt(pt) {
+    const h = this.pathAtPoint(pt);
+    if (!h) { this.status('请点在线上'); return false; }
+    const { path, owner } = h;
+    const L = path.length;
+    // 断点吸附（网格 / 端点 / 中点）：吸附点投影回这条线上，离得不远才用
+    const sp = this.snap(pt);
+    const sl = path.getNearestLocation(sp);
+    if (sl && sl.point.getDistance(sp) < 6 / this.zoom) { h.offset = sl.offset; h.point = sl.point; }
+    if (owner.data.text) this.convertText(owner);
+    if (path.closed) {
+      path.splitAt(h.offset);
+      if (owner.data.role === 'outline') owner.data.role = null;
+      if (owner.data.joints) owner.data.joints = null;
+      this.commit('已打断：闭合图形变成了开放的线（不再是一块板，切出来是一条缝）');
+      return true;
+    }
+    if (h.offset < 1e-3 || h.offset > L - 1e-3) { this.status('点在线的端点上，不用打断'); return false; }
+    const tail = path.splitAt(h.offset);
+    this.adoptTail(owner, path, tail);
+    this.commit(`已打断：分成 ${fmt(h.offset)} mm 和 ${fmt(L - h.offset)} mm 两段`);
+    return true;
+  }
+
+  // 橡皮擦：以点击处为中心，沿线擦掉「擦除宽度」那么长的一段（不提交，拖动结束时一起提交）
+  eraseAt(pt) {
+    const h = this.pathAtPoint(pt, 4);
+    if (!h) return false;
+    const { path, owner } = h;
+    const w = Math.max(0.2, Number(this.opts.eraseW) || 2);
+    const L = path.length;
+    if (owner.data.text) this.convertText(owner);
+    if (owner.data.role === 'outline' && path.closed) owner.data.role = null;
+    const drop = () => { if (owner === path || owner.children.length <= 1) { owner.remove(); this.sel.delete(owner); } else path.remove(); };
+    if (L <= w + 1e-6) { drop(); return true; }
+    if (path.closed) {
+      path.splitAt((h.offset + w / 2) % L);                   // 打开：起点在擦除段的末端
+      const piece = path.splitAt(L - w);                     // 最后 w 长的一段就是要擦掉的
+      if (piece) piece.remove();
+      if (owner.data.joints) owner.data.joints = null;
+      return true;
+    }
+    const a = h.offset - w / 2, b = h.offset + w / 2;
+    if (a <= 1e-6 && b >= L - 1e-6) { drop(); return true; }
+    const tail = b < L - 1e-6 ? path.splitAt(b) : null;
+    if (a > 1e-6) { const mid = path.splitAt(a); if (mid) mid.remove(); } else { path.remove(); if (owner === path) { this.sel.delete(owner); } }
+    if (tail) {
+      if (owner === path && a <= 1e-6) {                     // 前段整个擦掉了：尾段直接接替原来的图形
+        tail.remove(); tail.data = { ...owner.data }; this.content.addChild(tail); this.style(tail);
+      } else this.adoptTail(owner, path, tail);
+    }
+    return true;
+  }
+
+  eraseHover(pt) {
+    if (this.rubber) { this.rubber.remove(); this.rubber = null; }
+    const w = Math.max(0.2, Number(this.opts.eraseW) || 2);
+    this.rubber = new this.ps.Path.Circle({ center: pt, radius: w / 2, parent: this.overlay, strokeColor: '#f97316', strokeWidth: 1.5, strokeScaling: false, dashArray: [3, 2] });
+  }
+
+  breakHover(pt) {
+    if (this.rubber) { this.rubber.remove(); this.rubber = null; }
+    const h = this.pathAtPoint(pt);
+    if (!h) return;
+    const g = new this.ps.Group({ parent: this.overlay });
+    const r = 5 / this.zoom;
+    g.addChild(new this.ps.Path.Line({ from: h.point.add([-r, -r]), to: h.point.add([r, r]), strokeColor: '#f97316', strokeWidth: 2, strokeScaling: false }));
+    g.addChild(new this.ps.Path.Line({ from: h.point.add([-r, r]), to: h.point.add([r, -r]), strokeColor: '#f97316', strokeWidth: 2, strokeScaling: false }));
+    this.rubber = g;
   }
 
   // ---------------------------------------------------------------- 卡榫
@@ -4107,6 +4219,69 @@ export class SketchEditor {
     this.commit(label);
     this.status(label);
     return { items: made.length };
+  }
+
+  // ---------------------------------------------------------------- 二维码 / 条形码（C6）
+  // 文字工具右侧切到「二维码」「条形码」：单击放置（雕刻层）；选中后可以改内容 / 尺寸（重新生成，位置不变）
+
+  codeOpts() {
+    const o = this.opts;
+    if (!o.code) o.code = { qr: { text: 'https://github.com/makerseed201808/SeedLaser', size: 30 }, bar: { text: 'SeedLaser-01', size: 50, h: 15 } };
+    return o.code;
+  }
+
+  async buildCode(c, at, replace) {
+    const r = await this.api.code_paths(c.kind, c.text, Number(c.size), c.kind === 'bar' ? Number(c.h) || null : null, 'M');
+    if (!r || r.error) { this.toast((r && r.error) || '生成失败', 'error'); return null; }
+    const it = this.addItem({ mode: replace ? replace.data.mode : 'engrave', code: { kind: c.kind, text: c.text, size: Number(c.size), ...(c.kind === 'bar' ? { h: r.h } : {}) },
+      paths: r.polys.map((p) => this.polyPath(p.map(([x, y]) => [x + at.x, y + at.y]), true)), group: replace ? replace.data.group : undefined });
+    if (replace) { it.data.id = replace.data.id; it.insertAbove(replace); replace.remove(); }
+    return it;
+  }
+
+  async placeCode(pt) {
+    const kind = this.opts.textKind;
+    const c = { kind, ...this.codeOpts()[kind] };
+    const it = await this.buildCode(c, pt);
+    if (!it) return;
+    this.setTool('select');                                  // 先换回选择工具，再提交（状态栏留着「已添加」）
+    this.sel = new Set([it]);
+    this.commit(kind === 'qr' ? `已添加二维码（${fmt(c.size)} × ${fmt(c.size)} mm）` : `已添加条形码（宽 ${fmt(c.size)} mm）`);
+  }
+
+  codeHtml(codeSel) {
+    const kind = codeSel ? codeSel.data.code.kind : this.opts.textKind;
+    const src = codeSel ? codeSel.data.code : this.codeOpts()[kind];
+    const name = kind === 'qr' ? '二维码' : '条形码';
+    return `<h4>${codeSel ? '修改' + name : name}</h4>
+      <div class="sk-row"><textarea class="sk-wide" rows="2" data-cd="text" placeholder="${kind === 'qr' ? '网址或文字（中文也可以）' : '英文字母、数字、符号'}">${escAttr(src.text)}</textarea></div>
+      <div class="sk-row"><label>${kind === 'qr' ? '边长' : '宽度'}<input data-cd="size" type="number" min="5" step="1" value="${fmt(src.size)}"> mm</label>
+        ${kind === 'bar' ? `<label>条高<input data-cd="h" type="number" min="3" step="1" value="${fmt(src.h || 15)}"> mm</label>` : ''}</div>
+      ${codeSel ? '<div class="sk-row"><button data-cd-apply class="sk-chip-btn">重新生成</button></div>' : ''}
+      <p class="sk-small">${kind === 'qr' ? '雕刻在浅色木板上最好扫；每一格至少 0.8 mm（内容越长格子越多），四周留白至少 4 格。' : 'Code 128。每一条至少 0.3 mm 宽，左右留白至少 10 条宽。只能用英文、数字和常见符号。'}
+        ${codeSel ? '' : '在板上单击放置。'}</p>`;
+  }
+
+  bindCode(box, codeSel) {
+    const kind = codeSel ? codeSel.data.code.kind : this.opts.textKind;
+    box.querySelectorAll('[data-cd]').forEach((inp) => {
+      inp.addEventListener('change', () => {
+        if (codeSel) return;                                   // 选中的码：点「重新生成」才改
+        const v = inp.dataset.cd === 'text' ? inp.value : Number(inp.value);
+        this.codeOpts()[kind][inp.dataset.cd] = v;
+      });
+      inp.addEventListener('keydown', (ev) => ev.stopPropagation());
+    });
+    const ap = box.querySelector('[data-cd-apply]');
+    if (ap) ap.addEventListener('click', async () => {
+      const get = (k) => { const el = box.querySelector(`[data-cd=${k}]`); return el ? el.value : null; };
+      const c = { kind, text: get('text'), size: Number(get('size')), h: Number(get('h')) || null };
+      const at = codeSel.bounds.center;
+      const it = await this.buildCode(c, at, codeSel);
+      if (!it) return;
+      this.sel = new Set([it]);
+      this.commit(`已重新生成${kind === 'qr' ? '二维码' : '条形码'}`);
+    });
   }
 
   // ---------------------------------------------------------------- 测量
@@ -5403,25 +5578,30 @@ export class SketchEditor {
     const box = this.$('.sk-toolopts');
     // 正在输入的框（比如修改文字）还没提交就要被重画：先让它失焦，触发 change 把内容应用上
     const focused = box.querySelector(':focus');
-    if (focused && focused.dataset.o) focused.blur();
+    if (focused && (focused.dataset.o || focused.dataset.cd)) focused.blur();
     const t = this.tool;
     if (t === 'lib') { delete box.dataset.make; this.renderLib(box); return; }
     if (t === 'make') { delete box.dataset.lib; this.renderMake(box); return; }
     delete box.dataset.lib;
     delete box.dataset.make;
     const textSel = this.sel.size === 1 && [...this.sel][0].data.text ? [...this.sel][0] : null;
+    const codeSel = this.sel.size === 1 && [...this.sel][0].data.code ? [...this.sel][0] : null;
+    const kindSeg = t === 'text' && !textSel && !codeSel ? `<div class="sk-seg sk-textkind">${[['text', '文字'], ['qr', '二维码'], ['bar', '条形码']].map(([k, n]) =>
+      `<button data-tk="${k}" class="${(this.opts.textKind || 'text') === k ? 'on' : ''}">${n}</button>`).join('')}</div>` : '';
     let html = '';
     if (t === 'rect') html = `<h4>矩形</h4><div class="sk-row"><label>圆角半径<input data-o="radius" type="number" min="0" step="0.5" value="${this.opts.radius}"> mm</label></div>`;
     else if (t === 'polygon') {
       html = `<h4>多边形 / 星形</h4><div class="sk-row"><label>${this.opts.star ? '角数' : '边数'}<input data-o="sides" type="number" min="3" max="64" value="${this.opts.sides}"></label>
         <label class="sk-check"><input data-o="star" type="checkbox" ${this.opts.star ? 'checked' : ''}>星形</label></div>` +
         (this.opts.star ? `<div class="sk-row"><label>内外径比<input data-o="starRatio" type="number" min="0.1" max="0.95" step="0.05" value="${this.opts.starRatio}"></label></div>` : '');
+    } else if (codeSel || (t === 'text' && (this.opts.textKind === 'qr' || this.opts.textKind === 'bar'))) {
+      html = kindSeg + this.codeHtml(codeSel);
     } else if (t === 'text' || textSel) {
       const o = this.opts;
       const src = textSel ? textSel.data.text : this.textParams({});
       const layout = src.path ? 'path' : src.arc ? 'arc' : 'line';
       const fonts = (this.fonts || []).map((f) => `<option value="${f.id}" ${f.id === src.font ? 'selected' : ''}>${f.name}</option>`).join('');
-      html = `<h4>${textSel ? '修改文字' : '文字'}</h4>
+      html = kindSeg + `<h4>${textSel ? '修改文字' : '文字'}</h4>
         <div class="sk-row"><textarea class="sk-wide" rows="2" data-o="text" placeholder="可以换行">${escAttr(src.text)}</textarea></div>
         <div class="sk-row"><label>字体<select data-o="font">${fonts}</select></label></div>
         <div class="sk-row"><label>字高<input data-o="size" type="number" min="1" step="0.5" value="${src.size}"> mm</label>
@@ -5490,11 +5670,31 @@ export class SketchEditor {
       html = `<h4>测量</h4><div class="sk-seg">${[['pp', '点到点'], ['pl', '点到线'], ['ll', '线到线'], ['cc', '圆']].map(([k, n]) =>
         `<button data-mm="${k}" class="${mm === k ? 'on' : ''}">${n}</button>`).join('')}</div>
         <p class="sk-small">${tips[mm]}</p><div class="sk-meas-result sk-small">${this.meas && this.meas.has ? this.$('.sk-measure').innerHTML : '还没有测量结果'}</div>`;
-    } else if (t === 'trim') html = '<h4>修剪</h4><p class="sk-small">鼠标移到线上会标红将被删掉的一段（到最近的交点为止），单击或拖过即删除。没有交点的整条路径会被整个删掉。</p>';
+    } else if (t === 'trim') {
+      const tm = this.opts.trimMode || 'trim';
+      const tips = { trim: '鼠标移到线上会标出将被删掉的一段（到最近的交点为止），单击或拖过即删除。没有交点的整条路径会被整个删掉。',
+        break: '在线上单击，把线在这一点断开：开放的线变成两段（两个图形）；闭合图形变成开放的线（不再是一块板）。',
+        erase: '从线上拖过去，擦掉经过的地方；每次擦掉的长度 = 擦除宽度。闭合图形擦一下就变成开放的线。' };
+      html = `<h4>修剪</h4><div class="sk-seg">${[['trim', '修剪'], ['break', '打断'], ['erase', '橡皮擦']].map(([k, n]) => `<button data-trm="${k}" class="${tm === k ? 'on' : ''}">${n}</button>`).join('')}</div>` +
+        (tm === 'erase' ? `<div class="sk-row"><label>擦除宽度<input data-o="eraseW" type="number" min="0.2" step="0.5" value="${this.opts.eraseW || 2}"> mm</label></div>` : '') +
+        `<p class="sk-small">${tips[tm]}</p>`;
+    }
     if ((t === 'joint' || t === 'mortise') && !this.findEdit()) html = this.staleJointsHtml() + html;
     box.innerHTML = html;
     box.classList.toggle('hidden', !html);
     this.bindRedoJoints(box);
+    box.querySelectorAll('[data-tk]').forEach((b) => b.addEventListener('click', () => {
+      this.opts.textKind = b.dataset.tk;
+      this.renderToolOpts();
+      this.status(b.dataset.tk === 'text' ? '文字：在板上单击放置' : `${b.dataset.tk === 'qr' ? '二维码' : '条形码'}：右侧填内容和尺寸，在板上单击放置（雕刻）`);
+    }));
+    if (box.querySelector('[data-cd]')) this.bindCode(box, codeSel);
+    box.querySelectorAll('[data-trm]').forEach((b) => b.addEventListener('click', () => {
+      this.opts.trimMode = b.dataset.trm;
+      if (this.rubber) { this.rubber.remove(); this.rubber = null; }
+      this.renderToolOpts();
+      this.status({ trim: '修剪：单击或拖过线段，删掉两个交点之间的那一段', break: '打断：在线上单击，把线断开', erase: '橡皮擦：从线上拖过去擦掉一段' }[b.dataset.trm]);
+    }));
     box.querySelectorAll('[data-peer]').forEach((b) => b.addEventListener('click', () => this.pickPeer(Number(b.dataset.peer))));
     box.querySelectorAll('[data-o-btn=pickpath]').forEach((b) => b.addEventListener('click', () => {
       if (!textSel) return;

@@ -843,6 +843,16 @@ class Api:
         return {"placed": [{"id": k, "sheet": si, "x": x, "y": y, "rot": bool(rot)} for k, si, x, y, rot in placed],
                 "sheets": n, "too_big": list(too_big)}
 
+    def code_paths(self, kind: str, text: str, size: float, height: float | None = None, ec: str = "M") -> dict[str, Any]:
+        """二维画板：二维码（kind='qr'，size = 边长）/ Code 128 条形码（kind='bar'，size = 宽度）→ 轮廓（mm，以原点为中心）."""
+        try:
+            import codes2d
+            return codes2d.code_paths(kind, str(text or ""), float(size), float(height) if height else None, ec or "M")
+        except ValueError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:
+            return {"error": f"生成失败：{exc}"}
+
     def lib_list(self) -> dict[str, Any]:
         """「我的图库」里的图形：[{name, file, items}]，按修改时间新的在前."""
         d = library_dir()

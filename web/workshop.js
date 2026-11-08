@@ -2410,6 +2410,8 @@ async function nameplateDialog() {
       <label>文字<select data-n="mode"><option value="engrave" ${o.mode === 'engrave' ? 'selected' : ''}>雕刻</option>
         <option value="cut" ${o.mode === 'cut' ? 'selected' : ''}>镂空切割（自动焊接笔画）</option><option value="score" ${o.mode === 'score' ? 'selected' : ''}>描线</option></select></label>
       <label><input data-n="border" type="checkbox" ${o.border ? 'checked' : ''}>内圈装饰边框（描线）</label>
+      <label><input data-n="qr" type="checkbox" ${o.qr ? 'checked' : ''}>右边加二维码（雕刻）</label>
+      <label>二维码内容<input data-n="qrText" type="text" value="${(o.qrText || '{名字}').replace(/"/g, '&quot;')}" title="{名字} 会换成每一行的名字，比如 https://example.com/?n={名字}"></label>
     </div>
     <div class="app-modal-actions"><button data-m="close">取消</button><button data-m="ok" class="primary">生成名牌</button></div></div>`;
   m.classList.remove('hidden');
@@ -2419,7 +2421,8 @@ async function nameplateDialog() {
     const names = v('names').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
     if (!names.length) { toast('先输入名字（每行一个）', 'error'); return; }
     const opt = { w: Number(v('w').value) || 80, h: Number(v('h').value) || 28, r: Number(v('r').value) || 0, hole: v('hole').checked,
-      holeD: Number(v('holeD').value) || 4, size: Number(v('size').value) || 12, font: v('font').value, mode: v('mode').value, border: v('border').checked };
+      holeD: Number(v('holeD').value) || 4, size: Number(v('size').value) || 12, font: v('font').value, mode: v('mode').value, border: v('border').checked,
+      qr: v('qr').checked, qrText: v('qrText').value || '{名字}' };
     W.namesOpts = opt;
     W.namesText = v('names').value;
     const btn = m.querySelector('[data-m=ok]');
@@ -2428,7 +2431,9 @@ async function nameplateDialog() {
     const parts = freeParts();
     const holeR = opt.holeD / 2;
     const left = opt.hole ? holeR * 2 + 4 + 2 : 4;          // 挂孔占掉的宽度
-    const avail = opt.w - left - 4;
+    const qrS = opt.qr ? Math.max(8, opt.h - 6) : 0;          // 二维码边长：板高减上下各 3 mm
+    const avail = opt.w - left - 4 - (opt.qr ? qrS + 3 : 0);
+    if (avail < 8) { toast('名牌太窄，放不下文字和二维码：加宽一点或去掉二维码', 'error'); return; }
     let done = 0;
     for (const name of names) {
       let size = opt.size;
@@ -2448,6 +2453,14 @@ async function nameplateDialog() {
       }
       items.push({ id: 'text', mode: opt.mode, text: { ...params, size, x: cx, y: cy, spacing: 0, lineHeight: 1.25, align: 'center', arc: 0 },
         paths: r.polys.map((p) => ({ closed: true, segs: p.map(([x, y]) => [x + cx, y + cy, 0, 0, 0, 0]) })) });
+      if (opt.qr) {
+        const content = opt.qrText.replace(/\{名字\}/g, name);
+        const q = await api().code_paths('qr', content, qrS);
+        if (q.error) { toast(q.error, 'error'); break; }
+        const qx = opt.w - 3 - qrS / 2;
+        items.push({ id: 'qr', mode: 'engrave', code: { kind: 'qr', text: content, size: qrS },
+          paths: q.polys.map((p) => ({ closed: true, segs: p.map(([x, y]) => [x + qx, y + cy, 0, 0, 0, 0]) })) });
+      }
       const id = 'p' + Date.now().toString(36) + (uidCounter++).toString(36);
       parts.push({ id, name, w: opt.w, h: opt.h });
       W.project.sketches[id] = { items };
@@ -3060,7 +3073,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, freeAutoAssemble, connStates, teeCandidates, teeSlots, checkPose: () => checkPose(), get connState() { return W.connStates; }, openSheet, setStage, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
+    SF, sfCommand, sfSync, freeAutoAssemble, connStates, teeCandidates, teeSlots, checkPose: () => checkPose(), get connState() { return W.connStates; }, openSheet, setStage, fitTestDialog, nameplateDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);

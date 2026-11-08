@@ -120,6 +120,8 @@ hiddenimports = list({
     'model3d',
     'sketch2d',
     'freedesign',
+    'dxfout',
+    'codes2d',
     # 关键子模块（boxes/__init__.py 直接 import 的）
     'shapely',
     'shapely.geometry',
