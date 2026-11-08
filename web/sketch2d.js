@@ -141,9 +141,8 @@ export class SketchEditor {
         </div>
         <div class="sk-group sk-bargrp" title="旋转与镜像（也可以拖动图形上方的蓝点旋转）">
           <span class="sk-glabel">旋转</span>
-          <span class="sk-seg2"><button class="sk-ico" data-act="rotL" data-needsel title="左转 90°（逆时针）">${barIcon('rotL')}</button><button class="sk-ico" data-act="rotR" data-needsel title="右转 90°（顺时针）">${barIcon('rotR')}</button></span>
+          <span class="sk-seg2"><button class="sk-ico" data-act="rotL" data-needsel title="左转 90°（逆时针）">${barIcon('rotL')}</button><button class="sk-ico" data-rotask data-needsel title="输入任意角度">${barIcon('angle')}</button><button class="sk-ico" data-act="rotR" data-needsel title="右转 90°（顺时针）">${barIcon('rotR')}</button></span>
           <span class="sk-seg2"><button class="sk-ico" data-act="flipH" data-needsel title="水平镜像（左右翻转）">${barIcon('flipH')}</button><button class="sk-ico" data-act="flipV" data-needsel title="垂直镜像（上下翻转）">${barIcon('flipV')}</button></span>
-          <button class="sk-ico" data-rotask data-needsel title="输入任意角度">${barIcon('angle')}</button>
         </div>
         <div class="sk-group" title="视图">
           <button class="sk-ico" data-act="fit" title="适合窗口：显示整块材料（F）">${barIcon('fit')}</button>
