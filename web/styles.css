@@ -1347,3 +1347,7 @@ input, textarea, select { font: inherit; user-select: text; }
 /* 按 3D 摆放开插槽（B6）的确认框 */
 .tee-ask > div { width: 420px; }
 .tee-ask ul { margin: 0 0 14px; padding-left: 18px; font-size: 13px; line-height: 1.7; }
+
+/* 上下文栏里的按钮式 chip（自动排版） */
+.sk-host button.sk-chip-btn { cursor: pointer; border: 1px solid #93c5fd; background: #eff6ff; color: #1d4ed8; font: inherit; font-size: 12px; }
+.sk-host button.sk-chip-btn:hover { background: #dbeafe; }

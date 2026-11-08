@@ -819,6 +819,16 @@ class Api:
         except Exception as exc:
             return {"error": f"3D 编辑器启动失败：{exc}"}
 
+    def nest_rects(self, rects: list, sheet_w: float, sheet_h: float, gap: float = 2.0) -> dict[str, Any]:
+        """二维画板「自动排版」：rects = [{id, w, h}] → {placed: [{id, sheet, x, y, rot}], sheets, too_big: [id]}（和加工作业的排料同一个算法）."""
+        try:
+            items = [(str(r["id"]), float(r["w"]), float(r["h"])) for r in rects]
+            placed, n, too_big = freedesign.nest_rects(items, float(sheet_w), float(sheet_h), max(0.0, float(gap)))
+        except Exception as exc:
+            return {"error": f"排版失败：{exc}"}
+        return {"placed": [{"id": k, "sheet": si, "x": x, "y": y, "rot": bool(rot)} for k, si, x, y, rot in placed],
+                "sheets": n, "too_big": list(too_big)}
+
     def sketch_offset(self, paths: list[dict[str, Any]], distance: float, join: str = "round") -> dict[str, Any]:
         """二维草图：轮廓偏移（外扩 / 内缩）."""
         try:

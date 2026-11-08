@@ -754,7 +754,8 @@ export class SketchEditor {
       : id === 'edit'
       ? it('undo', '撤销', K('Z')) + it('redo', '重做', K('Z', true)) + '<hr>' +
         it('copy', '复制', K('C'), !n) + it('paste', '粘贴', K('V')) + it('dup', '复制一份', K('D'), !n) + it('delete', '删除', 'Delete', !n) + '<hr>' +
-        it('selectAll', '全选', K('A')) + it('group', '编组', K('G'), n < 2) + it('ungroup', '取消编组', K('G', true), !n)
+        it('selectAll', '全选', K('A')) + it('group', '编组', K('G'), n < 2) + it('ungroup', '取消编组', K('G', true), !n) +
+        (this.sheetMode ? '<hr>' + it('autoLayout', '自动排版（把板件排进材料）', '') : '')
       : it('keys', '快捷键一览', '?') + it('tour', '新手引导');
     const box = document.createElement('div');
     box.className = 'sk-filemenu';
@@ -3647,6 +3648,7 @@ export class SketchEditor {
       dedupe: () => this.dedupeItems(),
       keys: () => this.showKeys(), tour: () => this.startTour(),
       mirCopyH: () => this.mirrorCopy(true), mirCopyV: () => this.mirrorCopy(false),
+      autoLayout: () => this.autoLayout(),
       toggle3d: () => {
         const box = this.$('.sk-3d');
         box.classList.toggle('min');
@@ -4503,11 +4505,57 @@ export class SketchEditor {
     if (this.sheetMode && this.part.sheet) {
       const { parts, loose } = this.recognizeParts();
       html = chip('材料', `${fmt(this.part.sheet.w)} × ${fmt(this.part.sheet.h)} mm`) + chip('板厚', `${fmt(this.part.thickness || 0)} mm`) +
-        chip('板件', `${parts.length} 块`) + (loose.length ? `<span class="sk-chip warn" title="不在任何板里的图形不会导出">⚠ ${loose.length} 个图形不在板里</span>` : '');
+        chip('板件', `${parts.length} 块`) + (loose.length ? `<span class="sk-chip warn" title="不在任何板里的图形不会导出">⚠ ${loose.length} 个图形不在板里</span>` : '') +
+        (parts.length ? `<button class="sk-chip sk-chip-btn" data-act="autoLayout" title="把所有板件（连同上面的孔、雕刻、文字）自动排进材料，互不重叠；一步撤销">⊞ 自动排版</button>` : '');
     } else if (this.part.sub) html = `<span class="sk-chip"><b>${escAttr(this.part.sub)}</b></span>`;
     html += chip('图形', `${this.content.children.filter((c) => c.data && c.data.mode).length} 个`) +
       `<span class="sk-chip" title="新画的图形用这个加工方式（左下角可以换）"><i>新图形</i><b><i class="sk-dot" style="background:${m.color}"></i>${m.name}</b></span>`;
     el.innerHTML = html;
+    const al = el.querySelector('[data-act=autoLayout]');
+    if (al) al.addEventListener('click', () => this.autoLayout());
+  }
+
+  // ---------------------------------------------------------------- 自动排版（C1）
+  // 每块板 = 外轮廓 + 它上面的孔 / 雕刻 / 文字（recognizeParts 的 members），按包围盒排进材料；不在板里的图形不动。
+  async autoLayout() {
+    if (!this.sheetMode || !this.part || !this.part.sheet) return;
+    const { parts } = this.recognizeParts();
+    if (!parts.length) { this.toast('画板上还没有板件（闭合的切割轮廓）', 'error'); return; }
+    const sheet = this.part.sheet;
+    const gap = Math.max(0, Number(this.opts.layoutGap) || 3);
+    const boxes = parts.map((p) => {
+      let b = null;
+      p.members.forEach((m) => { b = b ? b.unite(m.bounds) : m.bounds.clone(); });
+      return { p, b };
+    });
+    let r;
+    try {
+      r = await this.api.nest_rects(boxes.map(({ p, b }) => ({ id: p.item.data.pid, w: b.width, h: b.height })), sheet.w, sheet.h, gap);
+    } catch (e) { r = { error: String(e && e.message || e) }; }
+    if (!r || r.error) { this.toast((r && r.error) || '排版失败', 'error'); return; }
+    const ps = this.ps;
+    let moved = 0;
+    let extra = 0;
+    r.placed.forEach((q) => {
+      const bx = boxes.find((x) => x.p.item.data.pid === q.id);
+      if (!bx) return;
+      const { p, b } = bx;
+      const c = b.center;
+      if (q.rot) p.members.forEach((m) => { this.convertTextIfRotated(m); m.rotate(90, c); });
+      const nb = p.members.reduce((acc, m) => (acc ? acc.unite(m.bounds) : m.bounds.clone()), null);
+      // 排版结果的 y 从 0 开始往上堆；用户看到的原点在材料左上角，所以从顶边往下排（数据 y 向上：顶边 = sheet.h）；第 2 张以后的材料排在右边
+      const ox = q.sheet * (sheet.w + 20);
+      const d = new ps.Point(ox + q.x - nb.left, (sheet.h - q.y - nb.height) - nb.top);
+      if (d.length > 1e-6 || q.rot) { p.members.forEach((m) => m.translate(d)); moved++; }
+      if (q.sheet > 0) extra++;
+    });
+    this.sel.clear();
+    const big = (r.too_big || []).length;
+    let label = `已自动排版 ${moved} 块板（间距 ${fmt(gap)} mm）`;
+    if (extra) label += `；材料放不下，${extra} 块排在材料右边（需要第 ${r.sheets} 张材料）`;
+    if (big) label += `；${big} 块比材料还大，没有动`;
+    this.commit(label);
+    this.toast(label, extra || big ? 'error' : 'success');
   }
 
   // ---------------------------------------------------------------- 对象原点（参考点）

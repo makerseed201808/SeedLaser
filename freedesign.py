@@ -78,13 +78,21 @@ def _part_area(sk: dict) -> float:
 
 def nest(items: list[tuple[dict, dict]], sheet_w: float, sheet_h: float, gap: float):
     """把板件（按包围盒）排进若干张 sheet_w × sheet_h 的材料，允许旋转 90°。
-    返回 (放置列表 [(part, sketch, 第几张, x, y, 是否旋转, 包围盒)], 张数, 放不下的板)。
-    用「天际线左下角」法：每张材料维护一条天际线，挑能放下且最低、最靠左的位置。"""
-    boxes_ = []
+    返回 (放置列表 [(part, sketch, 第几张, x, y, 是否旋转, 包围盒)], 张数, 放不下的板)."""
+    rects = []
     for p, sk in items:
         b = _bounds(sk)
-        boxes_.append((p, sk, b, b[2] - b[0], b[3] - b[1]))
-    boxes_.sort(key=lambda q: max(q[3], q[4]) * min(q[3], q[4]), reverse=True)
+        rects.append(((p, sk, b), b[2] - b[0], b[3] - b[1]))
+    placed, n, too_big = nest_rects(rects, sheet_w, sheet_h, gap)
+    return [(k[0], k[1], si, x, y, rot, k[2]) for k, si, x, y, rot in placed], n, [k[0] for k in too_big]
+
+
+def nest_rects(rects: list, sheet_w: float, sheet_h: float, gap: float):
+    """排矩形：rects = [(key, w, h)] → ([(key, 第几张, x, y, 是否旋转)], 张数, 放不下的 key)。
+    用「天际线左下角」法：每张材料维护一条天际线，挑能放下且最低、最靠左的位置。
+    二维画板的「自动排版」和加工作业的排料都用它。"""
+    boxes_ = [(k, w, h) for k, w, h in rects]
+    boxes_.sort(key=lambda q: max(q[1], q[2]) * min(q[1], q[2]), reverse=True)
     sheets: list[list[list[float]]] = []      # 每张：天际线段 [x, y, 宽]
     placed, too_big = [], []
 
@@ -120,7 +128,7 @@ def nest(items: list[tuple[dict, dict]], sheet_w: float, sheet_h: float, gap: fl
         new.sort(key=lambda q: q[0])
         sky[:] = new
 
-    for p, sk, b, w, h in boxes_:
+    for key, w, h in boxes_:
         gw, gh = w + gap, h + gap
         done = False
         for si, sky in enumerate(sheets + [None]):
@@ -140,11 +148,11 @@ def nest(items: list[tuple[dict, dict]], sheet_w: float, sheet_h: float, gap: fl
             if si == len(sheets):
                 sheets.append(sky)
             put(sky, x, y, ww, hh)
-            placed.append((p, sk, si, x, y, rot, b))
+            placed.append((key, si, x, y, rot))
             done = True
             break
         if not done:
-            too_big.append(p)
+            too_big.append(key)
     return placed, len(sheets), too_big
 
 
