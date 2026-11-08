@@ -57,7 +57,7 @@ SeedLaser 是 [种子创客工坊（MakerSeed）](https://github.com/makerseed) 
 ### ③ 加工作业
 
 - 板件数量、哪些要切，只在这里设置。
-- 导出 **SVG / LightBurn（lbrn2）**；安装 pstoedit / Ghostscript 后还可以导出 **DXF / PDF / GCode / PLT**。
+- 导出 **SVG / DXF / LightBurn（lbrn2）**：DXF 是内置转换（R12，单位 mm，按切割 / 雕刻 / 描线分图层），不需要装别的软件；安装 pstoedit / Ghostscript 后还可以导出 **PDF / GCode / PLT**。
 - 加工参数（速度、功率、遍数）随图纸写出一份说明。
 - **卡榫测试样**：新机器、新材料先切一组，填入卡尺读数，自动算出切缝补偿和插槽间隙。
 
@@ -117,7 +117,7 @@ brew install pstoedit ghostscript                    # macOS
 ```
 
 ```cmd
-winget install --id=Cybernetic.pstoedit             :: Windows：DXF / GCode / PLT
+winget install --id=Cybernetic.pstoedit             :: Windows：GCode / PLT
 winget install --id=ArtifexSoftware.GhostScript     :: Windows：PDF（含 ps2pdf）
 ```
 

@@ -9,7 +9,7 @@
 - 当前版本：v0.2.0 之后（见 `CHANGELOG.md`「未发布」）
 - **A 线清单：全部完成（2026-11-08）**。下一步等你看「待你决定」和「需要你提供 / 核对」，再定新的目标清单
 - 自动运行：**已开启**——每天晚上 21:47（台北时间）在用户的 Mac 上开一个新会话，按本清单做 1~2 条，完成后推送通知（定时任务「SeedLaser A 线自动推进」）
-- 最近一次运行：2026-11-08（手动）**A1 ~ A7 全部完成**。未验证：LaserMaker / LightBurn 里打开核对；Mac 上没有 pstoedit 时不提供 DXF 导出（DXF 只在云端测试环境验证过）；真机上导入带自相交 / 差一点闭合 / 分段线的文件；真机 Mac 上的性能数字和手感。
+- 最近一次运行：2026-11-08（手动）**A1 ~ A7 全部完成**。未验证：LaserMaker / LightBurn 里打开核对；DXF 已改成内置导出，但还没在 LaserMaker / LightBurn 里打开过；真机上导入带自相交 / 差一点闭合 / 分段线的文件；真机 Mac 上的性能数字和手感。
 
 ---
 
@@ -97,7 +97,7 @@
 |---|---|---|---|---|
 | 1 | 导出顺序是先外轮廓、后内孔：外轮廓先切断后零件会松动，再切内孔可能切偏 | test_export「先内后外」检查（修之前失败） | 高 | 已修 2026-11-08（sketch2d.py、freedesign.py 内孔排前面） |
 | 2 | 导出 DXF 报错「渲染失败：'bytes' object cannot be interpreted as an integer」（装了 pstoedit 时才会出现 DXF 选项） | test_export 的 DXF 部分（修之前失败） | 高 | 已修 2026-11-08（backend.py `_as_bytes` 兼容文件对象） |
-| 3 | DXF 格式细节：R12 格式没有单位字段（读的软件要默认按 mm）；全部在 0 图层，只靠颜色区分；外轮廓颜色是 0（BYBLOCK）而不是 7（黑/白）；线宽 0.2 | 用 ezdxf 读导出的 DXF | 待核对 | 未验证：这些来自上游 pstoedit，是否影响 LaserMaker / LightBurn 要真机核对，没有改 |
+| 3 | DXF 格式细节：R12 格式没有单位字段（读的软件要默认按 mm）；全部在 0 图层，只靠颜色区分；外轮廓颜色是 0（BYBLOCK）而不是 7（黑/白）；线宽 0.2 | 用 ezdxf 读导出的 DXF | 待核对 | 已修 2026-11-08（DXF 改成内置导出 dxfout.py：R12 + $INSUNITS = 4（mm）、图层 CUT_OUTER / CUT_INNER / ENGRAVE / SCORE / NOTE、颜色 BYLAYER、外轮廓 ACI 7；不再需要 pstoedit）。仍需真机软件核对 |
 | 4 | 自相交的切割轮廓（8 字形、蝴蝶结）后端只保留一瓣：蝴蝶结板少一半，8 字孔只挖掉一个洞 | test_geometry「蝴蝶结」「8 字形孔」（修之前面积 25 / 9900） | 高 | 已修 2026-11-08（sketch2d.py `_valid` 改用 make_valid） |
 | 5 | 前端：蝴蝶结的面积正负抵消，不算板件（显示「不在板里」，导出会漏掉）；8 字孔在 3D 预览里画错 | geo1、geometry.test「8 字形孔」 | 中 | 已修 2026-11-08（sketch2d.js `splitRing` / `loopArea`） |
 | 6 | 差 0.001 mm 没闭合的路径（导入文件常见）不算板件，也不能做形状运算 | test_geometry「差一点闭合」、geo1 | 中 | 已修 2026-11-08（前后端都按 < 0.01 mm 视为闭合，打开时直接闭合） |
@@ -123,7 +123,7 @@
 
 ## 需要你提供 / 核对（自动化做不了）
 
-- 导出文件在 LaserMaker / LightBurn 里的尺寸核对（A2）：用 `tests/py/test_export.py` 同款设计导出 SVG / DXF，打开后量外轮廓（应为 100.2 mm）、看颜色图层是否分开、DXF 单位是否按 mm 读入
+- 导出文件在 LaserMaker / LightBurn 里的尺寸核对（A2）：DXF 看图层是否分成 CUT_OUTER / CUT_INNER / ENGRAVE / SCORE / NOTE、中文标注是否乱码；用 `tests/py/test_export.py` 同款设计导出 SVG / DXF，打开后量外轮廓（应为 100.2 mm）、看颜色图层是否分开、DXF 单位是否按 mm 读入
 - 学校激光机切的测试样：切缝、实测板厚、卡榫松紧（卡尺读数 + 照片）
 - 真机上的界面和手感
 

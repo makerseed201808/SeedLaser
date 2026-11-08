@@ -66,6 +66,8 @@ cl     :: 应输出 Microsoft (R) C/C++ Optimizing Compiler Version 19.44.xxx
 
 **项目文件（2026-11-08）**：扩展名改为 `.seedlaser`（内容仍是 JSON）。保存 / 另存为 / 标签改名都用新扩展名，默认放「文稿/SeedLaser」；旧版 `.seedbox.json` 照样能打开，「保存」写回原文件不改名。扩展名逻辑集中在 `backend.PROJECT_EXT` / `project_stem()` / `project_dir()`。
 
+**DXF 导出（2026-11-08）**：不走 Boxes 的 pstoedit，`Api.save` 里 fmt == "dxf" 时先渲染 SVG，再用 `dxfout.svg_to_dxf_bytes` 转成 R12（GBK、$INSUNITS = 4、按颜色分图层）。改导出颜色时同步 `dxfout.LAYERS`。
+
 ## 术语表（界面文字统一用这些词）
 
 | 用词 | 意思 / 用法 | 不要再用 |

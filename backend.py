@@ -643,9 +643,9 @@ class Api:
             "plt": "HPGL/PLT", "pdf": "PDF",
         }
         # 实际可用：base 格式总有；pstoedit 系列要 pstoedit；pdf 要 ps2pdf
-        available = list(fm._BASE_FORMATS)
+        available = list(fm._BASE_FORMATS) + ["dxf"]      # DXF 内置转换（dxfout.py），总是可用
         if fm.pstoedit:
-            available += ["dxf", "gcode", "plt"]
+            available += ["gcode", "plt"]
         if fm.ps2pdf:
             available += ["pdf"]
         formats = [{"value": fmt, "label": labels.get(fmt, fmt)} for fmt in available]
@@ -1015,7 +1015,19 @@ class Api:
             return {"error": f"保存对话框失败: {exc}"}
         if not picked:
             return {"cancelled": True}
-        result = self._render(name, params, fmt=fmt, to_file=picked, project=project)
+        if fmt == "dxf":
+            # DXF 用内置转换（SVG → DXF R12，按切割 / 雕刻 / 描线分图层，单位 mm），不依赖 pstoedit
+            result = self._render(name, params, fmt="svg", to_file=None, project=project)
+            if "error" in result:
+                return result
+            try:
+                import dxfout
+                with open(picked, "wb") as f:
+                    f.write(dxfout.svg_to_dxf_bytes(result["svg"]))
+            except Exception as exc:
+                return {"error": f"DXF 导出失败：{exc}"}
+        else:
+            result = self._render(name, params, fmt=fmt, to_file=picked, project=project)
         if "error" in result:
             return result
         out = {"path": picked, "notes": result.get("notes", []) + result.get("warnings", []), "info": result.get("info", [])}

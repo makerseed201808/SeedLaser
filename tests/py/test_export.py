@@ -98,42 +98,58 @@ if os.environ.get('UPDATE_GOLDEN') or not os.path.exists(GOLD):
     json.dump(summary, open(GOLD, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
 assert json.load(open(GOLD, encoding='utf-8')) == json.loads(json.dumps(summary)), (summary, '和 golden 不一致；确认是有意改动后用 UPDATE_GOLDEN=1 重新生成')
 msg = f'SVG：{len(groups)} 组、{len(allp)} 条路径，颜色分层 / 闭合 / 无重复 / 先内后外 / 尺寸 / golden 全部正确'
-# DXF（需要 pstoedit + ezdxf）
-if shutil.which('pstoedit'):
-    try:
-        import ezdxf
-    except ImportError:
-        ezdxf = None
-    dxf_path = os.path.join(tmp, 'free.dxf')
-    api.dev_set_pick(dxf_path)
-    r = api.save('FreeDesign', p['params'], 'dxf', design, None, 'free')
-    assert r.get('path') == dxf_path, r
-    if ezdxf:
-        doc = ezdxf.readfile(dxf_path)
-        ents = list(doc.modelspace())
-        assert ents, 'DXF 里没有图形'
-        # pstoedit 用 ACI 颜色区分：0/7 黑=外轮廓，5 蓝=内孔，3 绿=雕刻，6 品红=描线，1 红=标注
-        ACI = {0: 'outer', 7: 'outer', 5: 'inner', 3: 'engrave', 6: 'score', 1: 'note'}
-        dcount = {}
-        douters = []
-        for e in ents:
-            if e.dxftype() != 'POLYLINE':
-                continue
-            kind = ACI.get(e.dxf.color, f'aci{e.dxf.color}')
-            dcount[kind] = dcount.get(kind, 0) + 1
-            pts = [v.dxf.location for v in e.vertices]
-            if kind != 'score':
-                assert e.is_closed or (abs(pts[0][0] - pts[-1][0]) < 1e-3 and abs(pts[0][1] - pts[-1][1]) < 1e-3), f'DXF 有没闭合的{kind}'
-            if kind == 'outer':
-                xs = [q[0] for q in pts]; ys = [q[1] for q in pts]
-                douters.append((round(max(xs) - min(xs), 2), round(max(ys) - min(ys), 2)))
-        assert dcount == summary['counts'], f'DXF 颜色分层和 SVG 不一致：{dcount} vs {summary["counts"]}'
-        big_d = sorted(douters, reverse=True)[:len(summary['outers'])]
-        for a, b in zip(big_d, sorted(map(tuple, summary['outers']), reverse=True)):
-            assert abs(a[0] - b[0]) <= 0.01 and abs(a[1] - b[1]) <= 0.01, f'DXF 外形尺寸 {a} ≠ SVG {b}'
-        msg += f'；DXF：{len(ents)} 个图形，颜色分层 / 闭合 / 尺寸和 SVG 一致'
-    else:
-        msg += '；DXF 已导出（没装 ezdxf，未校验内容）'
+# DXF（内置转换 dxfout.py，不需要 pstoedit）：一律导出；装了 ezdxf（uv sync --extra dev）就读回来校验
+import shutil as _sh  # noqa: E402,F401
+dxf_path = os.path.join(tmp, 'free.dxf')
+api.dev_set_pick(dxf_path)
+r = api.save('FreeDesign', p['params'], 'dxf', design, None, 'free')
+assert r.get('path') == dxf_path and os.path.getsize(dxf_path) > 1000, r
+assert 'dxf' in [f['value'] for f in api.list_formats()['formats']], '没有 pstoedit 也要能选 DXF'
+try:
+    import ezdxf
+except ImportError:
+    ezdxf = None
+if ezdxf:
+    doc = ezdxf.readfile(dxf_path)
+    assert doc.dxfversion == 'AC1009', doc.dxfversion
+    assert doc.header.get('$INSUNITS') == 4, '单位应是 mm'
+    LAY = {'CUT_OUTER': 'outer', 'CUT_INNER': 'inner', 'ENGRAVE': 'engrave', 'SCORE': 'score', 'NOTE': 'note'}
+    aci = {l.dxf.name: l.dxf.color for l in doc.layers}
+    assert aci.get('CUT_OUTER') == 7 and aci.get('CUT_INNER') == 5 and aci.get('ENGRAVE') == 3 and aci.get('SCORE') == 6 and aci.get('NOTE') == 1, aci
+    ents = list(doc.modelspace())
+    dcount = {}
+    douters = []
+    for e in ents:
+        if e.dxftype() not in ('POLYLINE', 'LINE'):
+            continue
+        kind = LAY.get(e.dxf.layer, e.dxf.layer)
+        assert e.dxf.color == 256, '颜色应是 BYLAYER'
+        dcount[kind] = dcount.get(kind, 0) + 1
+        if e.dxftype() == 'LINE':
+            continue
+        pts = [v.dxf.location for v in e.vertices]
+        if kind != 'score':
+            assert e.is_closed, f'DXF 有没闭合的{kind}'
+        if kind == 'outer':
+            xs = [q[0] for q in pts]; ys = [q[1] for q in pts]
+            douters.append((round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3)))
+    assert dcount == summary['counts'], f'DXF 图层和 SVG 不一致：{dcount} vs {summary["counts"]}'
+    big_d = sorted(douters, reverse=True)[:len(summary['outers'])]
+    for a, b in zip(big_d, sorted(map(tuple, summary['outers']), reverse=True)):
+        assert abs(a[0] - b[0]) <= 0.01 and abs(a[1] - b[1]) <= 0.01, f'DXF 外形尺寸 {a} ≠ SVG {b}'
+    # 先内后外：每块板的内孔在外轮廓之前
+    order = [LAY.get(e.dxf.layer) for e in ents if e.dxftype() == 'POLYLINE' and LAY.get(e.dxf.layer) in ('inner', 'outer')]
+    assert order[-1] == 'outer', order
+    msg += f'；DXF（内置 R12）：{len(ents)} 个图形，单位 mm、按图层分开、闭合、尺寸和 SVG 一致'
 else:
-    msg += '；DXF：本机没有 pstoedit，跳过（未验证）'
+    msg += '；DXF 已导出（没装 ezdxf，未校验内容）'
+
+# 快速建模的生成器（ABox，带曲线）也能导出 DXF
+abox = os.path.join(tmp, 'abox.dxf')
+api.dev_set_pick(abox)
+r = api.save('ABox', {}, 'dxf', None, None, 'abox')
+assert r.get('path') == abox and os.path.getsize(abox) > 1000, r
+if ezdxf:
+    d2 = ezdxf.readfile(abox)
+    assert len(list(d2.modelspace())) > 5
 print('PASS test_export：' + msg)

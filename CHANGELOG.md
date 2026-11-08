@@ -4,6 +4,7 @@
 
 ## 未发布（v0.2.0 之后）
 
+- DXF 导出改为内置（`dxfout.py`，SVG → DXF R12）：不再需要 pstoedit，Mac / Windows 都能直接导出；单位 mm，按切割外轮廓 / 内孔 / 雕刻 / 描线 / 标注分图层，中文标注不乱码。新增 test_dxfout。
 - 项目文件扩展名改为 `.seedlaser`（内容仍是 JSON）；保存 / 另存为 / 打开对话框默认在「文稿/SeedLaser」；旧版 `.seedbox.json` 照样能打开、原地保存。
 
 - A7 术语统一：卡扣测试样 → 卡榫测试样、刻字 → 文字、零件 → 板件、板材 → 材料、榫卯结构 → 指接卡榫、蚀刻 → 雕刻；术语表写进 CLAUDE.md；新增 test_terms 防止旧叫法回来。
