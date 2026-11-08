@@ -1505,6 +1505,7 @@ export class SketchEditor {
   // 连接 = 两条带同一个 pair 的卡榫边（数据就在各图形的 data.joints 里，项目文件里本来就有）。
   // 这里只是把它们整理成清单，不另存一份，避免两份数据对不上。
   static edgeSide(j, b) {
+    if (j.type === 'mortise') return '插槽';
     const ax = j.a[0]; const ay = j.a[1]; const bx = j.b[0]; const by = j.b[1];
     const tol = Math.max(0.5, (j.depth || 3) + 0.5);
     if (Math.abs(ay - by) < 1e-6) {
@@ -1538,7 +1539,7 @@ export class SketchEditor {
     const typeName = { a: '指接 A', b: '指接 B', slot: '凹槽', mortise: '插槽' };
     const byPair = new Map();
     ends.forEach((e) => {
-      if (e.j.type === 'mortise') { out.mortises.push({ key: `m:${e.j.id}`, ends: [e], L: e.j.L, k: e.j.k }); return; }
+      if (e.j.type === 'mortise' && !e.j.pair) { out.mortises.push({ key: `m:${e.j.id}`, ends: [e], L: e.j.L, k: e.j.k }); return; }
       if (!e.j.pair) { out.singles.push({ key: `s:${e.j.id}`, ends: [e], L: e.j.L, k: e.j.k, type: typeName[e.j.type] || e.j.type }); return; }
       if (!byPair.has(e.j.pair)) byPair.set(e.j.pair, []);
       byPair.get(e.j.pair).push(e);
@@ -1560,14 +1561,16 @@ export class SketchEditor {
         const sameL = Math.abs(p.j.L - q.j.L) <= 0.3;
         if (!sameL) reasons.push(`两条边不一样长（${fmt(p.j.L)} / ${fmt(q.j.L)} mm），要改板的尺寸`);
         const types = [p.j.type, q.j.type].sort().join('+');
-        if (types !== 'a+b') { reasons.push(`齿不能互补（${typeName[p.j.type] || p.j.type} + ${typeName[q.j.type] || q.j.type}）`); fixes.push('complement'); }
-        else if (sameL && !SketchEditor.sameIv(p.j.iv, q.j.iv, p.j.L)) { reasons.push('齿位对不上（齿数或间隔不一样）'); fixes.push('match'); }
+        const mort = types.includes('mortise');                         // A 边 ↔ 插槽（T 型）：插槽没法自动重做齿，只提示
+        if (types !== 'a+b' && types !== 'a+mortise') { reasons.push(`齿不能互补（${typeName[p.j.type] || p.j.type} + ${typeName[q.j.type] || q.j.type}）`); if (!mort) fixes.push('complement'); }
+        else if (sameL && !SketchEditor.sameIv(p.j.iv, q.j.iv, p.j.L)) { reasons.push(mort ? '插槽的孔和 A 边的齿对不上（齿数或间隔不一样）' : '齿位对不上（齿数或间隔不一样）'); if (!mort) fixes.push('match'); }
         if (p.pid && p.pid === q.pid) { reasons.push('两条边在同一块板上'); fixes.push('unpair'); }
       }
       list.forEach((e) => { const o = own(e); reasons.push(...o.r); fixes.push(...o.f); });
       const s3 = this.conn3d && this.conn3d[pair];                       // B4：3D 拼装检查的结果（workshop 传进来）
       if (s3 && s3.state !== 'ok' && !(s3.state === 'nomate' && reasons.length)) reasons.push(s3.why);   // 拼不上的原因二维已经写了就不重复
-      out.pairs.push({ key: `p:${pair}`, pair, ends: list, L: list[0].j.L, k: list[0].j.k, ok: !reasons.length, reasons, fixes: [...new Set(fixes)] });
+      out.pairs.push({ key: `p:${pair}`, pair, ends: list, L: list[0].j.L, k: list[0].j.k, ok: !reasons.length, reasons, fixes: [...new Set(fixes)],
+        tee: list.some((e) => e.j.type === 'mortise') });
     });
     [...out.singles, ...out.mortises].forEach((x) => {
       const o = own(x.ends[0]);
@@ -1595,7 +1598,7 @@ export class SketchEditor {
     let html = '';
     c.pairs.forEach((x) => {
       const t = x.ends.length >= 2 ? `${who(x.ends[0])} ↔ ${who(x.ends[1])}` : `${who(x.ends[0])} ↔ ？`;
-      html += row(x, t, `指接卡榫 · ${fmt(x.L)} mm · ${x.k} 个齿`, x.ok ? 'ok' : 'warn', x.reasons.map(escAttr).join('；'));
+      html += row(x, t, `${x.tee ? '插槽（T 型）' : '指接卡榫'} · ${fmt(x.L)} mm · ${x.k} 个齿`, x.ok ? 'ok' : 'warn', x.reasons.map(escAttr).join('；'));
     });
     if (c.singles.length) {
       html += '<div class="sk-conn-h">还没配对的卡榫边</div>';
@@ -3330,10 +3333,22 @@ export class SketchEditor {
     const peer = this.opts.jointPeer;
     const r = this.mortiseRects(from, to, peer && peer.iv && Math.abs(peer.L - to.getDistance(from)) < 0.3 ? peer.iv : null);
     if (!r || !r.rects.length) { this.status('插槽太短'); return; }
+    // 二维画板里选了另一块板的 A 边（B5）：插槽和它配成一对（同一个配对号），3D 自动拼装就认这一对
+    let pair = null;
+    let a = null;
+    if (peer && peer.sheet) {
+      this.content.children.forEach((c) => (c.data && c.data.joints || []).forEach((j) => { if (j.id === peer.id && !j.pair) a = j; }));
+      if (a) { pair = newId(); a.pair = pair; }
+    }
     const it = this.addItem({ mode: 'cut', paths: r.rects.map((q) => ({ closed: true, segs: q.map((p) => [p.x, p.y, 0, 0, 0, 0]) })),
-      joints: [{ id: newId(), ...this.mortiseMeta(r, from, to) }] });
+      joints: [{ id: newId(), ...(pair ? { pair } : {}), ...this.mortiseMeta(r, from, to) }] });
     this.sel = new Set([it]);
-    this.commit(`已开插槽（${r.rects.length} 个孔，长 ${fmt(r.L)} mm）`);
+    if (pair) {
+      this.opts.jointPeer = null;
+      const warn = Math.abs(peer.L - r.L) > 0.3 ? `  ⚠ 和 A 边（${fmt(peer.L)} mm）不一样长，拼不上` : '';
+      this.commit(`已开插槽并和「${peer.part}」配成一对（${r.rects.length} 个孔）${warn}`);
+      this.renderToolOpts();
+    } else this.commit(`已开插槽（${r.rects.length} 个孔，长 ${fmt(r.L)} mm）`);
   }
 
   applyEditMortise(item, joint, remove) {
@@ -3343,7 +3358,7 @@ export class SketchEditor {
     const r = this.mortiseRects(from, to);
     if (!r || !r.rects.length) { this.status('插槽太短'); this.refresh(); return; }
     const fresh = this.addItem({ mode: 'cut', paths: r.rects.map((q) => ({ closed: true, segs: q.map((p) => [p.x, p.y, 0, 0, 0, 0]) })),
-      joints: [{ id: joint.id, ...this.mortiseMeta(r, from, to) }] });
+      joints: [{ id: joint.id, ...(joint.pair ? { pair: joint.pair } : {}), ...this.mortiseMeta(r, from, to) }] });   // 配对号要留着
     fresh.data.id = item.data.id;
     fresh.insertAbove(item);
     item.remove();
@@ -4747,13 +4762,26 @@ export class SketchEditor {
   }
 
   // 其他板上已有的卡榫：点一下就设成配对的类型和段数
+  // 二维画板（B5）：配对对象就是这张画板上还没配对的 A 边（另一块板上的），插槽可以和它配成一对
+  sheetPeers() {
+    return this.connections().singles.filter((x) => x.ends[0].j.type === 'a').map((x) => {
+      const { j, name, side } = x.ends[0];
+      return { id: j.id, type: 'a', L: j.L, iv: j.iv, k: j.k, depth: j.depth, mode: j.mode, count: j.count, tab: j.tab, gap: j.gap, part: `${name} 的${side}`, sheet: true };
+    });
+  }
+
   peerHtml(tool) {
-    const list = (this.peers || []).filter((p) => (tool === 'mortise' ? p.type === 'a' : ['a', 'b', 'slot', 'mortise'].includes(p.type)));
-    if (!list.length) return '<p class="sk-small">其他板上还没有卡榫。先在一块板上做好，再回来这里配对。</p>';
+    this._peerSrc = this.sheetMode && tool === 'mortise' ? this.sheetPeers() : (this.peers || []);
+    const list = this._peerSrc.filter((p) => (tool === 'mortise' ? p.type === 'a' : ['a', 'b', 'slot', 'mortise'].includes(p.type)));
+    if (!list.length) {
+      return this.sheetMode && tool === 'mortise'
+        ? '<p class="sk-small">要和插槽配对，先用「卡榫」工具在另一块板的边上做一条 A 边（点一下后按 Esc，不和别的边配对），再回来这里选它。</p>'
+        : '<p class="sk-small">其他板上还没有卡榫。先在一块板上做好，再回来这里配对。</p>';
+    }
     const cur = this.opts.jointPeer;
     const names = { a: '指接 A', b: '指接 B', slot: '凹槽', mortise: '插槽' };
     return '<h4 class="sk-sub-h">和其他板配对</h4><div class="sk-peers">' + list.map((p) => {
-      const i = this.peers.indexOf(p);
+      const i = this._peerSrc.indexOf(p);
       const on = cur && cur.id === p.id ? ' on' : '';
       const n = p.iv ? p.iv.length : Math.floor(p.k / 2);
       return `<button data-peer="${i}" class="sk-peer${on}" title="点一下套用它的齿的设置">${escAttr(p.part)} · ${names[p.type] || p.type} · ${fmt(p.L)} mm · ${n} 个 A 齿</button>`;
@@ -4761,7 +4789,7 @@ export class SketchEditor {
   }
 
   pickPeer(i) {
-    const p = (this.peers || [])[i];
+    const p = (this._peerSrc || this.peers || [])[i];
     if (!p) return;
     this.opts.jointPeer = p;
     this.opts.jointMode = p.mode || 'count';

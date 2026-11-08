@@ -1743,7 +1743,7 @@ function connStates(rep) {
   W.model.parts.forEach((p) => {
     if (dis.has(p.id) || p.id === 'reference') return;
     jointsOf(p.id).forEach((j) => {
-      if (!j.pair || j.type === 'mortise') return;
+      if (!j.pair) return;                                // 插槽配了对（B5）也算一对连接
       if (!byPair.has(j.pair)) byPair.set(j.pair, []);
       byPair.get(j.pair).push({ pid: p.id, j });
     });
@@ -2152,7 +2152,8 @@ async function sfTrySnapFree(moved, prev) {
   moved.forEach((qid) => {
     const c = partCenter(partById(qid));
     jointsOf(qid).forEach((jq) => others.forEach((pid) => jointsOf(pid).forEach((jp) => {
-      mateOptions(jq, jp, t).forEach((F) => {
+      const direct = mateOptions(jq, jp, t);         // 插槽（T 型）只按 A 边那块算：拖的是插槽那块时用反过来的配合取逆（B5）
+      (direct.length ? direct : mateOptions(jp, jq, t).map((G) => G.clone().invert())).forEach((F) => {
         const target = M(pid).multiply(F);
         const now = poseError(M(qid), target, c);
         const before = prev[qid] ? poseError(M(qid, prev), target, c) : { d: Infinity, a: 0 };
@@ -2489,7 +2490,10 @@ async function freeAutoAssemble() {
       if (aIn === bIn) return;
       const q = aIn ? l.b : l.a; const pp = aIn ? l.a : l.b;
       const jq = aIn ? l.jb : l.ja; const jp = aIn ? l.ja : l.jb;
-      mateOptions(jq, jp, t).forEach((F) => cands.push({ q, pp, jq, jp, T: M(pp).multiply(F) }));
+      const direct = mateOptions(jq, jp, t);
+      direct.forEach((F) => cands.push({ q, pp, jq, jp, T: M(pp).multiply(F) }));
+      // 插槽（T 型）的配合只按「A 边那块 → 插槽那块」算：先放好的是 A 边那块时，用反过来的配合取逆（B5）
+      if (!direct.length) mateOptions(jp, jq, t).forEach((G) => cands.push({ q, pp, jq, jp, T: M(pp).multiply(G.clone().invert()) }));
     });
     if (!cands.length) break;
     const centroid = new THREE.Vector3();
