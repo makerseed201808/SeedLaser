@@ -1240,3 +1240,8 @@ input, textarea, select { font: inherit; user-select: text; }
 #sk-host .sk-file.editing { display: block; }
 #sk-host .sk-file-input { width: 100%; box-sizing: border-box; font-size: 13.5px; }
 .sk-numeric .sk-glabel { font-size: 11.5px; color: #8a96a3; }
+/* 选中图形时边上的长度数值：大一些，方便看和点 */
+#sk-host .sk-dim { font-size: 13.5px !important; font-weight: 600; padding: 3px 9px !important; border-radius: 7px !important;
+  background: #fff !important; border: 1px solid #c9d6e6 !important; color: #1f2933; box-shadow: 0 1px 3px rgba(16,35,63,.12); font-variant-numeric: tabular-nums; }
+#sk-host .sk-dim:hover { border-color: #1f6feb !important; color: #1f6feb !important; box-shadow: 0 0 0 3px rgba(31,111,235,.12); }
+#sk-host .sk-dim-input { width: 76px; font-size: 13.5px; padding: 3px 6px; }

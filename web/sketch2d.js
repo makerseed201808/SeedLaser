@@ -1578,12 +1578,15 @@ export class SketchEditor {
     paths.forEach((p) => p.curves.forEach((c) => {
       if (!c.isStraight() || c.length * this.zoom < 28) return;
       let at = null;
+      // 标签离边线的距离按标签自身大小算（竖边留半个宽、横边留半个高），不压线
+      const halfW = (String(fmt(c.length)).length * 8.5 + 20) / 2; const halfH = 12;
       for (const t of [0.5, 0.25, 0.75]) {
         const mid = c.getPointAtTime(t);
-        let n = c.getNormalAtTime(t).normalize(10 / this.zoom);
+        const nu = c.getNormalAtTime(t).normalize();
+        let n = nu.multiply((6 + Math.abs(nu.x) * halfW + Math.abs(nu.y) * halfH) / this.zoom);
         if (p.closed && p.contains(mid.add(n))) n = n.negate();
         const q = v.projectToView(mid.add(n));
-        if (hs.every((h) => Math.abs(h.x - q.x) > 26 || Math.abs(h.y - q.y) > 16)) { at = q; break; }
+        if (hs.every((h) => Math.abs(h.x - q.x) > 32 || Math.abs(h.y - q.y) > 20)) { at = q; break; }
       }
       if (!at) return;
       const lab = document.createElement('button');
