@@ -198,7 +198,7 @@ class FreeDesign(boxes.Boxes):
             for p, sk in items:
                 with self.saved_context():
                     self.moveTo(float(p["sx"]) + self.spacing, float(p["sy"]) + self.spacing, float(p.get("sa") or 0))
-                    sketch2d.draw(self, sk, burn)
+                    sketch2d.draw(self, sk, burn, dims=bool((self.design or {}).get("export_dims")))
             if sheet.get("w") and sheet.get("h") and not getattr(self, "clean", False):
                 with self.saved_context():
                     self.set_source_color(Color.ANNOTATIONS)

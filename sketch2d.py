@@ -226,9 +226,10 @@ def cut_polylines(sketch: dict, burn: float = 0.0) -> list[tuple[list, bool, boo
     return out
 
 
-def draw(box: Any, sketch: dict, burn: float = 0.0, cut: bool = True, marks: bool = True) -> None:
+def draw(box: Any, sketch: dict, burn: float = 0.0, cut: bool = True, marks: bool = True, dims: bool = False) -> None:
     """在当前零件、当前坐标系（从外面看）里画出草图。调用前设好 surface._p 和 ctx._m.
-    cut / marks：是否画切割部分 / 雕刻和描线部分（共边切割时切割部分另外画）。"""
+    cut / marks：是否画切割部分 / 雕刻和描线部分（共边切割时切割部分另外画）。
+    dims：是否把尺寸标注（mode = dim）一起画出来（描线颜色 + 数字文字）；默认不画。"""
     from boxes.Color import Color
 
     ctx = box.ctx
@@ -277,7 +278,52 @@ def draw(box: Any, sketch: dict, burn: float = 0.0, cut: bool = True, marks: boo
                     if path.get("closed"):
                         path = {**path, "segs": path["segs"] + [path["segs"][0]], "closed": False}
                     curves(path)
+    if dims:
+        box.set_source_color(Color.MAGENTA)
+        for item in sketch.get("items") or []:
+            if item.get("mode") != "dim":
+                continue
+            for path in item.get("paths") or []:
+                if len(path.get("segs") or []) >= 2:
+                    curves(path)
+            d = dim_label(item)
+            if d:
+                text, x, y, ang = d
+                box.text(text, x, y, ang, align="center", fontsize=3.5, color=Color.MAGENTA)
     box.set_source_color(Color.BLACK)
+
+
+def dim_points(item: dict):
+    """尺寸标注的几何：paths[0] = 尺寸线 A'B'，paths[1] / paths[2] = 从 A、B 出发的引出线。返回 (A, B, A', B') 或 None."""
+    paths = item.get("paths") or []
+    if len(paths) < 3:
+        return None
+    try:
+        a2 = (float(paths[0]["segs"][0][0]), float(paths[0]["segs"][0][1]))
+        b2 = (float(paths[0]["segs"][-1][0]), float(paths[0]["segs"][-1][1]))
+        a = (float(paths[1]["segs"][0][0]), float(paths[1]["segs"][0][1]))
+        b = (float(paths[2]["segs"][0][0]), float(paths[2]["segs"][0][1]))
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return a, b, a2, b2
+
+
+def dim_label(item: dict):
+    """标注数字：(文字, x, y, 角度°)，放在尺寸线中点偏上 1.5 mm，字沿尺寸线方向、保持正立。"""
+    g = dim_points(item)
+    if not g:
+        return None
+    a, b, a2, b2 = g
+    L = math.dist(a, b)
+    ang = math.degrees(math.atan2(b2[1] - a2[1], b2[0] - a2[0]))
+    if ang > 90 or ang <= -90:
+        ang += 180
+    r = math.radians(ang)
+    nx, ny = -math.sin(r), math.cos(r)
+    # 数字放在尺寸线「离被标注的边远」的那一侧
+    mx, my = (a2[0] + b2[0]) / 2, (a2[1] + b2[1]) / 2
+    side = 1 if (mx - a[0]) * nx + (my - a[1]) * ny >= 0 else -1
+    return f"{L:.2f}".rstrip("0").rstrip("."), mx + nx * 1.5 * side, my + ny * 1.5 * side, ang
 
 
 def export_warnings(sketch: dict, burn: float = 0.0) -> list[str]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import functools
 import gettext
+import json
 import mimetypes
 import os
 import re
@@ -583,6 +584,19 @@ def project_dir() -> str:
     return os.environ.get("SEEDLASER_PROJECT_DIR") or os.path.join(os.path.expanduser("~"), "Documents", "SeedLaser")
 
 
+LIB_EXT = ".seedlaser-shape"
+
+
+def library_dir() -> str:
+    """「我的图库」：项目文件夹下的「图库」，每个图形一个 .seedlaser-shape（JSON）。"""
+    return os.path.join(project_dir(), "图库")
+
+
+def _lib_safe_name(name: str) -> str:
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", str(name or "").strip()).strip(". ")
+    return name[:60] or "未命名图形"
+
+
 def launch_file_from_argv(argv: list[str]) -> str | None:
     """命令行 / 双击项目文件启动时带进来的项目路径（.seedlaser，旧版 .seedbox.json）。"""
     for a in argv[1:]:
@@ -828,6 +842,54 @@ class Api:
             return {"error": f"排版失败：{exc}"}
         return {"placed": [{"id": k, "sheet": si, "x": x, "y": y, "rot": bool(rot)} for k, si, x, y, rot in placed],
                 "sheets": n, "too_big": list(too_big)}
+
+    def lib_list(self) -> dict[str, Any]:
+        """「我的图库」里的图形：[{name, file, items}]，按修改时间新的在前."""
+        d = library_dir()
+        out = []
+        try:
+            files = [f for f in os.listdir(d) if f.endswith(LIB_EXT)]
+        except OSError:
+            files = []
+        for f in files:
+            fp = os.path.join(d, f)
+            try:
+                with open(fp, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                out.append({"name": data.get("name") or f[: -len(LIB_EXT)], "file": f, "items": data.get("items") or [],
+                            "mtime": os.path.getmtime(fp)})
+            except (OSError, ValueError) as exc:
+                print(f"图库文件读不了 {fp}：{exc}", file=sys.stderr)
+        out.sort(key=lambda x: -x["mtime"])
+        return {"dir": d, "items": out}
+
+    def lib_save(self, name: str, items: list) -> dict[str, Any]:
+        """把选中的图形存进「我的图库」；重名时自动加 (2)、(3)…，不覆盖."""
+        if not items:
+            return {"error": "没有可保存的图形"}
+        d = library_dir()
+        try:
+            os.makedirs(d, exist_ok=True)
+            base = _lib_safe_name(name)
+            nm, i = base, 2
+            while os.path.exists(os.path.join(d, nm + LIB_EXT)):
+                nm, i = f"{base} ({i})", i + 1
+            with open(os.path.join(d, nm + LIB_EXT), "w", encoding="utf-8") as fh:
+                json.dump({"format": "seedlaser-shape", "version": 1, "name": nm, "items": items}, fh, ensure_ascii=False)
+            return {"ok": True, "name": nm, "file": nm + LIB_EXT}
+        except OSError as exc:
+            return {"error": f"保存失败：{exc}"}
+
+    def lib_delete(self, file: str) -> dict[str, Any]:
+        """删除「我的图库」里的一个图形（只能删图库文件夹里的 .seedlaser-shape）."""
+        f = os.path.basename(str(file or ""))
+        if not f.endswith(LIB_EXT):
+            return {"error": "不是图库文件"}
+        try:
+            os.remove(os.path.join(library_dir(), f))
+            return {"ok": True}
+        except OSError as exc:
+            return {"error": f"删除失败：{exc}"}
 
     def sketch_offset(self, paths: list[dict[str, Any]], distance: float, join: str = "round") -> dict[str, Any]:
         """二维草图：轮廓偏移（外扩 / 内缩）."""

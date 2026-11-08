@@ -21,7 +21,7 @@ const RADIAL_REPEAT = {
 const RADIAL_CATALOG = [
   { g: '画图工具', items: [['t:select', '选择', '➤'], ['t:node', '节点', '◇'], ['t:line', '直线', '╱'], ['t:pen', '曲线', '✒'], ['t:rect', '矩形', '▭'],
     ['t:ellipse', '椭圆', '◯'], ['t:polygon', '多边形', '⬡'], ['t:text', '文字', 'T'], ['t:joint', '卡榫', '⊓'], ['t:mortise', '插槽', '▤'],
-    ['t:bridge', '水口', '⫶'], ['t:trim', '修剪', '✂'], ['t:measure', '测量', '📏']] },
+    ['t:bridge', '水口', '⫶'], ['t:trim', '修剪', '✂'], ['t:measure', '测量', '📏'], ['t:dim', '标注', '⟷']] },
   { g: '编辑', items: [['a:undo', '撤销', '↶'], ['a:redo', '重做', '↷'], ['a:copy', '复制', '⎘', 1], ['a:paste', '粘贴', '📋'], ['a:dup', '复制一份', '⧉', 1],
     ['a:delete', '删除', '🗑', 1], ['a:group', '编组', '▣', 1], ['a:ungroup', '取消编组', '▢', 1], ['a:breakApart', '拆分', '⋔', 1],
     ['a:lock', '锁定', '🔒', 1], ['a:hide', '隐藏', '🙈', 1], ['a:unlockAll', '全部解锁', '🔓'], ['a:showAll', '全部显示', '👁']] },
@@ -40,7 +40,8 @@ const SELECT = '#0ea5e9';
 const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='white' stroke-width='4.5'/><path d='M19 4v4h-4' stroke='white' stroke-width='4.5'/><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='%230ea5e9' stroke-width='2'/><path d='M19 4v4h-4' stroke='%230ea5e9' stroke-width='2'/></g></svg>") 12 12, alias`;   // 旋转手柄的光标（带白边的圆形箭头）
 const SMART = '#16a34a';
 const PX_PER_MM = 96 / 25.4;      // 缩放 100% = 1 mm 显示为 96 dpi 屏幕上的 1 mm
-const MEASURE = '#f97316';        // 测量线（橙色）          // 智能辅助线（对齐 / 贴边 / 相切）
+const MEASURE = '#f97316';        // 测量线（橙色）
+const DIM_COLOR = '#7c3aed';      // 尺寸标注（紫色；默认不导出）          // 智能辅助线（对齐 / 贴边 / 相切）
 
 const TOOLS = [
   { id: 'select', key: 'v', icon: '➤', name: '选择', tip: '点选 / 框选，拖动移动；拖控制点缩放、旋转（V）' },
@@ -56,6 +57,8 @@ const TOOLS = [
   { id: 'bridge', key: 'b', icon: '⫶', name: '水口', tip: '在切割线上点一下加水口：留一小段不切，板件切完还连在材料上不会掉，取下时用刀片划断；再点一次删除（B）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '测量：点到点 / 点到线 / 线到线（间距、夹角）/ 圆（半径、圆心距），方式在右侧选（M）' },
+  { id: 'lib', icon: '▦', name: '图库', tip: '图库：螺丝孔、舵机 / 主控板安装孔、轴孔、装饰图形，点一下放到画板中央；选中图形可以存进「我的图库」' },
+  { id: 'dim', key: 'd', icon: '⟷', name: '标注', tip: '尺寸标注：点一条直边，或点两个点，再移动鼠标点一下放置数字；数字跟着图形变。默认不导出（D）' },
   // 下面是「功能面板」：画布上照常可以选择 / 移动，右侧只显示对应的参数卡片
   { id: 'p-align', panel: 'align', sep: true, icon: '⫴', name: '对齐', tip: '对齐与分布：先选中图形（Shift 多选或框选），再点右侧的对齐方式' },
   { id: 'p-bool', panel: 'bool', icon: '◑', name: '运算', tip: '形状运算（并集 / 差集 / 交集 / 异或）和偏移：先选中图形' },
@@ -390,6 +393,7 @@ export class SketchEditor {
     this.measureLayer = L('measure');      // 测量结果：留到下一次测量 / 换工具 / Esc
     this.overlay = L('overlay');
     this.hlLayer = L('connhl');            // 连接清单点中的边（选择框重画时不清掉）
+    this.dimLayer = L('dims');             // 尺寸标注的数字
     this.content.activate();
     this.zoom = 4;
 
@@ -537,7 +541,7 @@ export class SketchEditor {
     let item;
     if (it.paths.length === 1) item = mk(it.paths[0]);
     else { item = new ps.CompoundPath({ insert: false }); item.addChildren(it.paths.map(mk)); }
-    item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked, lock: !!it.lock, hidden: !!it.hidden,
+    item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked, lock: !!it.lock, hidden: !!it.hidden, dim: it.dim ? JSON.parse(JSON.stringify(it.dim)) : null,
                   text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null,
                   group: it.group || null, pid: it.pid || null, origin: it.origin ? [...it.origin] : null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
     this.content.addChild(item);
@@ -559,6 +563,7 @@ export class SketchEditor {
     if (item.data.locked) out.locked = true;
     if (item.data.lock) out.lock = true;              // 用户锁定（不能选 / 动 / 删）
     if (item.data.hidden) out.hidden = true;          // 用户隐藏（不显示、不选，仍导出）
+    if (item.data.dim) out.dim = JSON.parse(JSON.stringify(item.data.dim));   // 尺寸标注：引用的图形 / 节点 + 引出距离
     if (item.data.text) out.text = { ...item.data.text };
     if (item.data.group) out.group = item.data.group;
     if (item.data.pid) out.pid = item.data.pid;
@@ -605,8 +610,8 @@ export class SketchEditor {
     const m = MODES[d.mode] || MODES.cut;
     const outline = d.role === 'outline';
     item.strokeScaling = false;
-    item.strokeWidth = outline ? 1.6 : 1.4;
-    item.strokeColor = outline ? OUTLINE_COLOR : m.color;
+    item.strokeWidth = outline ? 1.6 : d.mode === 'dim' ? 1 : 1.4;
+    item.strokeColor = outline ? OUTLINE_COLOR : d.mode === 'dim' ? DIM_COLOR : m.color;
     item.fillColor = d.mode === 'engrave' ? new this.ps.Color(0.09, 0.64, 0.29, 0.28) : null;
     item.fillRule = 'evenodd';
     item.dashArray = null;                     // 描线也用实线（用户要求），只靠红色区分
@@ -658,6 +663,7 @@ export class SketchEditor {
 
   // 一次修改完成：记录撤销点（调用前须 pushUndo，或传 skipPush=false 自动比较）
   commit(label, pushed) {
+    this.syncDims();
     const now = JSON.stringify(this.serialize().items);
     if (!pushed) {
       if (now === this.current) { this.refresh(); return; }
@@ -867,6 +873,7 @@ export class SketchEditor {
     for (const it of [...this.sel]) if (!it.parent) this.sel.delete(it);
     this.content.children.forEach((c) => { c.fullySelected = this.tool === 'node' && this.sel.has(c); });
     if (!selOnly) this.drawBoard();         // 只改了选中（图形没变）时，板面不用重画
+    this.drawDimLabels();
     this.drawSelection();
     this.updateNumeric();
     this.renderToolOpts();
@@ -1083,6 +1090,7 @@ export class SketchEditor {
     this.redrawGrid();
     this.drawGuides();
     this.drawRulers();
+    this.drawDimLabels();                    // 标注文字按屏幕像素定大小，缩放后重排
     this.drawSelection();
     if (this.marks) this.drawMarks();
     const zl = this.$ && this.$('.sk-zoom');
@@ -1742,6 +1750,16 @@ export class SketchEditor {
     const loose = [];
     this.content.children.forEach((it) => {
       if (!it.data || !it.data.mode || partItems.includes(it)) return;
+      if (it.data.mode === 'dim') {                                   // 标注：按它量的起点归到板；不算「不在板里」
+        const g = this.dimGeom(it);
+        const pt0 = g ? g.a : it.bounds.center;
+        let host = null;
+        outers.forEach((L) => { if (L.path.contains(pt0) && (!host || L.area < host.area)) host = L; });
+        if (!host) outers.forEach((L) => { const d = L.path.getNearestPoint(pt0).getDistance(pt0); if (d < 1.5 && (!host || d < host._d)) { host = L; host._d = d; } });
+        const part = host && parts.find((p) => p.item === host.item);
+        if (part) part.members.push(it);
+        return;
+      }
       const c = it.bounds.center;
       let best = null;
       outers.forEach((L) => {
@@ -2101,6 +2119,8 @@ export class SketchEditor {
     this.closeOverlap();
     this.finishDrawing();
     if (this.opts.jointPeer && this.opts.jointPeer.pair) this.cancelPairing(true);
+    if (this.dimState) this.cancelDim();
+    if (id !== 'lib') { this.libArmed = null; this.libDelArm = null; }
     if (id === 'text' && this.tool !== 'text') this.sel.clear();     // 文字工具：放新文字（不是改选中的）
     if (id !== this.tool) this.editJoint = null;
     this.tool = id;
@@ -2195,6 +2215,12 @@ export class SketchEditor {
       return;
     }
     if (t === 'measure') this.measureDown(e, pt);
+    if (t === 'dim') this.dimDown(e, pt);
+    if (t === 'lib') {
+      const le = this.libArmed && this.libEntry(this.libArmed);
+      if (le) { this.libPlace(le, this.snap(pt)); return; }
+      return this.selectDown(e, pt);                                       // 没在放图形时，画布照常可以选择（选好再存进我的图库）
+    }
   }
 
   onDrag(e) {
@@ -2294,6 +2320,7 @@ export class SketchEditor {
     if (this.tool === 'line' || this.tool === 'pen') this.pathHover(e.point, e.event);
     else if (this.tool === 'trim') this.trimHover(e.point);
     else if (this.tool === 'joint') this.jointHover(e.point);
+    else if (this.tool === 'dim') this.dimHover(e.point);
     else if (this.tool === 'mortise' && this.opts.jointPeer && this.opts.jointPeer.type === 'a') {
       if (this.rubber) this.rubber.remove();
       const [f, t2] = this.mortiseEnds(this.snap(e.point));
@@ -3440,6 +3467,315 @@ export class SketchEditor {
     this.commit(`已修改插槽（${r.rects.length} 个孔）`);
   }
 
+  // ---------------------------------------------------------------- 尺寸标注（C3）
+  // 一条标注 = 独立图形（mode 'dim'）：paths[0] 尺寸线 A'B'、paths[1] / [2] 从 A、B 出发的引出线、paths[3..] 箭头；
+  // data.dim = { ref: { a: {id, path, seg}, b: {...} } | null, off: 引出距离（带符号） }。
+  // 数字不是路径（画在 dimLayer 的文字里，导出时后端按几何重算），所以随图形变化时只要重建路径。
+
+  // 鼠标附近的图形节点：{ id, path, seg, point }
+  nearNode(pt) {
+    const tol = 7 / this.zoom;
+    let best = null;
+    this.content.children.forEach((it) => {
+      if (!it.data || !it.data.mode || it.data.mode === 'dim' || !it.visible) return;
+      this.itemPaths(it).forEach((p, pi) => p.segments.forEach((sg, si) => {
+        const d = sg.point.getDistance(pt);
+        if (d < tol && (!best || d < best.d)) best = { id: it.data.id, path: pi, seg: si, point: sg.point.clone(), d };
+      }));
+    });
+    return best;
+  }
+
+  nodePoint(ref) {
+    if (!ref) return null;
+    const it = this.content.children.find((c) => c.data && c.data.id === ref.id);
+    if (!it) return null;
+    const p = this.itemPaths(it)[ref.path || 0];
+    const sg = p && p.segments[ref.seg];
+    return sg ? sg.point.clone() : null;
+  }
+
+  // 标注的几何 { a, b, a2, b2, off, n }（从它自己的路径读；引用的图形在的话以图形为准）
+  dimGeom(it) {
+    const ps = this.itemPaths(it);
+    if (ps.length < 3) return null;
+    const d = it.data.dim || {};
+    const a = this.nodePoint(d.ref && d.ref.a) || ps[1].firstSegment.point.clone();
+    const b = this.nodePoint(d.ref && d.ref.b) || ps[2].firstSegment.point.clone();
+    const a2 = ps[0].firstSegment.point; const b2 = ps[0].lastSegment.point;
+    const u = b.subtract(a);
+    if (u.length < 1e-6) return null;
+    const n = new this.ps.Point(-u.y, u.x).normalize();
+    let off = d.off != null ? d.off : a2.subtract(a).dot(n);
+    // 标注自己被拖动了（引用的点没变，但它自己的引出线起点变了）：按尺寸线现在的位置算新的引出距离
+    const pa = ps[1].firstSegment.point;
+    if (d.a && a.getDistance(new this.ps.Point(d.a[0], d.a[1])) < 1e-6 && pa.getDistance(a) > 1e-6) off = r3(a2.subtract(a).dot(n));
+    return { a, b, a2, b2, off, n };
+  }
+
+  // 按 A、B、引出距离生成标注的路径（mm）
+  dimPaths(a, b, off) {
+    const ps = this.ps;
+    const u = b.subtract(a);
+    const L = u.length;
+    if (L < 1e-6) return null;
+    const d = u.normalize();
+    const n = new ps.Point(-d.y, d.x);
+    const a2 = a.add(n.multiply(off)); const b2 = b.add(n.multiply(off));
+    const ext = n.multiply(Math.sign(off || 1) * 1.5);                 // 引出线比尺寸线长出 1.5 mm
+    const ah = Math.min(2.5, L / 3);                                    // 箭头
+    const arrow = (tip, dir) => [tip.subtract(dir.multiply(ah)).add(n.multiply(ah * 0.35)), tip, tip.subtract(dir.multiply(ah)).subtract(n.multiply(ah * 0.35))];
+    const P = (pts, closed = false) => ({ closed, segs: pts.map((q) => [q.x, q.y, 0, 0, 0, 0]) });
+    return [P([a2, b2]), P([a, a2.add(ext)]), P([b, b2.add(ext)]), P(arrow(a2, d.multiply(-1))), P(arrow(b2, d))];
+  }
+
+  makeDimItem(a, b, off, ref) {
+    const paths = this.dimPaths(a, b, off);
+    if (!paths) return null;
+    return this.addItem({ mode: 'dim', paths, dim: { ref: ref || null, off, a: [r3(a.x), r3(a.y)] } });
+  }
+
+  // 引用的图形变了：按最新的 A、B 重建标注（在 commit 前跑，所以撤销 / 保存都带着）
+  syncDims() {
+    if (!this.content) return;
+    const key = (paths) => JSON.stringify(paths.map((p) => p.segs.map((q) => [r3(q[0]), r3(q[1])])));
+    this.content.children.slice().forEach((it) => {
+      if (!it.data || it.data.mode !== 'dim') return;
+      const g = this.dimGeom(it);
+      if (!g) return;
+      const paths = this.dimPaths(g.a, g.b, g.off);
+      if (key(this.serializeItem(it).paths) === key(paths)) return;
+      const ser = this.serializeItem(it);
+      const fresh = this.addItem({ ...ser, paths, dim: { ...(ser.dim || {}), off: g.off, a: [r3(g.a.x), r3(g.a.y)] } });
+      fresh.insertAbove(it);
+      it.remove();
+      if (this.sel.has(it)) { this.sel.delete(it); this.sel.add(fresh); }
+    });
+  }
+
+  // 数字：画在 dimLayer（不是路径，不导出；后端导出时按几何重算同样的数字）
+  drawDimLabels() {
+    if (!this.dimLayer) return;
+    this.dimLayer.removeChildren();
+    this.content.children.forEach((it) => {
+      if (!it.data || it.data.mode !== 'dim' || !it.visible) return;
+      const g = this.dimGeom(it);
+      if (!g) return;
+      const L = g.a.getDistance(g.b);
+      let ang = g.b2.subtract(g.a2).angle;
+      if (ang > 90 || ang <= -90) ang += 180;
+      const mid = g.a2.add(g.b2).divide(2);
+      const nn = new this.ps.Point({ angle: ang + 90, length: 1 });
+      const side = mid.subtract(g.a).dot(nn) >= 0 ? 1 : -1;
+      const fs = Math.max(3.5, 11 / (this.zoom || 1));                  // 至少 11 像素高，缩小视图也看得清
+      const t = new this.ps.PointText({ parent: this.dimLayer, point: mid, content: fmt(L), fillColor: DIM_COLOR,
+        fontFamily: 'sans-serif', fontSize: fs, fontWeight: 'bold', justification: 'center' });
+      t.scale(1, -1, t.point);                                            // 画布整体是 y 翻转的，文字先翻回来
+      t.position = mid.add(new this.ps.Point(0, side * (t.bounds.height / 2 + 3 / (this.zoom || 1))));   // 放在尺寸线外侧，不压线
+      t.rotate(ang, mid);
+    });
+  }
+
+  dimDown(e, pt) {
+    const st = this.dimState || (this.dimState = {});
+    if (st.a && st.b) {                                                   // 第三下：放置
+      const u = st.b.subtract(st.a).normalize(); const n = new this.ps.Point(-u.y, u.x);
+      const off = Math.round(pt.subtract(st.a).dot(n) * 10) / 10 || 8;
+      const it = this.makeDimItem(st.a, st.b, off, st.ref);
+      const L = st.a.getDistance(st.b);
+      this.dimState = null;
+      if (this.rubber) { this.rubber.remove(); this.rubber = null; }
+      if (it) { this.sel = new Set([it]); this.commit(`已标注 ${fmt(L)} mm（默认不导出；导出时可以勾选「标注一起导出」）`); }
+      return;
+    }
+    const node = this.nearNode(pt);
+    if (!st.a) {
+      if (!node) {                                                        // 没点到节点：点一条直边 → 直接拿它的两端
+        const c = this.pickCurve(pt);
+        const owner = c && this.topItem(c.path);
+        if (c && c.isStraight() && c.length > 0.5 && owner && owner.data.mode !== 'dim') {
+          const pi = this.itemPaths(owner).indexOf(c.path);
+          st.a = c.point1.clone(); st.b = c.point2.clone();
+          st.ref = { a: { id: owner.data.id, path: pi, seg: c.segment1.index }, b: { id: owner.data.id, path: pi, seg: c.segment2.index } };
+          this.status(`边长 ${fmt(c.length)} mm：移动鼠标选引出距离，点一下放置`);
+          return;
+        }
+      }
+      st.a = node ? node.point : this.snap(pt);
+      st.ref = { a: node ? { id: node.id, path: node.path, seg: node.seg } : null, b: null };
+      this.status('再点第二个点（点图形的节点，数字会跟着图形变）');
+      return;
+    }
+    st.b = node ? node.point : this.snap(pt);
+    st.ref.b = node ? { id: node.id, path: node.path, seg: node.seg } : null;
+    if (!st.ref.a && !st.ref.b) st.ref = null;
+    this.status(`${fmt(st.a.getDistance(st.b))} mm：移动鼠标选引出距离，点一下放置`);
+  }
+
+  dimHover(pt) {
+    if (this.rubber) { this.rubber.remove(); this.rubber = null; }
+    const st = this.dimState;
+    if (!st || !st.a) {
+      const node = this.nearNode(pt);
+      if (node) this.rubber = new this.ps.Path.Circle({ center: node.point, radius: 4 / this.zoom, parent: this.overlay, strokeColor: DIM_COLOR, strokeWidth: 1.5, strokeScaling: false });
+      return;
+    }
+    const b = st.b || this.snap(pt);
+    let off = 8;
+    if (st.b) { const u = st.b.subtract(st.a).normalize(); const n = new this.ps.Point(-u.y, u.x); off = pt.subtract(st.a).dot(n) || 8; }
+    const paths = this.dimPaths(st.a, b, off);
+    if (!paths) return;
+    const g = new this.ps.Group({ parent: this.overlay });
+    paths.forEach((p) => new this.ps.Path({ parent: g, segments: p.segs.map((q) => [q[0], q[1]]), strokeColor: DIM_COLOR, strokeWidth: 1, strokeScaling: false, dashArray: st.b ? null : [3, 2] }));
+    this.rubber = g;
+  }
+
+  cancelDim() {
+    this.dimState = null;
+    if (this.rubber) { this.rubber.remove(); this.rubber = null; }
+  }
+
+  // ---------------------------------------------------------------- 图库（C4）
+  // 内置件：web/library/builtin.json（scripts/make_library.py 生成，以 (0,0) 为中心）；
+  // 我的图库：项目文件夹/图库/*.seedlaser-shape（后端 lib_list / lib_save / lib_delete）
+
+  async loadLibrary(force) {
+    if (!this.libBuiltin) {
+      try { const r = await fetch('library/builtin.json'); this.libBuiltin = (await r.json()).items || []; } catch (e) { this.libBuiltin = []; }
+    }
+    if (force || !this.libMine) {
+      try { const r = await this.api.lib_list(); this.libMine = (r && r.items) || []; this.libDir = r && r.dir; } catch (e) { this.libMine = []; }
+    }
+  }
+
+  libEntry(key) {
+    const [kind, id] = [key.slice(0, 1), key.slice(2)];
+    if (kind === 'b') return (this.libBuiltin || []).find((x) => x.id === id) || null;
+    const m = (this.libMine || []).find((x) => x.file === id);
+    return m ? { id: m.file, name: m.name, items: m.items, verified: true } : null;
+  }
+
+  // 缩略图：SVG（y 向上的数据 → 翻转），线色 = 图层颜色
+  libThumb(items) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const ds = [];
+    items.forEach((it) => it.paths.forEach((p) => {
+      const s = p.segs;
+      if (!s.length) return;
+      let d = `M${s[0][0]} ${s[0][1]}`;
+      const n = p.closed ? s.length : s.length - 1;
+      for (let i = 0; i < n; i++) {
+        const a = s[i], b = s[(i + 1) % s.length];
+        d += `C${a[0] + a[4]} ${a[1] + a[5]} ${b[0] + b[2]} ${b[1] + b[3]} ${b[0]} ${b[1]}`;
+      }
+      if (p.closed) d += 'Z';
+      s.forEach((q) => { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); });
+      ds.push(`<path d="${d}" stroke="${(MODES[it.mode] || MODES.cut).color}" vector-effect="non-scaling-stroke"/>`);
+    }));
+    if (!ds.length) return '<svg class="sk-lib-svg"></svg>';
+    const w = Math.max(x1 - x0, 1), h = Math.max(y1 - y0, 1), pad = Math.max(w, h) * 0.08;
+    return `<svg class="sk-lib-svg" viewBox="${x0 - pad} ${-y1 - pad} ${w + 2 * pad} ${h + 2 * pad}"><g transform="scale(1,-1)" fill="none" stroke-width="1.4">${ds.join('')}</g></svg>`;
+  }
+
+  renderLib(box) {
+    const tab = this.opts.libTab || 'builtin';
+    const key = [tab, this.libBuiltin ? this.libBuiltin.length : -1, this.libMine ? this.libMine.map((x) => x.file).join('|') : '-',
+      this.sel.size > 0, this.libArmed || '', this.libDelArm || ''].join('§');
+    if (box.dataset.lib === key) return;
+    const nameInp = box.querySelector('[data-libname]');
+    const keepName = nameInp ? nameInp.value : '';
+    box.dataset.lib = key;
+    box.classList.remove('hidden');
+    if (!this.libBuiltin || !this.libMine) {
+      box.innerHTML = '<h4>图库</h4><p class="sk-small">加载中…</p>';
+      this.loadLibrary().then(() => { if (this.tool === 'lib') { delete box.dataset.lib; this.renderLib(box); } });
+      return;
+    }
+    const cell = (k, x, extra = '') => `<div class="sk-lib-cell"><button class="sk-lib-item${this.libArmed === k ? ' on' : ''}" data-lib="${escAttr(k)}"
+        title="${escAttr(x.name + (x.note ? '\n' + x.note : '') + (x.source ? '\n出处：' + x.source : ''))}">${this.libThumb(x.items)}<span>${escAttr(x.name)}</span>${x.verified === false ? '<em class="sk-lib-warn">未核对</em>' : ''}</button>${extra}</div>`;
+    let body = '';
+    if (tab === 'builtin') {
+      const cats = [];
+      this.libBuiltin.forEach((x) => { if (!cats.includes(x.cat)) cats.push(x.cat); });
+      body = cats.map((c) => `<div class="sk-lib-cat">${escAttr(c)}</div><div class="sk-lib-grid">${this.libBuiltin.filter((x) => x.cat === c).map((x) => cell('b:' + x.id, x)).join('')}</div>`).join('') +
+        '<p class="sk-small">标「未核对」的是按公开资料的常见尺寸画的，元件批次不同会有差别，切之前用卡尺量一下实物。</p>';
+    } else {
+      const save = this.sel.size
+        ? `<div class="sk-row sk-lib-save"><input data-libname type="text" maxlength="60" placeholder="起个名字" value="${escAttr(keepName)}"><button data-libsave class="sk-chip-btn">保存选中的 ${this.sel.size} 个图形</button></div>`
+        : '<p class="sk-small">先选中要保存的图形（可以多选），这里会出现「保存」。</p>';
+      const list = this.libMine.length
+        ? `<div class="sk-lib-grid">${this.libMine.map((x) => cell('m:' + x.file, { name: x.name, items: x.items },
+            `<button class="sk-lib-del${this.libDelArm === x.file ? ' arm' : ''}" data-libdel="${escAttr(x.file)}" title="${this.libDelArm === x.file ? '再点一次确认删除' : '删除'}">${this.libDelArm === x.file ? '删除?' : '✕'}</button>`)).join('')}</div>`
+        : '<p class="sk-small">还没有自己的图形。</p>';
+      body = save + list + `<p class="sk-small">存在「${escAttr(this.libDir || '文稿/SeedLaser/图库')}」，每个图形一个 .seedlaser-shape 文件，可以拷给别人。</p>`;
+    }
+    box.innerHTML = `<h4>图库</h4><div class="sk-seg">${[['builtin', '内置'], ['mine', '我的']].map(([k, n]) => `<button data-libtab="${k}" class="${tab === k ? 'on' : ''}">${n}</button>`).join('')}</div>
+      <p class="sk-small">点一下放到画板中央；放完还可以在画布上单击再放一个（Esc 结束）。</p>${body}`;
+    box.querySelectorAll('[data-libtab]').forEach((b) => b.addEventListener('click', () => { this.opts.libTab = b.dataset.libtab; this.libDelArm = null; this.renderLib(box); }));
+    box.querySelectorAll('[data-lib]').forEach((b) => b.addEventListener('click', () => {
+      const e = this.libEntry(b.dataset.lib);
+      if (!e) return;
+      this.libArmed = b.dataset.lib;
+      this.libPlace(e, null);
+    }));
+    box.querySelectorAll('[data-libdel]').forEach((b) => b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const f = b.dataset.libdel;
+      if (this.libDelArm !== f) { this.libDelArm = f; this.renderLib(box); return; }
+      this.libDelArm = null;
+      this.libDelete(f);
+    }));
+    const sb = box.querySelector('[data-libsave]');
+    if (sb) {
+      const inp = box.querySelector('[data-libname]');
+      const go = () => this.libSave(inp.value.trim());
+      sb.addEventListener('click', go);
+      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } ev.stopPropagation(); });
+    }
+  }
+
+  libDropPoint() {
+    const c = this.ps.view.center;
+    return new this.ps.Point(Math.round(c.x * 2) / 2, Math.round(c.y * 2) / 2);
+  }
+
+  libPlace(entry, at) {
+    const c = at || this.libDropPoint();
+    const grp = entry.items.length > 1 ? newId() : null;           // 多个图形（比如孔 + 外形）编成一组，一起移动
+    const made = entry.items.map((it) => this.addItem({ mode: it.mode, group: grp,
+      paths: it.paths.map((p) => ({ closed: p.closed, segs: p.segs.map((s) => [s[0] + c.x, s[1] + c.y, s[2], s[3], s[4], s[5]]) })) }));
+    this.sel = new Set(made);
+    this.commit(`已放入「${entry.name}」`);
+    this.status(`已放入「${entry.name}」：在画布上单击可以再放一个，Esc 结束`);
+  }
+
+  async libSave(name) {
+    const its = [...this.sel].filter((it) => it.data.mode !== 'dim');
+    if (!its.length) { this.toast('先选中要保存的图形', 'error'); return; }
+    let b = null;
+    its.forEach((it) => { b = b ? b.unite(it.bounds) : it.bounds.clone(); });
+    const c = b.center;
+    const items = its.map((it) => {
+      const s = this.serializeItem(it);
+      return { mode: s.mode, paths: s.paths.map((p) => ({ closed: p.closed, segs: p.segs.map((q) => [r3(q[0] - c.x), r3(q[1] - c.y), q[2], q[3], q[4], q[5]]) })) };
+    });
+    const r = await this.api.lib_save(name || '我的图形', items);
+    if (!r || r.error) { this.toast((r && r.error) || '保存失败', 'error'); return; }
+    await this.loadLibrary(true);
+    this.opts.libTab = 'mine';
+    this.status(`已保存到我的图库：「${r.name}」`);
+    if (this.tool === 'lib') { const box = this.$('.sk-toolopts'); delete box.dataset.lib; const inp = box.querySelector('[data-libname]'); if (inp) inp.value = ''; this.renderLib(box); }
+  }
+
+  async libDelete(file) {
+    const r = await this.api.lib_delete(file);
+    if (!r || r.error) { this.toast((r && r.error) || '删除失败', 'error'); return; }
+    if (this.libArmed === 'm:' + file) this.libArmed = null;
+    await this.loadLibrary(true);
+    this.status('已从我的图库删除');
+    if (this.tool === 'lib') this.renderLib(this.$('.sk-toolopts'));
+  }
+
   // ---------------------------------------------------------------- 测量
 
   // 四种方式：pp 点到点（拖动或点两下）/ pl 点到线（垂直距离）/ ll 线到线（平行间距、最近距离、夹角）/ cc 圆（半径直径、圆心距）
@@ -4582,7 +4918,7 @@ export class SketchEditor {
         chip('板件', `${parts.length} 块`) + (loose.length ? `<span class="sk-chip warn" title="不在任何板里的图形不会导出">⚠ ${loose.length} 个图形不在板里</span>` : '') +
         (parts.length ? `<button class="sk-chip sk-chip-btn" data-act="autoLayout" title="把所有板件（连同上面的孔、雕刻、文字）自动排进材料，互不重叠；一步撤销">⊞ 自动排版</button>` : '');
     } else if (this.part.sub) html = `<span class="sk-chip"><b>${escAttr(this.part.sub)}</b></span>`;
-    html += chip('图形', `${this.content.children.filter((c) => c.data && c.data.mode).length} 个`) +
+    html += chip('图形', `${this.content.children.filter((c) => c.data && c.data.mode && c.data.mode !== 'dim').length} 个`) +
       `<span class="sk-chip" title="新画的图形用这个加工方式（左下角可以换）"><i>新图形</i><b><i class="sk-dot" style="background:${m.color}"></i>${m.name}</b></span>`;
     el.innerHTML = html;
     const al = el.querySelector('[data-act=autoLayout]');
@@ -4736,6 +5072,8 @@ export class SketchEditor {
     const focused = box.querySelector(':focus');
     if (focused && focused.dataset.o) focused.blur();
     const t = this.tool;
+    if (t === 'lib') { this.renderLib(box); return; }
+    delete box.dataset.lib;
     const textSel = this.sel.size === 1 && [...this.sel][0].data.text ? [...this.sel][0] : null;
     let html = '';
     if (t === 'rect') html = `<h4>矩形</h4><div class="sk-row"><label>圆角半径<input data-o="radius" type="number" min="0" step="0.5" value="${this.opts.radius}"> mm</label></div>`;
@@ -5043,7 +5381,7 @@ export class SketchEditor {
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
     else if (ev.key === 'Escape' && this.radialCfg) { this.closeRadialConfig(); }
     else if (ev.key === 'Escape' && this.tool === 'measure' && (this.meas && (this.meas.a || this.meas.has))) { this.clearMeasure(); this.status('已清除测量'); }
-    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.cancelPairing(); this.status('已取消配对：第一条边保留为没配对的卡榫边'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
+    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.cancelPairing(); this.status('已取消配对：第一条边保留为没配对的卡榫边'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else if (this.dimState) { this.cancelDim(); this.status('已取消标注'); } else if (this.libArmed) { this.libArmed = null; this.status('已结束放置图库图形'); this.renderToolOpts(); } else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
       const s = ev.shiftKey ? 10 : (this.snapStep || 1);
@@ -5208,6 +5546,7 @@ export function flattenPath(path, steps = 16) {
 export function sketchPolys(sketch) {
   const out = { cut: [], open: [], engrave: [], lines: [] };
   (sketch.items || []).forEach((it) => {
+    if (it.mode === 'dim') return;                       // 尺寸标注不进 3D、不进导出几何
     (it.paths || []).forEach((p0) => {
       const p = closeNearlyClosed(p0);
       const pts = flattenPath(p);

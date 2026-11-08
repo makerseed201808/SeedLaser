@@ -1358,3 +1358,22 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-host .sk-eye.off { background: #f1f5f9; opacity: .7; }
 .sk-lockinfo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; color: #475569; }
 .sk-lockinfo.hidden { display: none; }
+.burn-ask .burn-dims { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 2px 0 12px; color: #334155; }
+
+/* ---- 图库（C4） ---- */
+.sk-lib-cat { margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: #475569; }
+.sk-lib-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.sk-lib-cell { position: relative; }
+.sk-lib-item { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 4px 5px;
+  border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; cursor: pointer; font-size: 11px; line-height: 1.25; color: #334155; }
+.sk-lib-item:hover { border-color: #93c5fd; background: #f8fbff; }
+.sk-lib-item.on { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .18); }
+.sk-lib-item span { text-align: center; overflow-wrap: anywhere; word-break: keep-all; }
+.sk-lib-svg { width: 100%; height: 46px; }
+.sk-lib-warn { font-style: normal; font-size: 10px; color: #b45309; background: #fef3c7; border-radius: 4px; padding: 0 4px; }
+.sk-lib-del { position: absolute; top: 2px; right: 2px; border: 0; background: rgba(255,255,255,.9); color: #94a3b8; border-radius: 5px;
+  font-size: 11px; padding: 1px 5px; cursor: pointer; }
+.sk-lib-del:hover { color: #dc2626; }
+.sk-lib-del.arm { color: #fff; background: #dc2626; }
+.sk-lib-save { gap: 6px; }
+.sk-lib-save input { flex: 1; min-width: 0; }
