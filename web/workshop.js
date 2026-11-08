@@ -819,6 +819,7 @@ function composeSheet() {
 // 画板 → 各板件：识别结果拆回 project.free.parts / sketches（板件坐标从 0 开始）
 function applySheet(res) {
   if (!res || !res.sheet) return;
+  W.teeUndo = null;                // 画板改过了：「撤销开槽」不再安全（会把之后的改动也撤掉）
   const f = W.project.free;
   const old = new Map(freeParts().map((p) => [p.id, p]));
   const parts = [];
@@ -962,6 +963,8 @@ function renderAssemblePanel(panel) {
       <button class="primary" data-k="auto" title="按画板里配对好的卡榫把板自动拼起来">🧩 按卡榫自动拼装</button>
       <button data-k="sf" title="在完整的 3D 编辑器里移动、旋转板件；靠近时自动吸附">🛠 手动摆放</button>
       <button data-k="flat" title="所有板平放在台面上（按画板上的位置）">拆开平铺</button>
+      <button data-k="tee" title="在「手动摆放」里把带 A 边的板立到另一块板上（边贴着板面），点这里就在下面那块板上开插槽并配对">🔩 按摆放开插槽</button>
+      ${W.teeUndo ? '<button data-k="teeundo" title="撤销刚才「按摆放开插槽」开的孔和配对">↩ 撤销开槽</button>' : ''}
     </div>
     <div class="asm-check">${!W.pose.report ? '<span class="pp-free">拼装后会自动检查有没有穿透</span>'
       : bad.length ? `<span class="pp-bad">穿透：${bad.map((p) => esc(p.name)).join('、')}</span>`
@@ -969,6 +972,9 @@ function renderAssemblePanel(panel) {
     <p class="asm-tip">要改形状：点上方「① 二维设计」。确认拼对了：点「③ 加工作业」排版导出。</p>`;
   panel.querySelector('[data-k=auto]').addEventListener('click', () => freeAutoAssemble());
   panel.querySelector('[data-k=sf]').addEventListener('click', () => openSketchForge());
+  panel.querySelector('[data-k=tee]').addEventListener('click', () => teeSlots());
+  const tu = panel.querySelector('[data-k=teeundo]');
+  if (tu) tu.addEventListener('click', () => undoTee());
   panel.querySelector('[data-k=flat]').addEventListener('click', () => {
     W.project.poses = {};
     W.model.parts.forEach((p) => { const o = view && view.objects.get(p.id); if (o) { o.group.matrix.fromArray(p.matrix); o.group.matrixWorldNeedsUpdate = true; } });
@@ -1825,6 +1831,7 @@ const checkPose = debounce(async (quiet) => {
 }, 150);
 
 function afterPoseChange() {
+  W.teeUndo = null;                // 手动摆放改过了：「撤销开槽」会把这些移动也撤掉，不再提供
   if (view) view.refreshStates();
   renderPartsPanel();
   checkPose();
@@ -2532,6 +2539,152 @@ async function freeAutoAssemble() {
   return msg;
 }
 
+// ---- B6：3D 里把带 A 边的板立在另一块板上 → 在那块板的二维草图里自动开插槽并配对
+// 条件：A 边还没配对；这块板垂直于另一块板；A 边贴着另一块板的上 / 下表面（误差 ≤ max(1.5 mm, 0.6 × 板厚)），齿朝里；
+// 边的两端都在另一块板的外轮廓里。插槽中线 = 立着的板的中面和另一块板的交线。
+function outerRingOf(id) {
+  const sk = sketchOf(id);
+  if (!sk) { const p = partById(id); return p && p.outer; }
+  const rings = sketchPolys(sk).cut;
+  return rings.length ? rings.reduce((m, r) => (Math.abs(signedArea(r)) > Math.abs(signedArea(m)) ? r : m)) : null;
+}
+
+function teeCandidates() {
+  if (!W.model || !W.model.parts) return [];
+  const t = W.model.thickness || 3;
+  const dis = new Set(W.project.disabled);
+  const parts = W.model.parts.filter((p) => !dis.has(p.id) && p.id !== 'reference');
+  const M4 = (p) => new THREE.Matrix4().fromArray(poseOf(p));
+  const tol = Math.max(1.5, t * 0.6);
+  const out = [];
+  parts.forEach((P) => {
+    const MP = M4(P);
+    jointsOf(P.id).filter((j) => j.type === 'a' && !j.pair).forEach((j) => {
+      const F = jointFrame(j);
+      const wa = F.a.clone().setZ(t / 2).applyMatrix4(MP);
+      const wb = F.b.clone().setZ(t / 2).applyMatrix4(MP);
+      const wn = F.n.clone().transformDirection(MP);                       // 齿伸出去的方向
+      const wz = new THREE.Vector3(0, 0, 1).transformDirection(MP);       // 这块板的法线
+      let best = null;
+      parts.forEach((Q) => {
+        if (Q.id === P.id) return;
+        const inv = M4(Q).invert();
+        const qa = wa.clone().applyMatrix4(inv); const qb = wb.clone().applyMatrix4(inv);
+        const qn = wn.clone().transformDirection(inv); const qz = wz.clone().transformDirection(inv);
+        if (Math.abs(qz.z) > 0.1 || Math.abs(qa.z - qb.z) > 0.5) return;  // 要垂直于 Q、边和 Q 的板面平行
+        const z = (qa.z + qb.z) / 2;
+        const top = Math.abs(z - t) <= tol && qn.z < -0.9;                 // 立在上表面，齿朝下插进去
+        const bot = Math.abs(z) <= tol && qn.z > 0.9;                      // 贴在下表面，齿朝上
+        if (!top && !bot) return;
+        const ring = outerRingOf(Q.id);
+        if (!ring || !pointInPoly([qa.x, qa.y], ring) || !pointInPoly([qb.x, qb.y], ring)) return;
+        const dz = Math.abs(z - (top ? t : 0));
+        if (!best || dz < best.dz) best = { P, Q, j, a: [qa.x, qa.y], b: [qb.x, qb.y], dz };
+      });
+      if (best) out.push(best);
+    });
+  });
+  return out;
+}
+
+function savedPlay() {
+  try { const v = Number(localStorage.getItem('seedboxes.jointPlay')); return Number.isFinite(v) ? v : 0; } catch (e) { return 0; }
+}
+
+// 在 Q 的草图里开插槽（和 sketch2d.js 的 mortiseRects / mortiseMeta 一样的算法），和 P 的 A 边配成一对，再把 P 吸到准确的位置
+function applyTee(c) {
+  const t = W.model.thickness || 3;
+  const sk = sketchOf(c.Q.id) || (W.project.sketches[c.Q.id] = rectSketchOf(c.Q));
+  const a = new THREE.Vector2(...c.a); const b = new THREE.Vector2(...c.b);
+  const L = a.distanceTo(b);
+  const u = b.clone().sub(a).divideScalar(L);
+  const v = new THREE.Vector2(-u.y, u.x);
+  const play = Math.max(-0.3, savedPlay());
+  const w = t / 2 + play / 2;
+  const iv = (c.j.iv || jointIv(c.j, c.j.L)).map(([s0, e0]) => [s0 * L / c.j.L, e0 * L / c.j.L]);
+  const P = (s0, side) => a.clone().add(u.clone().multiplyScalar(s0)).add(v.clone().multiplyScalar(side * w));
+  const rects = iv.map(([s0, e0]) => [P(s0 - play / 2, -1), P(e0 + play / 2, -1), P(e0 + play / 2, 1), P(s0 - play / 2, 1)]);
+  const pair = newId();
+  const r3 = (x) => Math.round(x * 1000) / 1000;
+  const meta = { id: newId(), pair, type: 'mortise', iv: iv.map(([s0, e0]) => [r3(s0), r3(e0)]), k: iv.length, depth: t, L: r3(L),
+    play, mode: c.j.mode || 'count', count: c.j.count || 0, tab: c.j.tab || 0, gap: c.j.gap || 0,
+    a: [a.x, a.y], b: [b.x, b.y], c: [a.x + v.x, a.y + v.y] };
+  sk.items.push({ id: newId(), mode: 'cut', paths: rects.map((q) => ({ closed: true, segs: q.map((pt) => [r3(pt.x), r3(pt.y), 0, 0, 0, 0]) })), joints: [meta] });
+  c.j.pair = pair;
+  // 立着的板吸到准确位置：从配合规则（和自动拼装同一套）里选离现在最近的
+  const MQ = new THREE.Matrix4().fromArray(poseOf(c.Q));
+  const MP = new THREE.Matrix4().fromArray(poseOf(c.P));
+  const cen = partCenter(c.P);
+  let best = null;
+  mateOptions(c.j, meta, t).forEach((F) => {
+    const T = MQ.clone().multiply(F);
+    const e = poseError(MP, T, cen);
+    const score = e.d + e.a;
+    if (!best || score < best.score) best = { T, score };
+  });
+  W.project.poses = W.project.poses || {};
+  W.project.poses[c.Q.id] = MQ.toArray().map((x) => Math.round(x * 1e4) / 1e4);
+  if (best) W.project.poses[c.P.id] = best.T.toArray().map((x) => Math.round(x * 1e4) / 1e4);
+  return iv.length;
+}
+
+function rectSketchOf(p) {
+  return { items: [{ id: 'outline', mode: 'cut', role: 'outline', paths: [{ closed: true, segs: [[0, 0, 0, 0, 0, 0], [p.w, 0, 0, 0, 0, 0], [p.w, p.h, 0, 0, 0, 0], [0, p.h, 0, 0, 0, 0]] }] }] };
+}
+
+async function teeSlots() {
+  const cands = teeCandidates();
+  if (!cands.length) {
+    toast('没找到立在另一块板上的 A 边：先用「卡榫」工具在要立起来的板边上做一条 A 边（不配对），再在「手动摆放」里把它立到另一块板上（边贴着板面）', 'error');
+    return null;
+  }
+  const side = (c) => {
+    const [ax, ay] = c.j.a; const [bx, by] = c.j.b;
+    return Math.abs(ay - by) < 1e-6 ? '横边' : Math.abs(ax - bx) < 1e-6 ? '竖边' : '斜边';
+  };
+  const ok = await new Promise((resolve) => {
+    const box = document.createElement('div');
+    box.className = 'sk-confirm tee-ask';
+    box.innerHTML = `<div><p><b>按 3D 摆放开插槽</b><br>找到 ${cands.length} 处立在另一块板上的 A 边，会在下面的板上开一排插槽孔，并和这条 A 边配成一对（开完后左侧有「↩ 撤销开槽」）：</p>
+      <ul>${cands.map((c) => `<li>${escHtml(c.P.name)} 的${side(c)}（${fmtN(c.j.L)} mm）插进 <b>${escHtml(c.Q.name)}</b></li>`).join('')}</ul>
+      <div class="row"><button data-r="no">取消</button><button data-r="yes" class="primary">开插槽</button></div></div>`;
+    document.body.appendChild(box);
+    box.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-r]');
+      if (!b) return;
+      box.remove();
+      resolve(b.dataset.r === 'yes');
+    });
+  });
+  if (!ok) return null;
+  W.teeUndo = JSON.stringify({ sketches: W.project.sketches || {}, poses: W.project.poses || {} });   // 一步撤销用
+  let holes = 0;
+  cands.forEach((c) => { holes += applyTee(c); });
+  projectChanged();
+  await loadModel();
+  renderPartsPanel();
+  checkPose();
+  const msg = `已开 ${cands.length} 处插槽（共 ${holes} 个孔），并和立着的板配成一对`;
+  toast(msg, 'success');
+  return msg;
+}
+
+async function undoTee() {
+  if (!W.teeUndo) return;
+  const u = JSON.parse(W.teeUndo);
+  W.teeUndo = null;
+  W.project.sketches = u.sketches;
+  W.project.poses = u.poses;
+  projectChanged();
+  await loadModel();
+  renderPartsPanel();
+  checkPose();
+  toast('已撤销刚才开的插槽', 'success');
+}
+
+function escHtml(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
+function fmtN(v) { return String(Math.round(Number(v) * 100) / 100); }
+
 async function sfExplode() {
   const dis = new Set(W.project.disabled);
   const parts = W.model.parts.filter((p) => !dis.has(p.id) && p.id !== 'reference');
@@ -2754,6 +2907,7 @@ window.SeedWorkshop = {
     W.stage = name === 'FreeDesign' ? 'design' : null;
     W.model = null;
     W.project = freshProject();
+    W.teeUndo = null;
     W.selected = null;
     W.multi.clear();
     W.pose.report = null;
@@ -2792,6 +2946,7 @@ window.SeedWorkshop = {
              free: W.project.free ? JSON.parse(JSON.stringify(W.project.free)) : null };
   },
   setProject(p) {
+    W.teeUndo = null;
     W.project = { disabled: [...(p.disabled || [])], edits: JSON.parse(JSON.stringify(p.edits || {})),
                   poses: JSON.parse(JSON.stringify(p.poses || {})),
                   sketches: JSON.parse(JSON.stringify(p.sketches || {})),
@@ -2837,7 +2992,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, freeAutoAssemble, connStates, checkPose: () => checkPose(), get connState() { return W.connStates; }, openSheet, setStage, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
+    SF, sfCommand, sfSync, freeAutoAssemble, connStates, teeCandidates, teeSlots, checkPose: () => checkPose(), get connState() { return W.connStates; }, openSheet, setStage, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);
