@@ -1027,6 +1027,8 @@ async function importToDesign() {
     (p.holes || []).forEach((h, i) => items.push({ id: 'hole' + i, mode: 'cut', paths: [{ closed: true, segs: polySegs(h) }] }));
     (p.extra || []).forEach((h, i) => { if (h.length > 2) items.push({ id: 'extra' + i, mode: 'cut', paths: [{ closed: true, segs: polySegs(h) }] }); });
     (p.etch || []).forEach((h, i) => { if (h.length > 2) items.push({ id: 'etch' + i, mode: 'engrave', paths: [{ closed: true, segs: polySegs(h) }] }); });
+    // 开放的切割线（活铰链的切缝等）：原来没带过来，弯曲板放进设计后切不出切缝
+    (p.lines || []).forEach((l, i) => { if (l.length > 1) items.push({ id: 'line' + i, mode: 'cut', paths: [{ closed: false, segs: polySegs(l) }] }); });
     sketches[id] = { items };
     const [x0, y0, x1, y1] = p.bbox || [0, 0, p.w, p.h];
     parts.push({ id, name: p.name, w: Math.round((x1 - x0) * 100) / 100, h: Math.round((y1 - y0) * 100) / 100 });
@@ -2464,6 +2466,64 @@ async function nameplateDialog() {
 // ---- 自由设计：按卡榫配对自动拼装
 // 从卡榫最多的板开始（保持原位），每次挑一对「已放好的板 ↔ 还没放的板」的配对卡榫，
 // 在候选姿态里选不穿透、接触最多、离已拼部分最近（第一块优先往上搭）的那个。
+// 自动拼装的「一致性搜索」：从 root 出发，每次放一块和已放的板有配对的板，只保留让最多配对对上的摆法（纯前端矩阵运算，很快）；
+// 返回若干组完整摆法：对上的配对多的在前，同样多时板的重心高的在前（盒子朝上）。穿透由调用方用后端检查。
+function mateTargets(l, q, M) {
+  const qa = l.a === q;
+  const pp = qa ? l.b : l.a; const jq = qa ? l.ja : l.jb; const jp = qa ? l.jb : l.ja;
+  const t = W.model.thickness || 3;
+  const direct = mateOptions(jq, jp, t);
+  const Fs = direct.length ? direct : mateOptions(jp, jq, t).map((G) => G.clone().invert());
+  return Fs.map((F) => M(pp).multiply(F));
+}
+
+function solveAssembly(ids, links, root, t) {
+  void t;
+  const results = [];
+  const centers = Object.fromEntries(ids.map((id) => [id, partCenter(partById(id))]));
+  const same = (A, B, id) => { const e = poseError(A, B, centers[id]); return e.d < 0.05 && e.a < 0.5; };
+  let budget = 6000;                                  // 搜索上限（节点数）：板很多时退回逐块贪心
+  let bestN = -1;
+  const dfs = (poses, placed, nSat) => {
+    if (--budget < 0) return;
+    const open = links.filter((l) => !placed.has(l.a) || !placed.has(l.b)).length;
+    if (nSat + open < bestN) return;                  // 剩下的配对全对上也比不过已找到的：剪掉
+    const M = (id) => new THREE.Matrix4().fromArray(poses[id]);
+    const frontier = links.filter((l) => placed.has(l.a) !== placed.has(l.b));
+    if (!frontier.length) {
+      if (nSat > bestN) bestN = nSat;
+      results.push({ poses: { ...poses }, nSat });
+      return;
+    }
+    // 下一块：和已放的板配对最多的那块
+    const cnt = {};
+    frontier.forEach((l) => { const q = placed.has(l.a) ? l.b : l.a; cnt[q] = (cnt[q] || 0) + 1; });
+    const q = Object.keys(cnt).sort((x, y) => cnt[y] - cnt[x])[0];
+    const mine = links.filter((l) => (l.a === q && placed.has(l.b)) || (l.b === q && placed.has(l.a)));
+    const cands = [];
+    mine.forEach((l) => mateTargets(l, q, M).forEach((T) => { if (!cands.some((c) => same(c, T, q))) cands.push(T); }));
+    const scored = cands.map((T) => ({ T, s: mine.filter((l) => mateTargets(l, q, M).some((T2) => same(T2, T, q))).length }));
+    const best = Math.max(0, ...scored.map((x) => x.s));
+    scored.filter((x) => x.s === best).forEach(({ T }) => {
+      poses[q] = T.toArray(); placed.add(q);
+      dfs(poses, placed, nSat + best);
+      placed.delete(q); delete poses[q];
+    });
+  };
+  dfs({ [root]: partById(root).matrix.slice() }, new Set([root]), 0);
+  // 整组朝下（其它板都在 root 下面）时绕 root 中心翻转 180°：配对关系不变，盒子正着放
+  const R0 = new THREE.Matrix4().fromArray(partById(root).matrix);
+  const rc = centers[root].clone().applyMatrix4(R0);
+  const flip = new THREE.Matrix4().makeTranslation(rc.x, rc.y, rc.z).multiply(new THREE.Matrix4().makeRotationX(Math.PI)).multiply(new THREE.Matrix4().makeTranslation(-rc.x, -rc.y, -rc.z));
+  const zOf = (r) => Object.entries(r.poses).reduce((s, [id, m]) => s + centers[id].clone().applyMatrix4(new THREE.Matrix4().fromArray(m)).z - rc.z, 0);
+  results.forEach((r) => {
+    if (zOf(r) < -1e-6) Object.keys(r.poses).forEach((id) => { r.poses[id] = flip.clone().multiply(new THREE.Matrix4().fromArray(r.poses[id])).toArray(); });
+    r.z = zOf(r);
+  });
+  results.sort((a, b) => b.nSat - a.nSat || b.z - a.z);
+  return results.slice(0, 6);
+}
+
 async function freeAutoAssemble() {
   if (!W.model || !W.model.token) return null;
   const t = W.model.thickness || 3;
@@ -2486,6 +2546,14 @@ async function freeAutoAssemble() {
   const placed = new Set([root]);
   poses[root] = partById(root).matrix.map((x) => Math.round(x * 1e4) / 1e4);
   const used = new Set();
+  // 先找一组「配对都对得上」的摆法（盒子这种闭环：四面墙的朝向互相约束，逐块贪心可能第一面墙就放反）
+  const solved = solveAssembly(ids, links, root, t);
+  for (const cand of solved) {
+    const r = await api().check_pose(W.model.token, cand.poses, Object.keys(cand.poses), W.project.sketches || {});
+    if (r.error || Object.values(r.report || {}).some((v) => v.collide && v.collide.length)) continue;
+    Object.entries(cand.poses).forEach(([id, m]) => { poses[id] = m.map((x) => Math.round(x * 1e4) / 1e4); placed.add(id); });
+    break;
+  }
   const M = (id) => new THREE.Matrix4().fromArray(poses[id] || partById(id).matrix);
   const centerW = (id, m) => partCenter(partById(id)).applyMatrix4(m || M(id));
   setNote('正在按卡榫自动拼装…', 'info');

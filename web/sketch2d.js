@@ -57,6 +57,7 @@ const TOOLS = [
   { id: 'bridge', key: 'b', icon: '⫶', name: '水口', tip: '在切割线上点一下加水口：留一小段不切，板件切完还连在材料上不会掉，取下时用刀片划断；再点一次删除（B）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '测量：点到点 / 点到线 / 线到线（间距、夹角）/ 圆（半径、圆心距），方式在右侧选（M）' },
+  { id: 'make', icon: '✦', name: '造物', tip: '一键造物：直角盒子、圆角盒子、模数齿轮、徽章 / 印章，填几个尺寸点「生成」，得到的是普通板件，可以继续改' },
   { id: 'lib', icon: '▦', name: '图库', tip: '图库：螺丝孔、舵机 / 主控板安装孔、轴孔、装饰图形，点一下放到画板中央；选中图形可以存进「我的图库」' },
   { id: 'dim', key: 'd', icon: '⟷', name: '标注', tip: '尺寸标注：点一条直边，或点两个点，再移动鼠标点一下放置数字；数字跟着图形变。默认不导出（D）' },
   // 下面是「功能面板」：画布上照常可以选择 / 移动，右侧只显示对应的参数卡片
@@ -2216,6 +2217,7 @@ export class SketchEditor {
     }
     if (t === 'measure') this.measureDown(e, pt);
     if (t === 'dim') this.dimDown(e, pt);
+    if (t === 'make') return this.selectDown(e, pt);                       // 造物：画布照常可以选择 / 移动
     if (t === 'lib') {
       const le = this.libArmed && this.libEntry(this.libArmed);
       if (le) { this.libPlace(le, this.snap(pt)); return; }
@@ -3776,6 +3778,337 @@ export class SketchEditor {
     if (this.tool === 'lib') this.renderLib(this.$('.sk-toolopts'));
   }
 
+  // ---------------------------------------------------------------- 一键造物（C5，参考 LaserMaker「一键造物」）
+  // 生成的都是普通板件：可以继续改、加孔、改卡榫。直角盒子用画板自己的卡榫（自动配对 → 连接清单 ✓、3D 自动拼装）；
+  // 圆角盒子用 Boxes.py 的 RoundedBox（侧壁是活铰链，一条长板弯过圆角）；齿轮按 ISO 53 标准基本齿廓（渐开线）计算。
+
+  makeDefaults() {
+    if (!this.opts.make) {
+      this.opts.make = { kind: 'box', box: { w: 80, d: 60, h: 50, outer: false, lid: true, finger: 0 },
+        rbox: { w: 100, d: 80, h: 50, r: 15, outer: false, top: 'closed' },
+        gear: { m: 2, z1: 20, z2: 12, bore: 5, lighten: true, pair: true },
+        badge: { shape: 'circle', d: 50, border: true, text: 'SeedLaser', arc: true, mirror: false } };
+    }
+    return this.opts.make;
+  }
+
+  makeSchematic(kind) {
+    const s = 'fill="none" stroke="#475569" stroke-width="1.3" stroke-linejoin="round"';
+    const acc = 'fill="none" stroke="#2563eb" stroke-width="1.3"';
+    if (kind === 'box') return `<svg viewBox="0 0 120 70" class="sk-make-svg"><path ${s} d="M20 25 L60 12 L100 25 L100 58 L60 68 L20 58 Z M20 25 L60 38 L100 25 M60 38 L60 68"/>
+      <path ${acc} d="M20 32h4v6h-4M20 44h4v6h-4M56 44h4v6h-4"/><text x="60" y="8" font-size="7" text-anchor="middle" fill="#64748b">指接卡榫 · 自动配对</text></svg>`;
+    if (kind === 'rbox') return `<svg viewBox="0 0 120 70" class="sk-make-svg"><rect ${s} x="22" y="14" width="76" height="48" rx="14"/>
+      <path ${acc} d="${Array.from({ length: 9 }, (_, i) => `M${30 + i * 7} 22v32`).join('')}"/><text x="60" y="8" font-size="7" text-anchor="middle" fill="#64748b">侧壁是活铰链（一条板弯过圆角）</text></svg>`;
+    if (kind === 'gear') return `<svg viewBox="0 0 120 70" class="sk-make-svg"><circle ${s} cx="42" cy="38" r="24" stroke-dasharray="3 2"/><circle ${s} cx="84" cy="38" r="14" stroke-dasharray="3 2"/>
+      <circle ${acc} cx="42" cy="38" r="3"/><circle ${acc} cx="84" cy="38" r="3"/><path ${s} d="M42 38H84"/><text x="63" y="35" font-size="6" text-anchor="middle" fill="#64748b">中心距</text>
+      <text x="60" y="8" font-size="7" text-anchor="middle" fill="#64748b">分度圆直径 = 模数 × 齿数</text></svg>`;
+    return `<svg viewBox="0 0 120 70" class="sk-make-svg"><circle ${s} cx="60" cy="38" r="27"/><circle fill="none" stroke="#dc2626" stroke-width="1" cx="60" cy="38" r="23"/>
+      <path fill="none" stroke="#16a34a" stroke-width="1.3" d="M42 33 Q60 18 78 33"/><text x="60" y="8" font-size="7" text-anchor="middle" fill="#64748b">外形切割 · 边框描线 · 文字雕刻</text></svg>`;
+  }
+
+  renderMake(box) {
+    const M = this.makeDefaults();
+    const key = M.kind + '§' + this.sheetMode;
+    if (box.dataset.make === key) return;
+    box.dataset.make = key;
+    box.classList.remove('hidden');
+    const t = this.part.thickness || 3;
+    const num = (grp, k, label, unit, attrs = 'min="0" step="1"') => `<label>${label}<input data-mk="${grp}.${k}" type="number" ${attrs} value="${M[grp][k]}">${unit ? ` ${unit}` : ''}</label>`;
+    const chk = (grp, k, label) => `<label class="sk-check"><input data-mk="${grp}.${k}" type="checkbox" ${M[grp][k] ? 'checked' : ''}>${label}</label>`;
+    let body = '';
+    if (M.kind === 'box') {
+      body = `<div class="sk-row">${num('box', 'w', '长', 'mm')}${num('box', 'd', '宽', 'mm')}</div>
+        <div class="sk-row">${num('box', 'h', '高', 'mm')}<label>板厚<input data-mk="thick" type="number" min="0.5" max="30" step="0.1" value="${fmt(t)}"> mm</label></div>
+        <div class="sk-row">${num('box', 'finger', '齿宽', 'mm', 'min="0" step="1" placeholder="自动"')}</div>
+        <div class="sk-row">${chk('box', 'outer', '尺寸是外部尺寸（含板厚）')}${chk('box', 'lid', '有盖子')}</div>
+        <p class="sk-small">生成 ${M.box.lid ? 6 : 5} 块板，所有边自动做成配对的指接卡榫（齿宽 0 = 按板厚自动，约 3 倍板厚）。之后「3D 装配 → 按卡榫自动拼装」就能拼成盒子。</p>`;
+    } else if (M.kind === 'rbox') {
+      body = `<div class="sk-row">${num('rbox', 'w', '长', 'mm')}${num('rbox', 'd', '宽', 'mm')}</div>
+        <div class="sk-row">${num('rbox', 'h', '高', 'mm')}${num('rbox', 'r', '圆角', 'mm')}</div>
+        <div class="sk-row"><label>板厚<input data-mk="thick" type="number" min="0.5" max="30" step="0.1" value="${fmt(t)}"> mm</label>
+          <label>顶部<select data-mk="rbox.top">${[['closed', '封闭'], ['hole', '开口（环）'], ['lid', '带盖']].map(([v, n]) => `<option value="${v}" ${M.rbox.top === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+        <div class="sk-row">${chk('rbox', 'outer', '尺寸是外部尺寸（含板厚）')}</div>
+        <p class="sk-small">侧壁是一整条带活铰链（密集切缝）的板，切好后弯过圆角插进底板。适合 3 mm 椴木板；亚克力不能弯。3D 里不拼装（弯曲的板没法当平板摆）。</p>`;
+    } else if (M.kind === 'gear') {
+      body = `<div class="sk-row">${num('gear', 'm', '模数', 'mm', 'min="0.5" step="0.5"')}${num('gear', 'z1', '齿数', '', 'min="6" step="1"')}</div>
+        <div class="sk-row">${num('gear', 'bore', '轴孔', 'mm', 'min="0" step="0.5"')}${chk('gear', 'lighten', '减重孔')}</div>
+        <div class="sk-row">${chk('gear', 'pair', '再配一个齿轮')}${num('gear', 'z2', '齿数', '', 'min="6" step="1"')}</div>
+        <p class="sk-small">压力角 20°，标准渐开线（ISO 53）。分度圆 ${fmt(M.gear.m * M.gear.z1)} mm、齿顶圆 ${fmt(M.gear.m * (M.gear.z1 + 2))} mm${M.gear.pair ? `；中心距 ${fmt(M.gear.m * (M.gear.z1 + M.gear.z2) / 2)} mm（两个轴孔按这个距离打）` : ''}。模数相同的齿轮才能啮合；激光切建议模数 ≥ 1.5。</p>`;
+    } else {
+      body = `<div class="sk-row"><label>形状<select data-mk="badge.shape">${[['circle', '圆形'], ['square', '方形'], ['shield', '盾牌']].map(([v, n]) => `<option value="${v}" ${M.badge.shape === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>${num('badge', 'd', '大小', 'mm', 'min="10" step="1"')}</div>
+        <div class="sk-row"><label>文字<input data-mk="badge.text" type="text" maxlength="40" value="${escAttr(M.badge.text)}"></label></div>
+        <div class="sk-row">${chk('badge', 'arc', '文字沿弧形')}${chk('badge', 'border', '边框')}${chk('badge', 'mirror', '镜像（做印章）')}</div>
+        <p class="sk-small">外形切割，边框是描线，文字雕刻。做印章要勾「镜像」：印出来才是正的。</p>`;
+    }
+    const tabs = [['box', '直角盒子'], ['rbox', '圆角盒子'], ['gear', '模数齿轮'], ['badge', '徽章 / 印章']];
+    box.innerHTML = `<h4>一键造物</h4><div class="sk-seg sk-make-tabs">${tabs.map(([k, n]) => `<button data-mkind="${k}" class="${M.kind === k ? 'on' : ''}">${n}</button>`).join('')}</div>
+      ${this.makeSchematic(M.kind)}${body}
+      ${this.sheetMode || M.kind === 'gear' || M.kind === 'badge' ? '' : '<p class="sk-warn">盒子要在自由设计的二维画板里生成（一块板的编辑里放不下多块板）。</p>'}
+      <div class="sk-row"><button data-mkgo class="primary sk-make-go">生成</button></div>`;
+    box.querySelectorAll('[data-mkind]').forEach((b) => b.addEventListener('click', () => { M.kind = b.dataset.mkind; delete box.dataset.make; this.renderMake(box); }));
+    box.querySelectorAll('[data-mk]').forEach((inp) => {
+      const upd = () => {
+        const k = inp.dataset.mk;
+        if (k === 'thick') return;
+        const [g, f] = k.split('.');
+        M[g][f] = inp.type === 'checkbox' ? inp.checked : inp.type === 'number' ? Number(inp.value) : inp.value;
+        if (inp.type === 'checkbox' || inp.tagName === 'SELECT' || g === 'gear') { delete box.dataset.make; this.renderMake(box); }
+      };
+      inp.addEventListener('change', upd);
+      inp.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') inp.blur(); });
+    });
+    box.querySelector('[data-mkgo]').addEventListener('click', () => {
+      const th = box.querySelector('[data-mk=thick]');
+      if (th) this.makeSetThickness(Number(th.value));
+      this.makeGo();
+    });
+  }
+
+  makeSetThickness(v) {
+    v = Math.min(30, Math.max(0.5, Number(v) || 3));
+    if (Math.abs(v - (this.part.thickness || 0)) < 1e-9) return;
+    this.part.thickness = v;
+    if (this.onThickness) this.onThickness(v);
+    if (this.renderBoardInfo) this.renderBoardInfo();
+  }
+
+  async makeGo() {
+    const M = this.makeDefaults();
+    try {
+      if (M.kind === 'box') return this.makeBox(M.box);
+      if (M.kind === 'rbox') return await this.makeRoundedBox(M.rbox);
+      if (M.kind === 'gear') return this.makeGears(M.gear);
+      return await this.makeBadge(M.badge);
+    } catch (e) {
+      this.toast(`生成失败：${e && e.message ? e.message : e}`, 'error');
+      return null;
+    }
+  }
+
+  rectSegs(x, y, w, h) { return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map(([a, b]) => [r3(a), r3(b), 0, 0, 0, 0]); }
+
+  // 在一条直边（a → b，是路径上相邻的两个节点）上做卡榫；不提交
+  edgeJoint(item, a, b, type, iv, depth, pair) {
+    const path = this.itemPaths(item)[0];
+    const ia = path.segments.findIndex((s) => s.point.getDistance(a) < 1e-3);
+    if (ia < 0) return false;
+    const nb = path.segments[(ia + 1) % path.segments.length];
+    if (nb.point.getDistance(b) > 1e-3) return false;
+    const { pts, n } = this.jointPoints(a, b, (q) => path.contains(q), type, iv, depth);
+    path.insertSegments(ia + 1, pts.map((q) => new this.ps.Segment(q)));
+    item.data.joints = [...(item.data.joints || []), { id: newId(), pair, ...this.jointMeta(type, iv, depth, a, b, n) }];
+    return true;
+  }
+
+  makeBox(o) {
+    if (!this.sheetMode) { this.toast('盒子要在自由设计的二维画板里生成', 'error'); return null; }
+    const t = this.part.thickness || 3;
+    let W = Number(o.w), D = Number(o.d), H = Number(o.h);
+    if (o.outer) { W -= 2 * t; D -= 2 * t; H -= t * (o.lid ? 2 : 1); }
+    if (!(W > 4 * t && D > 4 * t && H > 3 * t)) { this.toast(`尺寸太小：内部至少要 ${fmt(4 * t)} × ${fmt(4 * t)} × ${fmt(3 * t)} mm`, 'error'); return null; }
+    const f = Number(o.finger) > 0 ? Number(o.finger) : Math.max(2 * t, Math.round(t * 3));
+    const saved = { jointMode: this.opts.jointMode, jointTab: this.opts.jointTab, jointGap: this.opts.jointGap, jointDepth: this.opts.jointDepth };
+    Object.assign(this.opts, { jointMode: 'width', jointTab: f, jointGap: f, jointDepth: 0 });
+    try {
+      const gap = 2 * t + 6;
+      const P = (name, w, h) => ({ name, w, h });
+      const panels = [P('front', W, H), P('right', D, H), P('back', W, H), P('left', D, H), P('bottom', W, D)];
+      if (o.lid) panels.push(P('top', W, D));
+      // 摆放：上排四面侧板，下排底和盖，整体以视图中心为中心
+      const row1 = panels.slice(0, 4), row2 = panels.slice(4);
+      const w1 = row1.reduce((s, p) => s + p.w, 0) + gap * 3;
+      const w2 = row2.reduce((s, p) => s + p.w, 0) + gap * (row2.length - 1);
+      const totalH = H + gap + D;
+      const c = this.libDropPoint();
+      let x = c.x - w1 / 2;
+      const y1 = c.y + totalH / 2 - H;
+      row1.forEach((p) => { p.x = x; p.y = y1; x += p.w + gap; });
+      x = c.x - w2 / 2;
+      row2.forEach((p) => { p.x = x; p.y = y1 - gap - D; x += p.w + gap; });
+      const by = {};
+      panels.forEach((p) => { p.item = this.addItem({ mode: 'cut', paths: [{ closed: true, segs: this.rectSegs(p.x, p.y, p.w, p.h) }] }); by[p.name] = p; });
+      const pt = (x0, y0) => new this.ps.Point(x0, y0);
+      const edge = (p, side) => {
+        const BL = pt(p.x, p.y), BR = pt(p.x + p.w, p.y), TR = pt(p.x + p.w, p.y + p.h), TL = pt(p.x, p.y + p.h);
+        return { bottom: [BL, BR], right: [BR, TR], top: [TR, TL], left: [TL, BL] }[side];
+      };
+      const pairs = [['front', 'right', 'right', 'left'], ['right', 'right', 'back', 'left'], ['back', 'right', 'left', 'left'], ['left', 'right', 'front', 'left'],
+        ['front', 'bottom', 'bottom', 'bottom'], ['back', 'bottom', 'bottom', 'top'], ['right', 'bottom', 'bottom', 'left'], ['left', 'bottom', 'bottom', 'right']];
+      if (o.lid) pairs.push(['front', 'top', 'top', 'bottom'], ['back', 'top', 'top', 'top'], ['right', 'top', 'top', 'right'], ['left', 'top', 'top', 'left']);
+      // 每块板都按「从盒子外面看」画：底板从下面看，左右和盖板相反（右侧板配底板的左边；已用穷举核对 12 对全部能同时对上）
+      // A 边：前 / 后板的四条边、左 / 右板的上下边；B 边：左 / 右板的竖边、底板和盖板的四条边
+      const typeOf = (name, side) => (name === 'bottom' || name === 'top' ? 'b' : (name === 'left' || name === 'right') && (side === 'left' || side === 'right') ? 'b' : 'a');
+      let ok = 0;
+      pairs.forEach(([pa, sa, pb, sb]) => {
+        const [a1, b1] = edge(by[pa], sa);
+        const [a2, b2] = edge(by[pb], sb);
+        const L = a1.getDistance(b1);
+        const iv = this.jointIntervals(L);
+        const pair = newId();
+        if (this.edgeJoint(by[pa].item, a1, b1, typeOf(pa, sa), iv, t, pair) && this.edgeJoint(by[pb].item, a2, b2, typeOf(pb, sb), iv, t, pair)) ok++;
+      });
+      this.sel = new Set(panels.map((p) => p.item));
+      const label = `已生成直角盒子：${panels.length} 块板、${ok} 对卡榫（内部 ${fmt(W)} × ${fmt(D)} × ${fmt(H)} mm，板厚 ${fmt(t)} mm）`;
+      this.commit(label);
+      this.status(label + '。点「3D 装配 → 按卡榫自动拼装」看效果');
+      return { parts: panels.length, pairs: ok };
+    } finally {
+      Object.assign(this.opts, saved);
+    }
+  }
+
+  async makeRoundedBox(o) {
+    if (!this.sheetMode) { this.toast('盒子要在自由设计的二维画板里生成', 'error'); return null; }
+    const t = this.part.thickness || 3;
+    const r = await this.api.get_model('RoundedBox', { x: Number(o.w), y: Number(o.d), sh: String(Number(o.h)), radius: Math.round(Number(o.r)),
+      outside: !!o.outer, top: o.top, thickness: t, wallpieces: '1', edge_style: 'f', reference: 0 });
+    if (!r || r.error || !r.parts) { this.toast((r && r.error) || '圆角盒子生成失败', 'error'); return null; }
+    const src = r.parts.filter((p) => p.id !== 'reference');
+    const gap = 2 * t + 6;
+    const boxes = src.map((p) => { const [x0, y0, x1, y1] = p.bbox || [0, 0, p.w, p.h]; return { p, x0, y0, w: x1 - x0, h: y1 - y0 }; });
+    // 摆放：底 / 盖一排，侧壁（长条）在下面一排
+    const flat = boxes.filter((b) => b.w < 2.2 * b.h), strips = boxes.filter((b) => b.w >= 2.2 * b.h);
+    const c = this.libDropPoint();
+    const rows = [flat, strips].filter((rw) => rw.length);
+    const rowH = rows.map((rw) => Math.max(...rw.map((b) => b.h)));
+    const totalH = rowH.reduce((s, h) => s + h, 0) + gap * (rows.length - 1);
+    let y = c.y + totalH / 2;
+    const made = [];
+    const P = (pts, dx, dy, closed) => ({ closed, segs: pts.map(([x0, y0]) => [r3(x0 + dx), r3(y0 + dy), 0, 0, 0, 0]) });
+    rows.forEach((rw, i) => {
+      y -= rowH[i];
+      const wsum = rw.reduce((s, b) => s + b.w, 0) + gap * (rw.length - 1);
+      let x = c.x - wsum / 2;
+      rw.forEach((b) => {
+        const dx = x - b.x0, dy = y - b.y0;
+        made.push(this.addItem({ mode: 'cut', paths: [P(b.p.outer, dx, dy, true)] }));
+        (b.p.holes || []).concat(b.p.extra || []).forEach((h) => { if (h.length > 2) made.push(this.addItem({ mode: 'cut', paths: [P(h, dx, dy, true)] })); });
+        (b.p.lines || []).forEach((l) => { if (l.length > 1) made.push(this.addItem({ mode: 'cut', paths: [P(l, dx, dy, false)] })); });
+        (b.p.etch || []).forEach((h) => { if (h.length > 2) made.push(this.addItem({ mode: 'engrave', paths: [P(h, dx, dy, true)] })); });
+        x += b.w + gap;
+      });
+      y -= gap;
+    });
+    this.sel = new Set(made);
+    const label = `已生成圆角盒子：${src.length} 块板（侧壁带活铰链，圆角 ${fmt(o.r)} mm，板厚 ${fmt(t)} mm）`;
+    this.commit(label);
+    this.status(label);
+    return { parts: src.length };
+  }
+
+  // ISO 53 标准基本齿廓：压力角 α = 20°，齿顶高 ha = m，齿根高 hf = 1.25 m；齿廓为基圆渐开线
+  //   分度圆 r = m·z/2，基圆 rb = r·cos α，齿顶圆 ra = r + m，齿根圆 rf = r − 1.25 m
+  //   分度圆上齿厚 s = π·m/2 → 半齿角 ψ = π / (2z)；半径 ρ 处齿廓偏角 θ(ρ) = ψ + inv α − inv α_ρ，inv x = tan x − x，α_ρ = acos(rb / ρ)
+  static gearPoints(m, z, rot = 0) {
+    const al = 20 * Math.PI / 180;
+    const inv = (x) => Math.tan(x) - x;
+    const r = m * z / 2, rb = r * Math.cos(al), ra = r + m, rf = Math.max(r - 1.25 * m, 0.5);
+    const psi = Math.PI / (2 * z);
+    const th = (rho) => psi + inv(al) - inv(Math.acos(Math.min(1, rb / rho)));
+    const r0 = Math.max(rb, rf);
+    const N = 8;
+    const flank = [];                                           // 从齿根往齿顶：[半径, 偏角]
+    if (rf < rb) flank.push([rf, th(rb)]);                       // 基圆以下用径向直线
+    for (let i = 0; i <= N; i++) { const rho = r0 + (ra - r0) * i / N; flank.push([rho, th(rho)]); }
+    const pts = [];
+    const P = (rho, a) => [rho * Math.cos(a), rho * Math.sin(a)];
+    const pitch = 2 * Math.PI / z;
+    for (let k = 0; k < z; k++) {
+      const c = rot + k * pitch;
+      flank.forEach(([rho, t]) => pts.push(P(rho, c - t)));              // 右侧齿廓（向上）
+      const tipT = th(ra);
+      for (let i = 1; i < 4; i++) pts.push(P(ra, c - tipT + 2 * tipT * i / 4));   // 齿顶圆弧
+      for (let i = flank.length - 1; i >= 0; i--) pts.push(P(flank[i][0], c + flank[i][1]));   // 左侧齿廓（向下）
+      const a0 = c + th(r0), a1 = c + pitch - th(r0);
+      for (let i = 1; i < 4; i++) pts.push(P(rf, a0 + (a1 - a0) * i / 4));   // 齿根圆弧
+    }
+    return { pts, r, ra, rf, rb };
+  }
+
+  makeGears(o) {
+    const m = Number(o.m), z1 = Math.round(Number(o.z1)), z2 = Math.round(Number(o.z2));
+    if (!(m >= 0.5) || !(z1 >= 6) || (o.pair && !(z2 >= 6))) { this.toast('模数至少 0.5，齿数至少 6', 'error'); return null; }
+    const c = this.libDropPoint();
+    const a = o.pair ? m * (z1 + z2) / 2 : 0;
+    const specs = [{ z: z1, x: c.x - a / 2, y: c.y, rot: 0 }];
+    if (o.pair) specs.push({ z: z2, x: c.x + a / 2, y: c.y, rot: Math.PI + Math.PI / z2 });   // 第二个齿轮的齿槽对着第一个的齿
+    const made = [];
+    specs.forEach((s) => {
+      const g = SketchEditor.gearPoints(m, s.z, s.rot);
+      const grp = newId();
+      const outer = this.addItem({ mode: 'cut', group: grp, paths: [{ closed: true, segs: g.pts.map(([x, y]) => [r3(x + s.x), r3(y + s.y), 0, 0, 0, 0]) }] });
+      outer.data.gear = { m, z: s.z };
+      made.push(outer);
+      const circ = (cx, cy, d) => {
+        const R = d / 2, K = 0.5522847498 * R;
+        return { closed: true, segs: [[cx + R, cy, 0, -K, 0, K], [cx, cy + R, K, 0, -K, 0], [cx - R, cy, 0, K, 0, -K], [cx, cy - R, -K, 0, K, 0]].map((q) => q.map(r3)) };
+      };
+      const bore = Number(o.bore) || 0;
+      if (bore > 0 && bore < 2 * g.rf - 2 * m) made.push(this.addItem({ mode: 'cut', group: grp, paths: [circ(s.x, s.y, bore)] }));
+      if (o.lighten) {                                         // 减重孔：轮缘留 2m，轮毂留 max(3, 1.5m)
+        const rIn = g.rf - 2 * m, rHub = bore / 2 + Math.max(3, 1.5 * m);
+        const n = s.z >= 30 ? 6 : 4;
+        const rc = (rIn + rHub) / 2;
+        const hr = Math.min((rIn - rHub) / 2 * 0.85, rc * Math.sin(Math.PI / n) * 0.7);
+        if (hr >= 2) for (let i = 0; i < n; i++) { const ang = s.rot + Math.PI / n + i * 2 * Math.PI / n; made.push(this.addItem({ mode: 'cut', group: grp, paths: [circ(s.x + rc * Math.cos(ang), s.y + rc * Math.sin(ang), 2 * hr)] })); }
+      }
+    });
+    this.sel = new Set(made);
+    const label = `已生成齿轮：模数 ${fmt(m)}、${z1} 齿（分度圆 ${fmt(m * z1)} mm）` + (o.pair ? ` + ${z2} 齿（分度圆 ${fmt(m * z2)} mm），中心距 ${fmt(a)} mm` : '');
+    this.commit(label);
+    this.status(label);
+    return { gears: specs.length, a };
+  }
+
+  async makeBadge(o) {
+    const D = Number(o.d);
+    if (!(D >= 10)) { this.toast('大小至少 10 mm', 'error'); return null; }
+    const c = this.libDropPoint();
+    const R = D / 2, K = 0.5522847498;
+    const shapePath = (inset) => {
+      const r = R - inset;
+      if (o.shape === 'square') {
+        const rr = Math.max(0.5, D * 0.12 - inset * 0.5);
+        const q = new this.ps.Path.Rectangle({ point: [c.x - r, c.y - r], size: [2 * r, 2 * r], radius: rr, insert: false });
+        return { closed: true, segs: q.segments.map((sg) => [sg.point.x, sg.point.y, sg.handleIn.x, sg.handleIn.y, sg.handleOut.x, sg.handleOut.y].map(r3)) };
+      }
+      if (o.shape === 'shield') {
+        const top = c.y + R * 1.05 - inset, w = r, mid = c.y + R * 0.1, bot = c.y - R * 1.05 + inset * 1.4;
+        return { closed: true, segs: [[c.x - w, top, 0, 0, 0, 0], [c.x + w, top, 0, 0, 0, 0], [c.x + w, mid, 0, 0, 0, -R * 0.55],
+          [c.x, bot, R * 0.62, R * 0.28, -R * 0.62, R * 0.28], [c.x - w, mid, 0, -R * 0.55, 0, 0]].map((q) => q.map(r3)) };
+      }
+      const k = K * r;
+      return { closed: true, segs: [[c.x + r, c.y, 0, -k, 0, k], [c.x, c.y + r, k, 0, -k, 0], [c.x - r, c.y, 0, k, 0, -k], [c.x, c.y - r, -k, 0, k, 0]].map((q) => q.map(r3)) };
+    };
+    const made = [];
+    const grp = newId();
+    made.push(this.addItem({ mode: 'cut', group: grp, paths: [shapePath(0)] }));
+    const bw = Math.max(1.5, D * 0.07);
+    if (o.border) made.push(this.addItem({ mode: 'score', group: grp, paths: [shapePath(bw)] }));
+    const text = String(o.text || '').trim();
+    if (text) {
+      const inner = R - (o.border ? bw : 0);
+      const arc = !!o.arc && o.shape !== 'square';
+      const size = arc ? Math.max(2, Math.min(inner * 0.32, (Math.PI * inner * 0.85) / Math.max(2, text.length))) : Math.max(2, Math.min(inner * 0.45, (1.6 * inner) / Math.max(1, text.length) * 1.6));
+      const rt = inner - size * 0.75;
+      const tp = { text, font: this.opts.font, size, spacing: 0, lineHeight: 1.25, align: 'center', arc: arc ? rt : 0, weld: false,
+        x: c.x, y: arc ? c.y + rt : c.y };
+      const keepMode = this.opts.mode;
+      this.opts.mode = 'engrave';
+      const it = await this.buildText(tp);
+      this.opts.mode = keepMode;
+      if (it) { it.data.group = grp; made.push(it); }
+    }
+    if (o.mirror) {                                          // 印章：雕刻 / 描线左右镜像（外形对称，不用动）
+      made.forEach((it) => { if (it.data.mode !== 'cut') { it.scale(-1, 1, c); if (it.data.text) it.data.text = null; } });
+    }
+    this.sel = new Set(made);
+    const label = `已生成${o.mirror ? '印章（已镜像）' : '徽章'}：${{ circle: '圆形', square: '方形', shield: '盾牌' }[o.shape] || ''} ${fmt(D)} mm`;
+    this.commit(label);
+    this.status(label);
+    return { items: made.length };
+  }
+
   // ---------------------------------------------------------------- 测量
 
   // 四种方式：pp 点到点（拖动或点两下）/ pl 点到线（垂直距离）/ ll 线到线（平行间距、最近距离、夹角）/ cc 圆（半径直径、圆心距）
@@ -5072,8 +5405,10 @@ export class SketchEditor {
     const focused = box.querySelector(':focus');
     if (focused && focused.dataset.o) focused.blur();
     const t = this.tool;
-    if (t === 'lib') { this.renderLib(box); return; }
+    if (t === 'lib') { delete box.dataset.make; this.renderLib(box); return; }
+    if (t === 'make') { delete box.dataset.lib; this.renderMake(box); return; }
     delete box.dataset.lib;
+    delete box.dataset.make;
     const textSel = this.sel.size === 1 && [...this.sel][0].data.text ? [...this.sel][0] : null;
     let html = '';
     if (t === 'rect') html = `<h4>矩形</h4><div class="sk-row"><label>圆角半径<input data-o="radius" type="number" min="0" step="0.5" value="${this.opts.radius}"> mm</label></div>`;
