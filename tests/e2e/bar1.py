@@ -17,7 +17,7 @@ async def main():
         await pg.click('#free-entry'); await pg.wait_for_selector('#sk-host:not(.hidden)'); await pg.wait_for_timeout(1500)
         H = '#sk-host '
         # 没选中：对齐 / 旋转按钮不可用
-        assert await pg.is_disabled(H + '.sk-top [data-act=rotR]') and not await pg.query_selector(H + '.sk-top [data-align]')
+        assert not await pg.query_selector(H + '.sk-top [data-align]') and not await pg.query_selector(H + '.sk-top [data-act=rotR]')
         # 没选中：上下文栏显示材料数据
         t = await pg.inner_text(H + '.sk-ctx-data')
         assert '材料' in t and '400 × 300' in t and '板厚' in t and '1 块' in t and '切割' in t, t
@@ -67,12 +67,9 @@ async def main():
         assert len(set(lefts)) == 1, lefts
         # 旋转菜单：右转 90° → 30×20 变成 20×30
         await pg.evaluate(f"{ED}.sel=new Set([{ED}.content.children.find(c=>Math.abs(c.bounds.width-30)<1e-6)]); {ED}.refresh()")
-        await pg.click(H + '.sk-top [data-act=rotR]')
+        await pg.click(H + '.sk-ctx-sel [data-act=rotR]')
         wh = await pg.evaluate(f"(()=>{{const b=[...{ED}.sel][0].bounds; return [Math.round(b.width), Math.round(b.height)]}})()")
         assert wh == [20, 30], wh
-        await pg.click(H + '.sk-top [data-rotask]')
-        await pg.wait_for_timeout(200)
-        await pg.keyboard.press('Escape')
         # 帮助菜单：快捷键
         await pg.click(H + '[data-menu=help]'); await pg.click('.sk-filemenu [data-mact=keys]')
         await pg.wait_for_selector('.sk-modal-box')

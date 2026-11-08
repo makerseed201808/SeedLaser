@@ -140,11 +140,6 @@ export class SketchEditor {
           <button class="sk-ico" data-act="undo" title="撤销（⌘Z）">${barIcon('undo')}</button>
           <button class="sk-ico" data-act="redo" title="重做（⇧⌘Z）">${barIcon('redo')}</button>
         </div>
-        <div class="sk-group sk-bargrp" title="旋转与镜像（也可以拖动图形上方的蓝点旋转）">
-          <span class="sk-glabel">旋转</span>
-          <span class="sk-seg2"><button class="sk-ico" data-act="rotL" data-needsel title="左转 90°（逆时针）">${barIcon('rotL')}</button><button class="sk-ico" data-rotask data-needsel title="输入任意角度">${barIcon('angle')}</button><button class="sk-ico" data-act="rotR" data-needsel title="右转 90°（顺时针）">${barIcon('rotR')}</button></span>
-          <span class="sk-seg2"><button class="sk-ico" data-act="flipH" data-needsel title="水平镜像（左右翻转）">${barIcon('flipH')}</button><button class="sk-ico" data-act="flipV" data-needsel title="垂直镜像（上下翻转）">${barIcon('flipV')}</button></span>
-        </div>
         <div class="sk-group" title="视图">
           <button class="sk-ico" data-act="fit" title="适合窗口：显示整块材料（F）">${barIcon('fit')}</button>
           <button class="sk-ico" data-zoom="out" title="缩小（滚轮也可以缩放）">−</button>
@@ -177,6 +172,10 @@ export class SketchEditor {
           <button class="sk-ratio on" data-act="ratio" title="锁定宽高比">🔗</button>
           <label title="高（回车生效）">高<input data-num="h" type="number" step="0.1" min="0.1"></label>
           <label title="旋转角度，正数 = 逆时针（回车生效）">旋转<input data-num="rot" type="number" step="1" value="0"></label><span class="sk-unit">°</span>
+          <span class="sk-seg2 sk-ctx-ico"><button class="sk-ico" data-act="rotL" title="左转 90°（逆时针）">${barIcon('rotL')}</button><button class="sk-ico" data-act="rotR" title="右转 90°（顺时针）">${barIcon('rotR')}</button></span>
+          <i class="sk-sep sk-num-sep"></i>
+          <span class="sk-glabel">镜像</span>
+          <span class="sk-seg2 sk-ctx-ico"><button class="sk-ico" data-act="flipH" title="水平镜像（左右翻转）">${barIcon('flipH')}</button><button class="sk-ico" data-act="flipV" title="垂直镜像（上下翻转）">${barIcon('flipV')}</button></span>
           <i class="sk-sep sk-num-sep"></i>
           <span class="sk-glabel">对齐</span>
           <span class="sk-aligns" title="对齐：只选 1 个时对齐到整块材料；选多个时互相对齐">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}">${alignIcon(k)}</button>`).join('')}
@@ -323,7 +322,6 @@ export class SketchEditor {
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
     h.querySelector('[data-filemenu]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleFileMenu(); });
     h.querySelector('.sk-file').addEventListener('click', () => this.startRename());
-    h.querySelector('[data-rotask]').addEventListener('click', () => { const b = this.selBounds(); if (b) this.askRotate(b.center); });
     h.querySelectorAll('[data-menu]').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleMenu(b.dataset.menu); }));
     h.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => {
       const v = this.ps.view;

@@ -1251,3 +1251,12 @@ input, textarea, select { font: inherit; user-select: text; }
   border: 1px solid transparent; border-radius: 6px; background: transparent; color: #33465f; cursor: text; font-variant-numeric: tabular-nums; }
 #sk-host input.sk-zoom:hover { border-color: #c9d6e6; background: #fff; }
 #sk-host input.sk-zoom:focus { border-color: #1f6feb; background: #fff; outline: none; box-shadow: 0 0 0 3px rgba(31,111,235,.15); }
+
+/* 上下文栏里的旋转 / 镜像图标 */
+#sk-host .sk-numeric .sk-ico { width: 30px; height: 28px; min-width: 30px; padding: 0 !important; display: inline-flex; align-items: center; justify-content: center;
+  border: none !important; background: transparent; color: #33465f; border-radius: 6px; }
+#sk-host .sk-numeric .sk-ctx-ico .sk-ico:hover { background: #fff !important; color: #1f6feb; box-shadow: 0 0 0 1px #c9d6e6 inset; }
+#sk-host .sk-numeric .sk-seg2 { background: #eef2f7; }
+#sk-host .sk-numeric input[data-num] { width: 64px; }
+#sk-host .sk-numeric .sk-ctx-sel { gap: 8px; flex-wrap: nowrap; }
+#sk-host .sk-numeric { overflow-x: auto; scrollbar-width: none; }
