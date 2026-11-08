@@ -635,7 +635,7 @@ function buildProject() {
   const ws = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
   return {
     app: 'SeedLaser',
-    version: 1,
+    version: 2,                 // 项目文件版本（backend.PROJECT_VERSION）
     generator: state.current,
     params: collectParams(),
     format: $('#format-select').value,
@@ -768,6 +768,7 @@ async function doOpenProject(path) {
   }
   if (!r || r.cancelled) return;
   if (r.error) { toast(r.error, 'error'); if (state.view === 'home') renderRecent(); return; }
+  if (r.warning) toast(r.warning, 'info');
   const same = r.path && tabs.list.find((t) => t.path && samePath(t.path, r.path));
   if (same) { await activateTab(same.id); toast(`「${tabTitle(same)}」已经开着，切换过去了`, 'info'); return; }
   const cur = activeTab();

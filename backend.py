@@ -521,6 +521,46 @@ def _save_recent(items: list[dict[str, Any]]) -> None:
         pass   # 记不住最近项目不影响使用
 
 
+# ---- 项目文件版本 ----
+# 1：SeedBoxes / v0.2.0 时期（没写 version 的也当 1）
+# 2：补齐所有字段（disabled / edits / poses / sketches / params / format；自由设计的 free.parts / sheet / loose），app 统一为 SeedLaser
+PROJECT_VERSION = 2
+
+
+def _migrate_project(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """把旧版本的项目数据升级到当前版本（不改原文件；保存时才写新版本）。返回 (新数据, 提示)。"""
+    import copy
+    d = copy.deepcopy(data)
+    notes: list[str] = []
+    try:
+        v = int(d.get("version") or 1)
+    except (TypeError, ValueError):
+        v = 1
+    if v > PROJECT_VERSION:
+        notes.append(f"这个项目是用更新版本的 SeedLaser 保存的（文件版本 {v}），有些内容可能显示不全")
+        return d, notes
+    if v < 2:
+        for k, empty in (("params", {}), ("disabled", []), ("edits", {}), ("poses", {}), ("sketches", {})):
+            if not isinstance(d.get(k), type(empty)):
+                d[k] = copy.deepcopy(empty)
+        d.setdefault("format", "svg")
+        if d.get("generator") == "FreeDesign":
+            free = d.get("free") if isinstance(d.get("free"), dict) else {}
+            free.setdefault("parts", [])
+            sheet = free.get("sheet") if isinstance(free.get("sheet"), dict) else {}
+            sheet.setdefault("w", 400)
+            sheet.setdefault("h", 300)
+            free["sheet"] = sheet
+            if not isinstance(free.get("loose"), list):
+                free["loose"] = []
+            d["free"] = free
+        elif "free" not in d:
+            d["free"] = None
+        d["app"] = "SeedLaser"
+        d["version"] = 2
+    return d, notes
+
+
 def _remember_recent(path: str, project: dict[str, Any]) -> None:
     import time
     path = os.path.abspath(path)
@@ -899,8 +939,15 @@ class Api:
         _init_generators()
         if data.get("generator") not in _GENERATORS:
             return {"error": f"项目使用的生成器「{data.get('generator')}」不存在"}
+        old_v = data.get("version") or 1
+        data, notes = _migrate_project(data)
         _remember_recent(path, data)
-        return {"project": data, "path": path}
+        out: dict[str, Any] = {"project": data, "path": path}
+        if old_v != data.get("version"):
+            out["migrated_from"] = old_v
+        if notes:
+            out["warning"] = "；".join(notes)
+        return out
 
     def recent_projects(self) -> list[dict[str, Any]]:
         """主页「最近项目」：最近打开 / 保存过的项目，最新的在前。"""
