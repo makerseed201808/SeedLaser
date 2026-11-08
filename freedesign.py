@@ -180,7 +180,7 @@ class FreeDesign(boxes.Boxes):
         sw, sh = float(self.sheet_w or 0), float(self.sheet_h or 0)
         gap = max(0.0, float(self.part_gap or 0)) + 2 * burn
         if not items:
-            self.warnings.append("没有可以导出的板件（画板上没有闭合的切割轮廓，或者在加工清单里都取消了），文件里只有校准尺")
+            self.warnings.append("没有可以导出的板件（画板上没有闭合的切割轮廓，或者在加工清单里都取消了），导出的文件是空的")
         for p, sk in items:
             for w in sketch2d.export_warnings(sk, burn):
                 self.warnings.append(f"{p.get('name') or '板件'}：{w}")
@@ -191,12 +191,13 @@ class FreeDesign(boxes.Boxes):
                 with self.saved_context():
                     self.moveTo(float(p["sx"]) + self.spacing, float(p["sy"]) + self.spacing, float(p.get("sa") or 0))
                     sketch2d.draw(self, sk, burn)
-            if sheet.get("w") and sheet.get("h"):
+            if sheet.get("w") and sheet.get("h") and not getattr(self, "clean", False):
                 with self.saved_context():
                     self.set_source_color(Color.ANNOTATIONS)
                     self.ctx.rectangle(self.spacing, self.spacing, float(sheet["w"]), float(sheet["h"]))
                     self.ctx.stroke()
                     self.set_source_color(Color.BLACK)
+            if sheet.get("w") and sheet.get("h"):
                 self.notes.append(f"按二维画板上的位置导出（材料 {float(sheet['w']):g}×{float(sheet['h']):g} mm）")
             loose = ((self.design or {}).get("free") or {}).get("loose") or []
             if loose:
@@ -250,6 +251,8 @@ class FreeDesign(boxes.Boxes):
             self.set_source_color(Color.BLACK)
             self.notes.append(f"共边切割：重叠的切割线省掉 {saved_total:.0f} mm")
         for si in range(n_sheets):
+            if getattr(self, "clean", False):        # 导出：不画材料边框和标注
+                break
             ox = self.spacing + si * (sw + sheet_gap)
             with self.saved_context():
                 self.set_source_color(Color.ANNOTATIONS)

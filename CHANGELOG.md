@@ -4,6 +4,7 @@
 
 ## 未发布（v0.2.0 之后）
 
+- 自由设计导出只输出画的图形：去掉红色材料边框、100 mm 校准尺和标注文字（SVG / DXF / LightBurn / PDF）；加工作业里的预览仍显示材料边框。
 - DXF 导出改为内置（`dxfout.py`，SVG → DXF R12）：不再需要 pstoedit，Mac / Windows 都能直接导出；单位 mm，按切割外轮廓 / 内孔 / 雕刻 / 描线 / 标注分图层，中文标注不乱码。新增 test_dxfout。
 - 项目文件扩展名改为 `.seedlaser`（内容仍是 JSON）；保存 / 另存为 / 打开对话框默认在「文稿/SeedLaser」；旧版 `.seedbox.json` 照样能打开、原地保存。
 

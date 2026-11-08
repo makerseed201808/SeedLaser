@@ -1017,7 +1017,7 @@ class Api:
             return {"cancelled": True}
         if fmt == "dxf":
             # DXF 用内置转换（SVG → DXF R12，按切割 / 雕刻 / 描线分图层，单位 mm），不依赖 pstoedit
-            result = self._render(name, params, fmt="svg", to_file=None, project=project)
+            result = self._render(name, params, fmt="svg", to_file=None, project=project, clean=True)
             if "error" in result:
                 return result
             try:
@@ -1027,7 +1027,7 @@ class Api:
             except Exception as exc:
                 return {"error": f"DXF 导出失败：{exc}"}
         else:
-            result = self._render(name, params, fmt=fmt, to_file=picked, project=project)
+            result = self._render(name, params, fmt=fmt, to_file=picked, project=project, clean=True)
         if "error" in result:
             return result
         out = {"path": picked, "notes": result.get("notes", []) + result.get("warnings", []), "info": result.get("info", [])}
@@ -1060,7 +1060,8 @@ class Api:
     # --------------------------------------------------------- helper
 
     def _render(self, name: str, params: dict[str, Any], fmt: str, to_file: str | None,
-                project: dict[str, Any] | None = None, model: bool = False) -> dict[str, Any]:
+                project: dict[str, Any] | None = None, model: bool = False, clean: bool = False) -> dict[str, Any]:
+        """clean = 导出给激光机：自由设计只输出画的图形（不要校准尺、材料边框和标注文字）."""
         _init_generators()
         cls = _GENERATORS.get(name)
         if cls is None:
@@ -1089,6 +1090,9 @@ class Api:
                 instance.metadata["url"] = ""
                 instance.metadata["url_short"] = ""
                 instance.qr_code = False
+                if name == "FreeDesign" and clean:
+                    instance.reference = 0          # 不画 100 mm 校准尺
+                    instance.clean = True           # 不画材料边框、材料标注
                 if name == "FreeDesign":
                     if model:
                         parts = freedesign.model_parts(project)

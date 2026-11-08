@@ -56,12 +56,10 @@ assert m and abs(float(m.group(1)) - float(m.group(3))) < 1e-6 and abs(float(m.g
 groups = parse(svg)
 allp = [x for g in groups for x in g]
 kinds = {k for k, _ in allp}
-assert {'outer', 'inner', 'engrave', 'score', 'note'} <= kinds, kinds
-# 材料边框（红色标注）= 400×300
-sheet = p['free']['sheet']
-notes = [pts_of(d)[0] for k, d in allp if k == 'note']
-assert any(abs(max(q[0] for q in pl if q != 'Z') - min(q[0] for q in pl if q != 'Z') - sheet['w']) < 0.01
-           and abs(max(q[1] for q in pl if q != 'Z') - min(q[1] for q in pl if q != 'Z') - sheet['h']) < 0.01 for pl in notes), '材料边框尺寸不对'
+assert {'outer', 'inner', 'engrave', 'score'} <= kinds, kinds
+# 导出只要画的图形：没有材料边框 / 标注（红色）、没有校准尺和文字
+assert 'note' not in kinds, '导出里不应有红色的材料边框 / 标注'
+assert '<text' not in svg, '导出里不应有文字标注（校准尺说明）'
 # 切割路径闭合、没有重复线
 seen = set()
 for k, d in allp:
@@ -89,7 +87,8 @@ for j, (k, ob) in enumerate(seq):
             assert i < j, f'应先切内孔、再切外轮廓：内孔 #{i} 排在外轮廓 #{j} 后面'
     outers.append((round(ob[2] - ob[0], 3), round(ob[3] - ob[1], 3)))
 want = sorted((round(q['w'] + 2 * burn, 3), round(q['h'] + 2 * burn, 3)) for q in p['free']['parts'])
-got = sorted(o for o in outers if o != (100.0, 10.0))     # 去掉 100 mm 校准尺
+got = sorted(outers)
+assert (100.0, 10.0) not in got, '导出里不应有 100 mm 校准尺'
 assert all(abs(a[0] - b[0]) < 0.01 and abs(a[1] - b[1]) < 0.01 for a, b in zip(got, want)) and len(got) == len(want), (got, want)
 # golden 摘要：每种颜色的路径数、外轮廓尺寸
 summary = {'counts': {k: sum(1 for x, _ in allp if x == k) for k in sorted(kinds)}, 'outers': got}
@@ -97,7 +96,7 @@ if os.environ.get('UPDATE_GOLDEN') or not os.path.exists(GOLD):
     os.makedirs(os.path.dirname(GOLD), exist_ok=True)
     json.dump(summary, open(GOLD, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
 assert json.load(open(GOLD, encoding='utf-8')) == json.loads(json.dumps(summary)), (summary, '和 golden 不一致；确认是有意改动后用 UPDATE_GOLDEN=1 重新生成')
-msg = f'SVG：{len(groups)} 组、{len(allp)} 条路径，颜色分层 / 闭合 / 无重复 / 先内后外 / 尺寸 / golden 全部正确'
+msg = f'SVG：{len(groups)} 组、{len(allp)} 条路径，只有画的图形（无边框 / 校准尺 / 文字）、颜色分层 / 闭合 / 无重复 / 先内后外 / 尺寸 / golden 全部正确'
 # DXF（内置转换 dxfout.py，不需要 pstoedit）：一律导出；装了 ezdxf（uv sync --extra dev）就读回来校验
 import shutil as _sh  # noqa: E402,F401
 dxf_path = os.path.join(tmp, 'free.dxf')
@@ -115,7 +114,7 @@ if ezdxf:
     assert doc.header.get('$INSUNITS') == 4, '单位应是 mm'
     LAY = {'CUT_OUTER': 'outer', 'CUT_INNER': 'inner', 'ENGRAVE': 'engrave', 'SCORE': 'score', 'NOTE': 'note'}
     aci = {l.dxf.name: l.dxf.color for l in doc.layers}
-    assert aci.get('CUT_OUTER') == 7 and aci.get('CUT_INNER') == 5 and aci.get('ENGRAVE') == 3 and aci.get('SCORE') == 6 and aci.get('NOTE') == 1, aci
+    assert aci.get('CUT_OUTER') == 7 and aci.get('CUT_INNER') == 5 and aci.get('ENGRAVE') == 3 and aci.get('SCORE') == 6 and 'NOTE' not in aci, aci
     ents = list(doc.modelspace())
     dcount = {}
     douters = []
@@ -134,6 +133,7 @@ if ezdxf:
             xs = [q[0] for q in pts]; ys = [q[1] for q in pts]
             douters.append((round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3)))
     assert dcount == summary['counts'], f'DXF 图层和 SVG 不一致：{dcount} vs {summary["counts"]}'
+    assert not [e for e in ents if e.dxftype() == 'TEXT'] and 'note' not in dcount, 'DXF 里不应有文字 / 标注'
     big_d = sorted(douters, reverse=True)[:len(summary['outers'])]
     for a, b in zip(big_d, sorted(map(tuple, summary['outers']), reverse=True)):
         assert abs(a[0] - b[0]) <= 0.01 and abs(a[1] - b[1]) <= 0.01, f'DXF 外形尺寸 {a} ≠ SVG {b}'
