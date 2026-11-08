@@ -466,7 +466,7 @@ export class SketchEditor {
     }
     this.current = JSON.stringify(this.serialize().items);
     this.drawReference();
-    this.fit();
+    this.fit(true);
     this.setTool('select');
     this.refresh();
     this.renderBoardInfo();
@@ -1081,11 +1081,12 @@ export class SketchEditor {
     this.setView(this.zoom, c.x - dxView / this.zoom, c.y + dyView / this.zoom);
   }
 
-  fit() {
+  // 适合窗口。sheetOnly：只对准材料（打开画板时：材料左上角的原点 (0, 0) 在画面左上方）
+  fit(sheetOnly) {
     const v = this.ps.view;
     v.viewSize = new this.ps.Size(this.canvas.clientWidth || 800, this.canvas.clientHeight || 600);
     let b = null;
-    this.content.children.forEach((c) => { b = b ? b.unite(c.bounds) : c.bounds.clone(); });
+    if (!(sheetOnly && this.sheetMode)) this.content.children.forEach((c) => { b = b ? b.unite(c.bounds) : c.bounds.clone(); });
     if (this.sheetMode) { const m = new this.ps.Rectangle(0, 0, this.part.sheet.w, this.part.sheet.h); b = b ? b.unite(m) : m; }
     if (!b) b = new this.ps.Rectangle(0, 0, 100, 100);
     const pad = 40;
@@ -1384,7 +1385,7 @@ export class SketchEditor {
       const sy = v.projectToView(new this.ps.Point(0, y)).y + 0.5;
       const isMajor = Math.abs(y / major - Math.round(y / major)) < 1e-6;
       gy.moveTo(R, sy); gy.lineTo(isMajor ? 6 : 14, sy);
-      if (isMajor) { gy.save(); gy.translate(9, sy - 2); gy.rotate(-Math.PI / 2); gy.fillText(String(Math.round(y)), 0, 0); gy.restore(); }
+      if (isMajor) { gy.save(); gy.translate(9, sy - 2); gy.rotate(-Math.PI / 2); gy.fillText(String(Math.round(this.dispY(y))), 0, 0); gy.restore(); }
     }
     gy.stroke();
   }
@@ -1571,7 +1572,7 @@ export class SketchEditor {
         row('形状', shape) +
         (circ ? row('直径', `${fmt(circ.r * 2)} mm`) + row('半径', `${fmt(circ.r)} mm`) : '') +
         row('宽 × 高', `${fmt(b.width)} × ${fmt(b.height)} mm`) +
-        row('位置（左下角）', `X ${fmt(b.left)} · Y ${fmt(b.top)}`) +
+        row('位置（左上角）', `X ${fmt(b.left)} · Y ${fmt(this.dispY(b.bottom))}`) +
         (closed ? row('面积', `${fmt(area / 100)} cm²`) : '') +
         row(it.data.mode === 'cut' ? '切割长度' : '线长', `${fmt(len(it))} mm`) +
         (it.data.bridges && it.data.bridges.length ? row('水口', `${it.data.bridges.length} 个`) : '');
@@ -2007,7 +2008,7 @@ export class SketchEditor {
   }
 
   showCoords(pt) {
-    this.$('.sk-coords').textContent = `X ${fmt(pt.x)}  Y ${fmt(pt.y)} mm`;
+    this.$('.sk-coords').textContent = `X ${fmt(pt.x)}  Y ${fmt(this.dispY(pt.y))} mm`;
   }
 
   // ---------------------------------------------------------------- 选择工具
@@ -3829,6 +3830,17 @@ export class SketchEditor {
     return { el: m, close };
   }
 
+  // 显示坐标（和激光机台面一致）：材料左上角 = (0, 0)，X 往右、Y 往下。
+  // 内部数据仍然是 y 向上（左下角为 0），只在标尺、X / Y 输入、坐标显示时换算。
+  originTopY() {
+    if (this.sheetMode && this.part && this.part.sheet) return Number(this.part.sheet.h) || 0;
+    return this.boardBounds().bottom;
+  }
+
+  dispY(y) { return this.originTopY() - y; }
+
+  dataY(v) { return this.originTopY() - v; }
+
   boardBounds() {
     const outline = this.content.children.find((c) => c.data && c.data.role === 'outline');
     return outline ? outline.bounds : new this.ps.Rectangle(0, 0, 100, 100);
@@ -4129,7 +4141,7 @@ export class SketchEditor {
     this.$('.sk-ctx-count').textContent = `选中 ${this.sel.size} 个`;
     this.renderRefBtn();
     const rp = this.refPoint(b);
-    set('x', fmt(rp.x)); set('y', fmt(rp.y)); set('w', fmt(b.width)); set('h', fmt(b.height)); set('rot', 0);
+    set('x', fmt(rp.x)); set('y', fmt(this.dispY(rp.y))); set('w', fmt(b.width)); set('h', fmt(b.height)); set('rot', 0);
   }
 
   renderCtxData() {
@@ -4150,8 +4162,8 @@ export class SketchEditor {
 
   // ---------------------------------------------------------------- 对象原点（参考点）
   get refKey() {
-    if (!this._refKey) { try { this._refKey = localStorage.getItem('seedboxes.refPoint') || 'bl'; } catch (e) { this._refKey = 'bl'; } }
-    return REF_KEYS.includes(this._refKey) ? this._refKey : 'bl';
+    if (!this._refKey) { try { this._refKey = localStorage.getItem('seedboxes.refPoint') || 'tl'; } catch (e) { this._refKey = 'tl'; } }
+    return REF_KEYS.includes(this._refKey) ? this._refKey : 'tl';
   }
 
   set refKey(k) {
@@ -4216,7 +4228,7 @@ export class SketchEditor {
     const b = this.selBounds();
     const rp = this.refPoint(b);
     if (k === 'x') this.sel.forEach((it) => it.translate(new this.ps.Point(v - rp.x, 0)));
-    else if (k === 'y') this.sel.forEach((it) => it.translate(new this.ps.Point(0, v - rp.y)));
+    else if (k === 'y') this.sel.forEach((it) => it.translate(new this.ps.Point(0, this.dataY(v) - rp.y)));   // 输入的是显示坐标（Y 往下）
     else if (k === 'w' || k === 'h') {
       if (v <= 0) return;
       let sx = k === 'w' ? v / b.width : 1;

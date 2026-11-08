@@ -18,8 +18,20 @@ async def main():
         B = lambda: pg.evaluate(f"(()=>{{const b=[...{ED}.sel][0].bounds;return [b.left,b.top,b.right,b.bottom].map(v=>Math.round(v*1000)/1000)}})()")
         await pg.evaluate(f"(()=>{{const e={ED}; e.sel=new Set([e.content.children[0]]); e.refresh();}})()")
         l, bt, r, tp = await B()                                   # bt = 屏幕下边（paper top），tp = 屏幕上边
-        # 默认左下角
-        assert float(await pg.input_value(H + '[data-num=x]')) == l and float(await pg.input_value(H + '[data-num=y]')) == bt
+        SH = await pg.evaluate(f"{ED}.part.sheet.h")
+        # 默认左上角；显示坐标和激光机一样：材料左上角 = (0, 0)，Y 往下
+        assert float(await pg.input_value(H + '[data-num=x]')) == l and float(await pg.input_value(H + '[data-num=y]')) == SH - tp
+        # 输入 (0, 0) → 图形贴在材料左上角
+        await pg.fill(H + '[data-num=x]', '0'); await pg.keyboard.press('Enter')
+        await pg.fill(H + '[data-num=y]', '0'); await pg.keyboard.press('Enter'); await pg.wait_for_timeout(200)
+        l, bt, r, tp = await B()
+        assert l == 0 and tp == SH, (l, tp, SH)
+        # 标尺 / 右下角坐标也按左上角为原点
+        await pg.mouse.move(*(await pg.evaluate(f"(()=>{{const e={ED};const r=e.canvas.getBoundingClientRect();const v=e.ps.view.projectToView(new e.ps.Point(10, {SH}-20));return [v.x+r.left,v.y+r.top]}})()")))
+        import re as _re
+        cy = float(_re.search(r'Y (-?[\d.]+)', await pg.inner_text(H + '.sk-coords')).group(1))
+        assert abs(cy - 20) < 1, cy
+        await pg.evaluate(f"(()=>{{const e={ED}; e.sel=new Set([e.content.children[0]]); e.refresh();}})()")
         # 选中心
         await pg.click(H + '[data-refbtn]'); await pg.wait_for_selector('.sk-refmenu')
         await pg.screenshot(path=OUT + 'ref1.png', clip={'x': 0, 'y': 40, 'width': 600, 'height': 260})
@@ -48,6 +60,6 @@ async def main():
         assert await pg.evaluate("localStorage.getItem('seedboxes.refPoint')") == 'br'
         await b.close()
     assert not errs, errs
-    print('PASS ref1：对象原点 9 选 1；X / Y 为该点坐标并按它移动；改宽高、旋转时该点不动；设置记住')
+    print('PASS ref1：默认左上角、材料左上角为 (0,0)（Y 往下）；对象原点 9 选 1；X / Y 为该点坐标并按它移动；改宽高、旋转时该点不动；设置记住')
 
 asyncio.run(main())
