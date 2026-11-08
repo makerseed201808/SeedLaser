@@ -18,11 +18,11 @@ async def main():
         label = lambda: pg.inner_text('#doc-tabs .dt-tab.on .dt-name')
         TAB = '#doc-tabs .dt-tab.on .dt-name'
         name = f'测试小船{os.getpid()}'
-        f1 = os.path.join(DIR, name + '.seedbox.json')
+        f1 = os.path.join(DIR, name + '.seedlaser')
         assert not await pg.is_visible('#sk-host .sk-proj'), '画板里不再显示项目名称块'
         # Esc 取消：什么都不存
         await pg.click(TAB); await pg.keyboard.type('不要保存'); await pg.keyboard.press('Escape')
-        assert not os.path.exists(os.path.join(DIR, '不要保存.seedbox.json')) and await label() == '未命名设计'
+        assert not os.path.exists(os.path.join(DIR, '不要保存.seedlaser')) and await label() == '未命名设计'
         # 输入名字回车 → 保存到项目文件夹
         await pg.click(TAB)
         assert await pg.input_value('#doc-tabs .dt-input') == ''
@@ -35,7 +35,7 @@ async def main():
         await pg.dblclick('#doc-tabs .dt-tab.on'); await pg.keyboard.press('End'); await pg.keyboard.type('号')
         await pg.keyboard.press('Backspace'); await pg.keyboard.type('2号'); await pg.keyboard.press('Enter'); await pg.wait_for_timeout(800)
         assert await pg.evaluate(f"{ED}.content.children.length") == n
-        f2 = os.path.join(DIR, name + '2号.seedbox.json')
+        f2 = os.path.join(DIR, name + '2号.seedlaser')
         assert os.path.exists(f2) and not os.path.exists(f1), os.listdir(DIR)
         assert await label() == name + '2号'
         await b.close()

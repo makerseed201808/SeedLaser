@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 
 ED = 'window.__seedDebug.sketchEd'
 TMP = tempfile.mkdtemp(prefix='seedlaser-file1-')
-PROJ = os.path.join(TMP, '测试设计.seedbox.json')
+PROJ = os.path.join(TMP, '测试设计.seedlaser')
 SVG = os.path.join(TMP, '测试设计.svg')
 
 

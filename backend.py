@@ -567,13 +567,29 @@ def _migrate_project(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return d, notes
 
 
+PROJECT_EXT = ".seedlaser"     # 项目文件扩展名（内容是 JSON）；旧版的 .seedbox.json 照样能打开
+_EXT_RE = re.compile(r"\.seedlaser$|\.seedbox\.json$|\.json$", re.I)
+_OPEN_TYPES = ("SeedLaser 项目 (*.seedlaser;*.json)", "All files (*.*)")
+_SAVE_TYPES = ("SeedLaser 项目 (*.seedlaser)",)
+
+
+def project_stem(path_or_name: str) -> str:
+    """文件名去掉项目扩展名（.seedlaser / 旧版 .seedbox.json / .json）."""
+    return _EXT_RE.sub("", os.path.basename(str(path_or_name)))
+
+
+def project_dir() -> str:
+    """默认的项目文件夹：「文稿/SeedLaser」（测试时用 SEEDLASER_PROJECT_DIR）."""
+    return os.environ.get("SEEDLASER_PROJECT_DIR") or os.path.join(os.path.expanduser("~"), "Documents", "SeedLaser")
+
+
 def _remember_recent(path: str, project: dict[str, Any]) -> None:
     import time
     path = os.path.abspath(path)
     gen = project.get("generator") or ""
     free = project.get("free") or {}
     n = len(free.get("parts") or []) if gen == "FreeDesign" else None
-    item = {"path": path, "name": os.path.basename(path).replace(".seedbox.json", "").replace(".json", ""),
+    item = {"path": path, "name": project_stem(path),
             "generator": gen, "parts": n, "time": int(time.time())}
     _save_recent([item] + [r for r in _load_recent() if os.path.abspath(r.get("path", "")) != path])
 
@@ -858,7 +874,7 @@ class Api:
         self._test_pick = [path]
         return {"ok": True}
 
-    def _pick(self, save: bool, filename: str = "", file_types: tuple = ()) -> Any:
+    def _pick(self, save: bool, filename: str = "", file_types: tuple = (), directory: str = "") -> Any:
         if self._window is None:
             q = getattr(self, "_test_pick", None)
             if q:
@@ -867,10 +883,10 @@ class Api:
         _fd = getattr(webview, "FileDialog", None)
         if save:
             mode = _fd.SAVE if _fd else webview.SAVE_DIALOG
-            picked = self._window.create_file_dialog(mode, save_filename=filename, file_types=file_types)
+            picked = self._window.create_file_dialog(mode, directory=directory, save_filename=filename, file_types=file_types)
         else:
             mode = _fd.OPEN if _fd else webview.OPEN_DIALOG
-            picked = self._window.create_file_dialog(mode, file_types=file_types)
+            picked = self._window.create_file_dialog(mode, directory=directory, file_types=file_types)
         if isinstance(picked, (list, tuple)):
             picked = picked[0] if picked else None
         return picked
@@ -881,15 +897,18 @@ class Api:
         picked = path
         if not picked:
             base = (name or project.get("name") or ("我的设计" if project.get("generator") == "FreeDesign" else project.get("generator", "project")))
-            base = re.sub(r"\.seedbox\.json$|\.json$", "", str(base))
+            base = project_stem(base)
             try:
-                picked = self._pick(True, f"{base}.seedbox.json", ("SeedLaser 项目 (*.json)", "All files (*.*)"))
+                folder = project_dir()
+                os.makedirs(folder, exist_ok=True)
+                picked = self._pick(True, f"{base}{PROJECT_EXT}", _SAVE_TYPES, folder)
             except Exception as exc:
                 return {"error": f"保存对话框失败: {exc}"}
             if not picked:
                 return {"cancelled": True}
-            if not str(picked).endswith(".json"):
-                picked = f"{picked}.seedbox.json"
+            picked = str(picked)
+            # 另存为一律用新扩展名（对话框里留着旧的 .json 也换掉）
+            picked = os.path.join(os.path.dirname(picked), project_stem(picked) + PROJECT_EXT)
         try:
             with open(picked, "w", encoding="utf-8") as f:
                 json.dump(project, f, ensure_ascii=False, indent=2)
@@ -904,7 +923,7 @@ class Api:
         已有同名文件时不覆盖，返回 {exists: True}。"""
         import json
         name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", str(name or "")).strip().strip(".")
-        name = re.sub(r"\.seedbox\.json$|\.json$", "", name, flags=re.I).strip()
+        name = project_stem(name).strip()
         if not name:
             return {"error": "名字不能为空，也不能只有 / \\ : * ? \" < > | 这些符号"}
         if len(name) > 80:
@@ -912,8 +931,8 @@ class Api:
         if current and os.path.isdir(os.path.dirname(current)):
             folder = os.path.dirname(os.path.abspath(current))
         else:
-            folder = os.environ.get("SEEDLASER_PROJECT_DIR") or os.path.join(os.path.expanduser("~"), "Documents", "SeedLaser")
-        target = os.path.join(folder, f"{name}.seedbox.json")
+            folder = project_dir()
+        target = os.path.join(folder, f"{name}{PROJECT_EXT}")
         same = bool(current) and os.path.abspath(current) == os.path.abspath(target)
         if not same and os.path.exists(target):
             return {"exists": True, "path": target, "error": f"「{name}」已经有了（{folder}），换个名字，或用「文件 → 另存为」"}
@@ -937,7 +956,8 @@ class Api:
 
     def open_project(self) -> dict[str, Any]:
         try:
-            picked = self._pick(False, "", ("SeedLaser 项目 (*.json)", "All files (*.*)"))
+            folder = project_dir()
+            picked = self._pick(False, "", _OPEN_TYPES, folder if os.path.isdir(folder) else "")
         except Exception as exc:
             return {"error": f"打开对话框失败: {exc}"}
         if not picked:

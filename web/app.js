@@ -629,7 +629,7 @@ async function doSave(fmtArg) {
   }
 }
 
-// ---- 项目文件（.seedbox.json）----
+// ---- 项目文件（.seedlaser，内容是 JSON；旧版 .seedbox.json 照样能打开）----
 // 当前文件：state.projectPath（null = 还没保存过）；state.savedSnap = 上次保存 / 打开时的内容，用来判断有没有改动
 function buildProject() {
   const ws = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
@@ -655,7 +655,7 @@ function projectSnap() {
 }
 
 function fileBase(forExport) {
-  if (state.projectPath) return state.projectPath.split(/[\\/]/).pop().replace(/\.seedbox\.json$|\.json$/i, '');
+  if (state.projectPath) return state.projectPath.split(/[\\/]/).pop().replace(/\.seedlaser$|\.seedbox\.json$|\.json$/i, '');
   if (forExport) return state.current === 'FreeDesign' ? '我的设计' : state.current;
   return null;
 }

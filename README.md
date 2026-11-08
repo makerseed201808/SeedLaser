@@ -71,7 +71,7 @@ SeedLaser 是 [种子创客工坊（MakerSeed）](https://github.com/makerseed) 
 - **主页**：新建设计 / 快速建模 / 打开项目三个入口，最近项目和示例（卡榫测试样、批量名牌、基础收纳盒）。
 - **快速建模**：Boxes.py 的 170 多个生成器，中文界面和作品参考图；「放进设计 →」把板件连同装配位置放进二维画板。
 - **多开项目**：顶部标签栏像 Fusion 一样同时开多个项目，点标签切换，⌂ 回主页，＋ 新建。
-- **文件**：二维画板左上角「文件」菜单：新建、打开、最近打开、保存（⌘S）、另存为（⇧⌘S）、导入 SVG / DXF / 图片描摹（⌘I）、导出图纸。项目文件扩展名为 `.seedbox.json`。
+- **文件**：二维画板左上角「文件」菜单：新建、打开、最近打开、保存（⌘S）、另存为（⇧⌘S）、导入 SVG / DXF / 图片描摹（⌘I）、导出图纸。项目文件扩展名为 `.seedlaser`（内容是 JSON；旧版的 `.seedbox.json` 照样能打开）。
 
 ---
 
@@ -150,7 +150,7 @@ flowchart LR
 - **桌面外壳**：PyWebView（Windows 用 WebView2，macOS 用 WKWebView）；前端通过 `window.pywebview.api.<方法>()` 直接调用 Python，不走 HTTP。
 - **前端**：原生 HTML / CSS / ES 模块，不需要构建工具；二维画板用 paper.js，3D 用 three.js（都在 `web/vendor/`）。
 - **几何计算**在 Python 端：偏移、布尔运算、实体判定（交叉的切割轮廓按实体合并，完全在里面的才是孔）用 shapely；文字轮廓用 fonttools 读取系统字体。
-- **项目数据**：`.seedbox.json` 里保存每块板的二维草图（y 向上，单位 mm）、板件排版、3D 装配姿态和加工参数。二维排版位置和 3D 装配位置互相独立。
+- **项目数据**：`.seedlaser`（JSON）里保存每块板的二维草图（y 向上，单位 mm）、板件排版、3D 装配姿态和加工参数。二维排版位置和 3D 装配位置互相独立。
 - **快速建模**：不修改上游 Boxes.py 源码，通过 git 引用 `release-1.2`，所有定制都在客户端层。
 
 更详细的约定（数据格式、坐标系、配对规则、测试要求）见 [CLAUDE.md](CLAUDE.md) 和 [docs/ROADMAP.md](docs/ROADMAP.md)。
