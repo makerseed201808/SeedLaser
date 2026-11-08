@@ -18,7 +18,7 @@ async def main():
         await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         pick = lambda path: pg.evaluate(f"window.pywebview.api.dev_set_pick({json.dumps(path)})")
-        label = lambda: pg.inner_text('#sk-host .sk-file')
+        label = lambda: pg.evaluate("(()=>{const n=document.querySelector('#sk-host .sk-file').textContent; const d=document.querySelector('#sk-host .sk-savestate').classList.contains('dirty'); return n+(d?' ●':'')})()")
         count = lambda: pg.evaluate(f"{ED}.content.children.length")
         add_rect = lambda x: pg.evaluate(f"""(()=>{{const e={ED}; const it=e.addItem({{mode:'cut',paths:[]}}); it.remove();
             const r=new e.ps.Path.Rectangle({{point:[{x},10],size:[20,20],insert:false}}); r.data=it.data; e.content.addChild(r); e.style(r); e.commit('t');}})()""")

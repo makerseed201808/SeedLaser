@@ -1204,3 +1204,39 @@ input, textarea, select { font: inherit; user-select: text; }
 
 .sk-mi { display: inline-flex; align-items: center; gap: 8px; }
 .sk-mi svg { width: 16px; height: 16px; }
+
+/* ===== 菜单栏 v3：项目名称块 + 分组图标（对齐 / 旋转直接展示） ===== */
+#sk-host .sk-top { gap: 6px; padding: 6px 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+#sk-host .sk-top::-webkit-scrollbar { display: none; }
+#sk-host .sk-group { gap: 2px; padding-left: 8px; margin-left: 2px; border-left: 1px solid #e6eaf0; flex: none; }
+.sk-proj { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 6px; margin-right: 4px; border-radius: 8px;
+  background: #f4f7fb; border: 1px solid #e3e9f1; flex: none; max-width: 300px; }
+.sk-proj-ico { display: inline-flex; color: #1f6feb; }
+#sk-host .sk-proj .sk-title { max-width: 210px; min-width: 0; }
+#sk-host .sk-file { font-size: 13.5px; font-weight: 700; color: #10233f; padding: 2px 5px; margin: 0; }
+#sk-host .sk-file:hover { background: #fff; border-color: #c9d6e6; }
+.sk-file-input { width: 190px; }
+.sk-savestate { font-size: 11px; color: #8a96a3; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.sk-savestate:empty { display: none; }
+.sk-savestate.dirty { color: #c2410c; }
+.sk-savestate.dirty::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #f97316; }
+#sk-host .sk-glabel { font-size: 11.5px; color: #8a96a3; margin: 0 4px 0 2px; white-space: nowrap; }
+.sk-seg2 { display: inline-flex; gap: 1px; padding: 1px; border-radius: 7px; background: #f1f4f8; }
+.sk-seg2 + .sk-seg2, .sk-seg2 + .sk-ico { margin-left: 4px; }
+#sk-host .sk-top .sk-ico { width: 30px; height: 28px; min-width: 30px; padding: 0 !important; display: inline-flex; align-items: center; justify-content: center;
+  border-color: transparent !important; background: transparent; color: #33465f; border-radius: 6px; }
+#sk-host .sk-top .sk-seg2 .sk-ico { background: transparent; }
+#sk-host .sk-top .sk-ico:hover:not(:disabled) { background: #fff !important; color: #1f6feb; box-shadow: 0 0 0 1px #c9d6e6 inset; }
+#sk-host .sk-top .sk-ico:disabled { color: #b6bfca; cursor: default; }
+#sk-host .sk-top .sk-group > .sk-ico { border: 1px solid #e3e9f1 !important; }
+#sk-host .sk-top .sk-group > .sk-ico:disabled { border-color: #eef1f5 !important; }
+#sk-host .sk-top .sk-menubtn { flex: none; }
+#sk-host .sk-zoom { min-width: 40px; }
+
+/* 改名时输入框和名字同宽，菜单栏不跳动 */
+#sk-host .sk-proj { width: 210px; max-width: 210px; box-sizing: border-box; }
+#sk-host .sk-proj .sk-title { flex: 1; max-width: none; overflow: hidden; }
+#sk-host .sk-file { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sk-host .sk-file.editing { display: block; }
+#sk-host .sk-file-input { width: 100%; box-sizing: border-box; font-size: 13.5px; }
+.sk-numeric .sk-glabel { font-size: 11.5px; color: #8a96a3; }

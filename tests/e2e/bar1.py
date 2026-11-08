@@ -16,6 +16,8 @@ async def main():
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry'); await pg.wait_for_selector('#sk-host:not(.hidden)'); await pg.wait_for_timeout(1500)
         H = '#sk-host '
+        # 没选中：对齐 / 旋转按钮不可用
+        assert await pg.is_disabled(H + '.sk-top [data-act=rotR]') and not await pg.query_selector(H + '.sk-top [data-align]')
         # 没选中：上下文栏显示材料数据
         t = await pg.inner_text(H + '.sk-ctx-data')
         assert '材料' in t and '400 × 300' in t and '板厚' in t and '1 块' in t and '切割' in t, t
@@ -51,18 +53,16 @@ async def main():
         await pg.evaluate(f"""(()=>{{const e={ED}; const it=e.addItem({{mode:'cut',paths:[]}}); it.remove();
             const r=new e.ps.Path.Rectangle({{point:[200,40],size:[30,20],insert:false}}); r.data=it.data; e.content.addChild(r); e.style(r);
             window.__R=r; e.sel=new Set([e.content.children[0], r]); e.refresh();}})()""")
-        await pg.click(H + '[data-menu=align]')
-        assert await pg.is_disabled('.sk-filemenu [data-mact="al:dh"]'), '选 2 个时分布不可用'
-        await pg.screenshot(path=OUT + 'bar1_align.png', clip={'x': 0, 'y': 0, 'width': 700, 'height': 460})
-        await pg.click('.sk-filemenu [data-mact="al:l"]')
+        assert await pg.is_disabled(H + '.sk-ctx-sel [data-align=dh]'), '选 2 个时分布不可用'
+        await pg.click(H + '.sk-ctx-sel [data-align=l]')
         lefts = await pg.evaluate(f"[...{ED}.sel].map(i=>Math.round(i.bounds.left*1000)/1000)")
         assert len(set(lefts)) == 1, lefts
         # 旋转菜单：右转 90° → 30×20 变成 20×30
         await pg.evaluate(f"{ED}.sel=new Set([{ED}.content.children.find(c=>Math.abs(c.bounds.width-30)<1e-6)]); {ED}.refresh()")
-        await pg.click(H + '[data-menu=rotate]'); await pg.click('.sk-filemenu [data-mact=rotR]')
+        await pg.click(H + '.sk-top [data-act=rotR]')
         wh = await pg.evaluate(f"(()=>{{const b=[...{ED}.sel][0].bounds; return [Math.round(b.width), Math.round(b.height)]}})()")
         assert wh == [20, 30], wh
-        await pg.click(H + '[data-menu=rotate]'); await pg.click('.sk-filemenu [data-mact=askRot]')
+        await pg.click(H + '.sk-top [data-rotask]')
         await pg.wait_for_timeout(200)
         await pg.keyboard.press('Escape')
         # 帮助菜单：快捷键

@@ -73,6 +73,19 @@ const ALIGN_ICONS = {
   dv: '<path d="M2 1h12M2 15h12"/><rect x="4" y="3.5" width="8" height="3"/><rect x="4" y="9.5" width="8" height="3"/>',
 };
 const ALIGN_NAMES = { l: '左对齐', hc: '水平居中', r: '右对齐', t: '顶对齐', vc: '垂直居中', b: '底对齐', dh: '水平等距分布', dv: '垂直等距分布' };
+// 菜单栏的其他图标（16×16 线框，和对齐图标同一风格）
+const BAR_ICONS = {
+  undo: '<path d="M5 3.5L2 6.5l3 3"/><path d="M2.5 6.5H10a3.5 3.5 0 0 1 0 7H7"/>',
+  redo: '<path d="M11 3.5l3 3-3 3"/><path d="M13.5 6.5H6a3.5 3.5 0 0 0 0 7h3"/>',
+  rotL: '<path d="M3.2 9.5A5 5 0 1 0 4.6 4.2"/><path d="M2.5 1.8v3.4h3.4"/>',
+  rotR: '<path d="M12.8 9.5A5 5 0 1 1 11.4 4.2"/><path d="M13.5 1.8v3.4h-3.4"/>',
+  flipH: '<path d="M8 1v14" stroke-dasharray="1.6 1.6"/><path d="M6 4.5L2 12h4z"/><path d="M10 4.5l4 7.5h-4z" fill="currentColor" fill-opacity=".25"/>',
+  flipV: '<path d="M1 8h14" stroke-dasharray="1.6 1.6"/><path d="M4.5 6L12 2v4z"/><path d="M4.5 10l7.5 4v-4z" fill="currentColor" fill-opacity=".25"/>',
+  angle: '<path d="M2 13.5h12"/><path d="M2 13.5L11.5 3"/><path d="M7.2 13.5a5.2 5.2 0 0 0-1.6-3.8"/>',
+  fit: '<path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5"/><rect x="5" y="5" width="6" height="6" rx="1"/>',
+  file: '<path d="M4 1.5h5.5L12.5 4.5v10H4z"/><path d="M9.5 1.5v3h3"/><path d="M6 8.5h4.5M6 11h4.5"/>',
+};
+const barIcon = (k) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${BAR_ICONS[k]}</svg>`;
 const alignIcon = (k) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3">${ALIGN_ICONS[k]}</svg>`;
 
 import { parseDXF, loadImage, grayOf, otsu, binarize, readFile } from './sketch-import.js';
@@ -115,17 +128,25 @@ export class SketchEditor {
     const h = this.host;
     h.innerHTML = `
       <div class="sk-top">
+        <div class="sk-proj">
+          <span class="sk-proj-ico">${barIcon('file')}</span>
+          <div class="sk-title"><b class="sk-name">—</b><span class="sk-file" title="点一下输入项目名称，回车就保存"></span></div>
+          <span class="sk-savestate" title="● = 有改动还没保存（⌘S 保存）"></span>
+        </div>
         <button class="sk-menubtn sk-filebtn" data-filemenu title="新建、打开、保存、另存为、导入、导出">文件 ▾</button>
-        <button class="sk-menubtn" data-menu="edit" title="撤销、复制、粘贴、删除、编组……">编辑 ▾</button>
-        <button class="sk-menubtn" data-menu="align" title="对齐与分布（只选 1 个时对齐到整块材料）">对齐 ▾</button>
-        <button class="sk-menubtn" data-menu="rotate" title="旋转 90° / 180°、输入任意角度、水平 / 垂直镜像">旋转 ▾</button>
-        <div class="sk-title"><b class="sk-name">—</b><span class="sk-file" title="点一下输入项目名称，回车就保存（● = 有改动还没保存）"></span></div>
+        <button class="sk-menubtn" data-menu="edit" title="复制、粘贴、删除、全选、编组……">编辑 ▾</button>
         <div class="sk-group">
-          <button class="sk-ico" data-act="undo" title="撤销（⌘Z）">↶</button>
-          <button class="sk-ico" data-act="redo" title="重做（⇧⌘Z）">↷</button>
+          <button class="sk-ico" data-act="undo" title="撤销（⌘Z）">${barIcon('undo')}</button>
+          <button class="sk-ico" data-act="redo" title="重做（⇧⌘Z）">${barIcon('redo')}</button>
+        </div>
+        <div class="sk-group sk-bargrp" title="旋转与镜像（也可以拖动图形上方的蓝点旋转）">
+          <span class="sk-glabel">旋转</span>
+          <span class="sk-seg2"><button class="sk-ico" data-act="rotL" data-needsel title="左转 90°（逆时针）">${barIcon('rotL')}</button><button class="sk-ico" data-act="rotR" data-needsel title="右转 90°（顺时针）">${barIcon('rotR')}</button></span>
+          <span class="sk-seg2"><button class="sk-ico" data-act="flipH" data-needsel title="水平镜像（左右翻转）">${barIcon('flipH')}</button><button class="sk-ico" data-act="flipV" data-needsel title="垂直镜像（上下翻转）">${barIcon('flipV')}</button></span>
+          <button class="sk-ico" data-rotask data-needsel title="输入任意角度">${barIcon('angle')}</button>
         </div>
         <div class="sk-group" title="视图">
-          <button class="sk-ico" data-act="fit" title="适合窗口：显示整块材料（F）">⤢</button>
+          <button class="sk-ico" data-act="fit" title="适合窗口：显示整块材料（F）">${barIcon('fit')}</button>
           <button class="sk-ico" data-zoom="out" title="缩小（滚轮也可以缩放）">−</button>
           <span class="sk-zoom" title="缩放比例（100% ≈ 屏幕上的实际大小）">100%</span>
           <button class="sk-ico" data-zoom="in" title="放大">+</button>
@@ -134,7 +155,7 @@ export class SketchEditor {
           <span class="sk-glabel">吸附</span>
           <select data-opt="snap" title="网格吸附步长"><option value="0">网格 关</option><option value="0.5">网格 0.5</option>
             <option value="1" selected>网格 1 mm</option><option value="5">网格 5 mm</option></select>
-          <label class="sk-toggle" title="吸附端点、中点、交点、圆心，以及绿色对齐辅助线"><input type="checkbox" data-opt="snapPoints" checked><span>端点 / 对齐</span></label>
+          <label class="sk-toggle" title="吸附端点、中点、交点、圆心，以及绿色对齐辅助线"><input type="checkbox" data-opt="snapPoints" checked><span>端点</span></label>
         </div>
         <span class="sk-spacer"></span>
         <button class="sk-menubtn" data-menu="help" title="快捷键、新手引导">? 帮助 ▾</button>
@@ -157,7 +178,8 @@ export class SketchEditor {
           <label title="高（回车生效）">高<input data-num="h" type="number" step="0.1" min="0.1"></label>
           <label title="旋转角度，正数 = 逆时针（回车生效）">旋转<input data-num="rot" type="number" step="1" value="0"></label><span class="sk-unit">°</span>
           <i class="sk-sep sk-num-sep"></i>
-          <span class="sk-aligns" title="对齐：只选 1 个时对齐到整块材料">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}">${alignIcon(k)}</button>`).join('')}
+          <span class="sk-glabel">对齐</span>
+          <span class="sk-aligns" title="对齐：只选 1 个时对齐到整块材料；选多个时互相对齐">${['l', 'hc', 'r', 't', 'vc', 'b'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}">${alignIcon(k)}</button>`).join('')}
             <i class="sk-sep"></i>${['dh', 'dv'].map((k) => `<button data-align="${k}" title="${ALIGN_NAMES[k]}（选 3 个以上）">${alignIcon(k)}</button>`).join('')}</span>
           <i class="sk-sep sk-num-sep"></i>
           <button class="sk-ico" data-act="dup" title="复制一份（⌘D）">⧉</button>
@@ -301,6 +323,7 @@ export class SketchEditor {
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
     h.querySelector('[data-filemenu]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleFileMenu(); });
     h.querySelector('.sk-file').addEventListener('click', () => this.startRename());
+    h.querySelector('[data-rotask]').addEventListener('click', () => { const b = this.selBounds(); if (b) this.askRotate(b.center); });
     h.querySelectorAll('[data-menu]').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleMenu(b.dataset.menu); }));
     h.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => {
       const v = this.ps.view;
@@ -723,7 +746,12 @@ export class SketchEditor {
 
   setFileLabel(text) {
     const el = this.$ && this.$('.sk-file');
-    if (el && !this.renaming && el.textContent !== text) el.textContent = text;
+    if (!el) return;
+    const dirty = /●\s*$/.test(text);
+    const name = text.replace(/\s*●\s*$/, '');
+    if (!this.renaming && el.textContent !== name) el.textContent = name;
+    const st = this.$('.sk-savestate');
+    if (st) { st.classList.toggle('dirty', dirty); st.textContent = dirty ? '未保存' : (name === '未命名设计' ? '' : '已保存'); }
   }
 
   // 标题上直接改名：输入名字，回车 / 点别处 = 保存（没保存过的存到「文稿/SeedLaser」，保存过的原地改名）；Esc 取消
@@ -4048,6 +4076,7 @@ export class SketchEditor {
 
   updateNumeric() {
     const n = this.sel.size;
+    this.$$('.sk-top [data-needsel]').forEach((btn) => { btn.disabled = !n; });
     this.$$('[data-align]').forEach((btn) => {
       const k = btn.dataset.align;
       btn.disabled = k === 'dh' || k === 'dv' ? n < 3 : n < 1;
