@@ -1201,3 +1201,6 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-file.editing { padding: 0; border: none; background: none; }
 .sk-file-input { font-size: 13px; font-weight: 600; width: 180px; padding: 3px 6px; border: 1px solid #1f6feb; border-radius: 6px; outline: none; box-shadow: 0 0 0 3px rgba(31,111,235,.15); }
 .sk-title { max-width: 260px; }
+
+.sk-mi { display: inline-flex; align-items: center; gap: 8px; }
+.sk-mi svg { width: 16px; height: 16px; }

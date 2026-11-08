@@ -47,11 +47,29 @@ async def main():
         assert await pg.query_selector('.sk-filemenu [data-fc=save]')
         await pg.click(H + '[data-filemenu]')
         assert not await pg.query_selector('.sk-filemenu')
+        # 对齐菜单：两个图形左对齐
+        await pg.evaluate(f"""(()=>{{const e={ED}; const it=e.addItem({{mode:'cut',paths:[]}}); it.remove();
+            const r=new e.ps.Path.Rectangle({{point:[200,40],size:[30,20],insert:false}}); r.data=it.data; e.content.addChild(r); e.style(r);
+            window.__R=r; e.sel=new Set([e.content.children[0], r]); e.refresh();}})()""")
+        await pg.click(H + '[data-menu=align]')
+        assert await pg.is_disabled('.sk-filemenu [data-mact="al:dh"]'), '选 2 个时分布不可用'
+        await pg.screenshot(path=OUT + 'bar1_align.png', clip={'x': 0, 'y': 0, 'width': 700, 'height': 460})
+        await pg.click('.sk-filemenu [data-mact="al:l"]')
+        lefts = await pg.evaluate(f"[...{ED}.sel].map(i=>Math.round(i.bounds.left*1000)/1000)")
+        assert len(set(lefts)) == 1, lefts
+        # 旋转菜单：右转 90° → 30×20 变成 20×30
+        await pg.evaluate(f"{ED}.sel=new Set([{ED}.content.children.find(c=>Math.abs(c.bounds.width-30)<1e-6)]); {ED}.refresh()")
+        await pg.click(H + '[data-menu=rotate]'); await pg.click('.sk-filemenu [data-mact=rotR]')
+        wh = await pg.evaluate(f"(()=>{{const b=[...{ED}.sel][0].bounds; return [Math.round(b.width), Math.round(b.height)]}})()")
+        assert wh == [20, 30], wh
+        await pg.click(H + '[data-menu=rotate]'); await pg.click('.sk-filemenu [data-mact=askRot]')
+        await pg.wait_for_timeout(200)
+        await pg.keyboard.press('Escape')
         # 帮助菜单：快捷键
         await pg.click(H + '[data-menu=help]'); await pg.click('.sk-filemenu [data-mact=keys]')
         await pg.wait_for_selector('.sk-modal-box')
         await b.close()
     assert not errs, errs
-    print('PASS bar1：编辑 / 帮助菜单、缩放 −/+ 和百分比、上下文栏（材料数据 / 位置尺寸 + 复制删除）')
+    print('PASS bar1：编辑 / 对齐 / 旋转 / 帮助菜单、缩放 −/+ 和百分比、上下文栏（材料数据 / 位置尺寸 + 复制删除）')
 
 asyncio.run(main())

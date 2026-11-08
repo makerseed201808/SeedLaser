@@ -117,6 +117,8 @@ export class SketchEditor {
       <div class="sk-top">
         <button class="sk-menubtn sk-filebtn" data-filemenu title="新建、打开、保存、另存为、导入、导出">文件 ▾</button>
         <button class="sk-menubtn" data-menu="edit" title="撤销、复制、粘贴、删除、编组……">编辑 ▾</button>
+        <button class="sk-menubtn" data-menu="align" title="对齐与分布（只选 1 个时对齐到整块材料）">对齐 ▾</button>
+        <button class="sk-menubtn" data-menu="rotate" title="旋转 90° / 180°、输入任意角度、水平 / 垂直镜像">旋转 ▾</button>
         <div class="sk-title"><b class="sk-name">—</b><span class="sk-file" title="点一下输入项目名称，回车就保存（● = 有改动还没保存）"></span></div>
         <div class="sk-group">
           <button class="sk-ico" data-act="undo" title="撤销（⌘Z）">↶</button>
@@ -679,7 +681,15 @@ export class SketchEditor {
     const K = (k, shift) => (mac ? `${shift ? '⇧' : ''}⌘${k}` : `Ctrl+${shift ? 'Shift+' : ''}${k}`);
     const it = (act, label, key, dis) => `<button data-mact="${act}" ${dis ? 'disabled' : ''}><span>${label}</span><kbd>${key || ''}</kbd></button>`;
     const n = this.sel.size;
-    const html = id === 'edit'
+    const ai = (k) => `<button data-mact="al:${k}" ${(k === 'dh' || k === 'dv' ? n < 3 : n < 1) ? 'disabled' : ''}><span class="sk-mi">${alignIcon(k)}${ALIGN_NAMES[k]}</span><kbd></kbd></button>`;
+    const html = id === 'align'
+      ? ['l', 'hc', 'r'].map(ai).join('') + '<hr>' + ['t', 'vc', 'b'].map(ai).join('') + '<hr>' + ['dh', 'dv'].map(ai).join('') +
+        `<div class="sk-fm-h">${n === 1 ? '只选了 1 个：对齐到整块材料' : n ? `已选 ${n} 个：互相对齐` : '先选中图形'}；分布要选 3 个以上</div>`
+      : id === 'rotate'
+      ? it('rotL', '↺ 左转 90°（逆时针）', '', !n) + it('rotR', '↻ 右转 90°（顺时针）', '', !n) + it('rot180', '⟲ 旋转 180°', '', !n) +
+        it('askRot', '∠ 输入角度…', '', !n) + '<hr>' + it('flipH', '⇆ 水平镜像', '', !n) + it('flipV', '⇅ 垂直镜像', '', !n) +
+        '<div class="sk-fm-h">也可以拖动图形上方的蓝点旋转</div>'
+      : id === 'edit'
       ? it('undo', '撤销', K('Z')) + it('redo', '重做', K('Z', true)) + '<hr>' +
         it('copy', '复制', K('C'), !n) + it('paste', '粘贴', K('V')) + it('dup', '复制一份', K('D'), !n) + it('delete', '删除', 'Delete', !n) + '<hr>' +
         it('selectAll', '全选', K('A')) + it('group', '编组', K('G'), n < 2) + it('ungroup', '取消编组', K('G', true), !n)
@@ -694,6 +704,9 @@ export class SketchEditor {
       this.closeFileMenu();
       const a = b.dataset.mact;
       if (a === 'selectAll') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); return; }
+      if (a.startsWith('al:')) { this.align(a.slice(3)); return; }
+      if (a === 'rot180') { this.transformSel((x, c) => x.rotate(180, c), '已旋转 180°'); return; }
+      if (a === 'askRot') { const b = this.selBounds(); if (b) this.askRotate(b.center); return; }
       this.act(a, b);
     });
     const btn = this.$(`[data-menu=${id}]`);
