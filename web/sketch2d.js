@@ -1565,6 +1565,8 @@ export class SketchEditor {
         if (p.pid && p.pid === q.pid) { reasons.push('两条边在同一块板上'); fixes.push('unpair'); }
       }
       list.forEach((e) => { const o = own(e); reasons.push(...o.r); fixes.push(...o.f); });
+      const s3 = this.conn3d && this.conn3d[pair];                       // B4：3D 拼装检查的结果（workshop 传进来）
+      if (s3 && s3.state !== 'ok' && !(s3.state === 'nomate' && reasons.length)) reasons.push(s3.why);   // 拼不上的原因二维已经写了就不重复
       out.pairs.push({ key: `p:${pair}`, pair, ends: list, L: list[0].j.L, k: list[0].j.k, ok: !reasons.length, reasons, fixes: [...new Set(fixes)] });
     });
     [...out.singles, ...out.mortises].forEach((x) => {
@@ -1650,6 +1652,15 @@ export class SketchEditor {
     if (!done) { this.toast(failed ? '这条边被改动过，没法自动修复；可以撤销后重做卡榫' : '没有需要修复的', 'error'); this.refresh(); return; }
     this.commit(label + (failed ? `；有 ${failed} 条边被改动过，没能自动修复` : ''));
     this.highlightConn(key);
+  }
+
+  // B4：workshop 每次 3D 检查后传进来 { pair: { state, why } }
+  setConn3D(map) {
+    const key = JSON.stringify(map || {});
+    if (key === this._conn3dKey) return;
+    this._conn3dKey = key;
+    this.conn3d = map || {};
+    if (this.opened && !this.drag) this.updateCards();
   }
 
   // 点连接清单的一行：画板上高亮这对边并移到画面中间；3D 预览里也高亮（onHighlight 由 workshop 接上）

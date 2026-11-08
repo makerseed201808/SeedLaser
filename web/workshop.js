@@ -1732,6 +1732,50 @@ function resetPoses(all) {
 }
 
 let poseCheckSeq = 0;
+// B4：按「连接」（两条配对的卡榫边）判断 3D 状态：拼不上 / 没拼在一起 / 穿透 / ✓。
+// rep = check_pose 的结果（每块板的 collide / touch）。返回 { pair: { state, why } }
+function connStates(rep) {
+  const out = {};
+  if (!W.model || !W.model.parts) return out;
+  const t = W.model.thickness || 3;
+  const dis = new Set(W.project.disabled);
+  const byPair = new Map();
+  W.model.parts.forEach((p) => {
+    if (dis.has(p.id) || p.id === 'reference') return;
+    jointsOf(p.id).forEach((j) => {
+      if (!j.pair || j.type === 'mortise') return;
+      if (!byPair.has(j.pair)) byPair.set(j.pair, []);
+      byPair.get(j.pair).push({ pid: p.id, j });
+    });
+  });
+  const near = (A, B) => A.elements.every((v, i) => Math.abs(v - B.elements[i]) < (i >= 12 && i <= 14 ? 0.05 : 1e-3));
+  const poses = W.project.poses || {};
+  byPair.forEach((ends, pair) => {
+    if (ends.length !== 2 || ends[0].pid === ends[1].pid) return;       // 半个配对 / 同一块板：二维检查已经报了
+    const [P, Q] = ends;
+    const qp = mateOptions(Q.j, P.j, t);                                // Q 局部 → P 局部
+    const pq = mateOptions(P.j, Q.j, t);                                // P 局部 → Q 局部
+    if (!qp.length && !pq.length) { out[pair] = { state: 'nomate', why: '3D 里拼不上：两条边的长度或齿位对不上' }; return; }
+    if (!poses[P.pid] || !poses[Q.pid]) return;                         // 还没拼装过：不判断
+    const MP = new THREE.Matrix4().fromArray(poseOf(partById(P.pid)));
+    const MQ = new THREE.Matrix4().fromArray(poseOf(partById(Q.pid)));
+    const rel = MP.clone().invert().multiply(MQ);
+    const relInv = rel.clone().invert();
+    const mated = qp.some((F) => near(F, rel)) || pq.some((F) => near(F, relInv));
+    const hit = rep && ((rep[P.pid] && rep[P.pid].collide.includes(Q.pid)) || (rep[Q.pid] && rep[Q.pid].collide.includes(P.pid)));
+    if (hit) out[pair] = { state: 'collide', why: mated ? '3D 里拼上了，但两块板互相穿透' : '3D 里两块板互相穿透（位置也没对上）' };
+    else if (!mated) out[pair] = { state: 'apart', why: '3D 里这两条边没拼在一起（位置不对或还没摆上去）' };
+    else out[pair] = { state: 'ok' };
+  });
+  return out;
+}
+
+function pushConnStates(rep) {
+  W.connStates = connStates(rep);
+  if (sketchEd && sketchEd.setConn3D) sketchEd.setConn3D(W.connStates);
+  return W.connStates;
+}
+
 // 咬合 / 穿透检查：只在有手动摆放（3D 编辑器里移动过）时运行；quiet 时只更新清单标记、不改提示
 const checkPose = debounce(async (quiet) => {
   if (!W.model || !W.model.token) return;
@@ -1750,6 +1794,8 @@ const checkPose = debounce(async (quiet) => {
   W.pose.report = r.report;
   if (view) view.refreshStates();
   renderPartsPanel();
+  const cs = pushConnStates(r.report);
+  const badConn = Object.values(cs).filter((c) => c.state !== 'ok');
   // 汇总：全部咬合且连通？
   const rep = r.report;
   const bad = ids.filter((id) => rep[id] && rep[id].collide.length);
@@ -1771,7 +1817,9 @@ const checkPose = debounce(async (quiet) => {
   });
   const loose = ids.filter((id) => !biggest.includes(id));
   if (quiet) return;
-  if (bad.length) setNote(`有 ${bad.length} 块板互相穿透（红色）：${bad.map(nameOf).join('、')}`, 'error');
+  const connHint = badConn.length ? `；${badConn.length} 处连接有问题（在二维画板的「连接」清单里点它可以定位）` : '';
+  if (bad.length) setNote(`有 ${bad.length} 块板互相穿透（红色）：${bad.map(nameOf).join('、')}${connHint}`, 'error');
+  else if (badConn.length) setNote(`${badConn.length} 处连接有问题：${badConn.map((c) => c.why.replace(/^3D 里/, '')).join('；')}（在二维画板的「连接」清单里点它可以定位）`, 'error');
   else if (!loose.length && ids.length > 1) setNote('✓ 所有板件都已咬合，没有穿透', 'ok');
   else setNote(`没有穿透；${loose.map(nameOf).join('、')} 还没有和主体连在一起`, 'info');
 }, 150);
@@ -2785,7 +2833,7 @@ if (new URLSearchParams(location.search).has('dev')) {
     get view() { return view; },
     get poser() { return poser; },
     get sketchEd() { return sketchEd; },
-    SF, sfCommand, sfSync, freeAutoAssemble, openSheet, setStage, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
+    SF, sfCommand, sfSync, freeAutoAssemble, connStates, checkPose: () => checkPose(), get connState() { return W.connStates; }, openSheet, setStage, fitTestDialog, generateFitTest, openSketchForge, closeSketchForge, sfReloadPoses, mateOptions, jointsOf, freeAdd, openEditor, partById,
     // 板件在屏幕上的位置（像素，相对视口）
     screenOf(id) {
       const o = view.objects.get(id);
