@@ -3215,7 +3215,12 @@ export class SketchEditor {
     const path = this.straightenEdge(item, joint);
     if (!path) { this.status('这条边被改动过，没法自动修改；可以撤销后重做'); this.refresh(); return; }
     item.data.joints = item.data.joints.filter((j) => j.id !== joint.id);
-    if (remove) { this.commit('已删除卡榫，恢复成直边'); return; }
+    const partner = joint.pair ? this.partnerOf(joint) : null;
+    if (remove) {
+      if (partner) delete partner.joint.pair;          // 另一条边变回没配对的卡榫边，不留半个配对
+      this.commit(partner ? '已删除卡榫，恢复成直边（配对的另一条边保留，变成没配对的卡榫边）' : '已删除卡榫，恢复成直边');
+      return;
+    }
     const a = new this.ps.Point(joint.a[0], joint.a[1]);
     const b = new this.ps.Point(joint.b[0], joint.b[1]);
     const iv = this.jointIntervals(b.getDistance(a));
@@ -3226,7 +3231,27 @@ export class SketchEditor {
     path.insertSegments(ia + 1, pts.map((q) => new this.ps.Segment(q)));
     // 配对号要留着（原来修改后丢了，配对的另一条边就变成「半个配对」）
     item.data.joints.push({ id: joint.id, ...(joint.pair ? { pair: joint.pair } : {}), ...this.jointMeta(this.opts.jointType, iv, depth, a, b, n) });
-    this.commit(`已修改卡榫（${iv.length} 个 A 齿）`);
+    // B3：配对的另一条边跟着改（齿位相同、A / B 互补、齿深一样），和这次修改算同一步撤销
+    let linked = '';
+    if (partner && ['a', 'b'].includes(this.opts.jointType) && Math.abs(partner.joint.L - b.getDistance(a)) <= 0.3) {
+      const other = this.opts.jointType === 'a' ? 'b' : 'a';
+      const ok = this.remakeJoint(partner.item, partner.joint, { type: other, iv, depth });
+      if (ok) {
+        const pj = partner.item.data.joints.find((q) => q.id === partner.joint.id);
+        Object.assign(pj, { mode: this.opts.jointMode, count: Number(this.opts.jointCount) || 0, tab: Number(this.opts.jointTab) || 0, gap: Number(this.opts.jointGap) || 0 });
+        linked = '，配对的另一条边也跟着改了';
+      } else linked = '；配对的另一条边被改动过，没能跟着改（连接清单里会标 ⚠）';
+    }
+    this.commit(`已修改卡榫（${iv.length} 个 A 齿）${linked}`);
+  }
+
+  // 配对的另一条边 { item, joint }
+  partnerOf(joint) {
+    for (const it of this.content.children) {
+      const j = (it.data && it.data.joints || []).find((q) => q.pair === joint.pair && q.id !== joint.id);
+      if (j) return { item: it, joint: j };
+    }
+    return null;
   }
 
   // 按给定的类型 / 齿区间 / 齿深重做一条卡榫边（编号、配对号、齿数设置都保留）。不提交，调用方统一 commit。
