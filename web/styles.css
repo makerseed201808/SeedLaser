@@ -1395,3 +1395,10 @@ input, textarea, select { font: inherit; user-select: text; }
   #sk-host .sk-numeric input[type=number]::-webkit-inner-spin-button,
   #sk-host .sk-numeric input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 }
+
+/* ---- 描摹前调节（C10） ---- */
+.sk-trace-cvbox { position: relative; }
+.sk-trace-cvbox .sk-trace-cv { cursor: crosshair; }
+.sk-trace-crop { position: absolute; border: 2px dashed #f97316; background: rgba(249, 115, 22, .08); pointer-events: none; }
+.sk-trace-cropin { flex-wrap: wrap; gap: 4px; align-items: center; }
+.sk-trace-cropin input { width: 42px; }

@@ -260,3 +260,23 @@ export function readFile(file, asText) {
     if (asText) r.readAsText(file); else r.readAsDataURL(file);
   });
 }
+
+/** 描摹前的调节（C10）：裁剪（各边裁掉的百分比）→ 亮度（−100 ~ 100）→ 对比度（−100 ~ 100）。返回新的 { gray, w, h }。
+ *  对比度用常见的 259 公式：f = 259 (c + 255) / (255 (259 − c))，c = 对比度 × 2.55；新值 = f (v − 128) + 128 + 亮度 × 2.55 */
+export function adjustGray({ gray, w, h }, { bright = 0, contrast = 0, crop = [0, 0, 0, 0] } = {}) {
+  const [cl, ct, cr, cb] = crop.map((v) => Math.max(0, Math.min(95, Number(v) || 0)) / 100);
+  const x0 = Math.min(w - 1, Math.round(w * cl)), x1 = Math.max(x0 + 1, Math.round(w * (1 - cr)));
+  const y0 = Math.min(h - 1, Math.round(h * ct)), y1 = Math.max(y0 + 1, Math.round(h * (1 - cb)));
+  const W = x1 - x0, H = y1 - y0;
+  const c = Math.max(-254, Math.min(254, (Number(contrast) || 0) * 2.55));
+  const f = (259 * (c + 255)) / (255 * (259 - c));
+  const b = (Number(bright) || 0) * 2.55;
+  const out = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const v = f * (gray[(y + y0) * w + x + x0] - 128) + 128 + b;
+      out[y * W + x] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
+    }
+  }
+  return { gray: out, w: W, h: H };
+}

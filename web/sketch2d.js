@@ -103,7 +103,7 @@ const refIcon = (k, size = 18) => {
 };
 const alignIcon = (k) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3">${ALIGN_ICONS[k]}</svg>`;
 
-import { parseDXF, loadImage, grayOf, otsu, binarize, readFile } from './sketch-import.js';
+import { parseDXF, loadImage, grayOf, otsu, binarize, readFile, adjustGray } from './sketch-import.js';
 
 let uid = 0;
 const newId = () => 's' + Date.now().toString(36) + (uid++).toString(36);
@@ -285,6 +285,11 @@ export class SketchEditor {
               <button data-act="dedupe" title="删除完全重合的重复图形（重复的线会被激光切两遍，边缘容易烧焦）">删除重复图形</button>
             </div>
             <p class="sk-small">只有闭合的切割路径才会切出一块板；重复的线会被切两遍。</p>
+          </section>
+          <section class="sk-card" data-panel="transform" data-key="t-warp">
+            <h4>四点变形</h4>
+            <div class="sk-btns sk-warp-btns"><button data-act="warpStart">开始变形</button></div>
+            <p class="sk-small">把选中图形外框的四个角拖到新位置（透视变形，比如做成梯形、贴合斜面）；曲线会细分成折线，文字会变成路径。</p>
           </section>
           <section class="sk-card" data-panel="transform" data-key="t-slot">
             <h4>改槽宽</h4>
@@ -930,7 +935,7 @@ export class SketchEditor {
   collapsedMap() {
     if (!this._collapsed) {
       try { this._collapsed = JSON.parse(localStorage.getItem('seedboxes.skCollapsed') || 'null'); } catch (e) { this._collapsed = null; }
-      if (!this._collapsed) this._collapsed = { 't-path': true, 't-group': true, 't-slot': true, array: true };
+      if (!this._collapsed) this._collapsed = { 't-path': true, 't-group': true, 't-slot': true, 't-warp': true, array: true };
     }
     return this._collapsed;
   }
@@ -2136,6 +2141,7 @@ export class SketchEditor {
     if (this.opts.jointPeer && this.opts.jointPeer.pair) this.cancelPairing(true);
     if (this.dimState) this.cancelDim();
     if (id !== 'lib') { this.libArmed = null; this.libDelArm = null; }
+    if (this.warp) this.warpCancel(true);
     if (id === 'text' && this.tool !== 'text') this.sel.clear();     // 文字工具：放新文字（不是改选中的）
     if (id !== this.tool) this.editJoint = null;
     this.tool = id;
@@ -2169,6 +2175,12 @@ export class SketchEditor {
     if (ev.button === 2 && this.drawing) { this.finishDrawing(); this.drag = null; return; }
     if (ev.button === 1 || ev.button === 2 || this.spacePan) { this.drag = { kind: 'pan', last: this.downView, start: this.downView, right: ev.button === 2 }; return; }
     const pt = e.point;
+    if (this.warp) {                                          // 四点变形中：只能拖角点
+      const wi = this.warpHandleAt(pt);
+      if (wi >= 0) this.drag = { kind: 'warp', i: wi };
+      else this.status('变形中：拖橙色角点；在右侧点「应用变形」或「取消」（Esc）');
+      return;
+    }
     if (this.tool === 'select' && !this.hitHandle(pt) && !this.hitItem(pt)) {
       const g = this.hitGuide(pt);
       if (g) { this.dragGuide(g, null); return; }
@@ -2277,6 +2289,7 @@ export class SketchEditor {
     else if (d.kind === 'node') this.nodeDrag(d, pt, ev);
     else if (d.kind === 'penHandle') this.penHandleDrag(d, pt);
     else if (d.kind === 'trim') this.trimAt(pt);
+    else if (d.kind === 'warp') { const q = this.snap(pt); this.warp.dst[d.i] = [q.x, q.y]; this.drawWarp(); }
     else if (d.kind === 'erase') {
       const w = Math.max(0.2, Number(this.opts.eraseW) || 2);
       // 沿拖动轨迹每隔半个擦除宽度擦一次（只擦真的点在线上的地方，擦出的缺口两端不会被再擦）
@@ -3909,11 +3922,13 @@ export class SketchEditor {
   // 圆角盒子用 Boxes.py 的 RoundedBox（侧壁是活铰链，一条长板弯过圆角）；齿轮按 ISO 53 标准基本齿廓（渐开线）计算。
 
   makeDefaults() {
+    if (this.opts.make && !this.opts.make.test) this.opts.make.test = { rows: 5, cols: 5, s: 10, gap: 3, pmin: 20, pmax: 100, vmin: 20, vmax: 100, mode: 'engrave' };
     if (!this.opts.make) {
       this.opts.make = { kind: 'box', box: { w: 80, d: 60, h: 50, outer: false, lid: true, finger: 0 },
         rbox: { w: 100, d: 80, h: 50, r: 15, outer: false, top: 'closed' },
         gear: { m: 2, z1: 20, z2: 12, bore: 5, lighten: true, pair: true },
-        badge: { shape: 'circle', d: 50, border: true, text: 'SeedLaser', arc: true, mirror: false } };
+        badge: { shape: 'circle', d: 50, border: true, text: 'SeedLaser', arc: true, mirror: false },
+        test: { rows: 5, cols: 5, s: 10, gap: 3, pmin: 20, pmax: 100, vmin: 20, vmax: 100, mode: 'engrave' } };
     }
     return this.opts.make;
   }
@@ -3928,6 +3943,9 @@ export class SketchEditor {
     if (kind === 'gear') return `<svg viewBox="0 0 120 70" class="sk-make-svg"><circle ${s} cx="42" cy="38" r="24" stroke-dasharray="3 2"/><circle ${s} cx="84" cy="38" r="14" stroke-dasharray="3 2"/>
       <circle ${acc} cx="42" cy="38" r="3"/><circle ${acc} cx="84" cy="38" r="3"/><path ${s} d="M42 38H84"/><text x="63" y="35" font-size="6" text-anchor="middle" fill="#64748b">中心距</text>
       <text x="60" y="8" font-size="7" text-anchor="middle" fill="#64748b">分度圆直径 = 模数 × 齿数</text></svg>`;
+    if (kind === 'test') return `<svg viewBox="0 0 120 70" class="sk-make-svg"><rect ${s} x="26" y="10" width="70" height="56" rx="2"/>
+      ${[0, 1, 2, 3].map((r) => [0, 1, 2, 3].map((c) => `<rect x="${44 + c * 12}" y="${22 + r * 11}" width="9" height="8" fill="#16a34a" opacity="${0.25 + c * 0.22}"/>`).join('')).join('')}
+      <text x="70" y="19" font-size="6" text-anchor="middle" fill="#64748b">功率 →</text><text x="36" y="44" font-size="6" text-anchor="middle" fill="#64748b" transform="rotate(-90 36 44)">速度 →</text></svg>`;
     return `<svg viewBox="0 0 120 70" class="sk-make-svg"><circle ${s} cx="60" cy="38" r="27"/><circle fill="none" stroke="#dc2626" stroke-width="1" cx="60" cy="38" r="23"/>
       <path fill="none" stroke="#16a34a" stroke-width="1.3" d="M42 33 Q60 18 78 33"/><text x="60" y="8" font-size="7" text-anchor="middle" fill="#64748b">外形切割 · 边框描线 · 文字雕刻</text></svg>`;
   }
@@ -3960,16 +3978,23 @@ export class SketchEditor {
         <div class="sk-row">${num('gear', 'bore', '轴孔', 'mm', 'min="0" step="0.5"')}${chk('gear', 'lighten', '减重孔')}</div>
         <div class="sk-row">${chk('gear', 'pair', '再配一个齿轮')}${num('gear', 'z2', '齿数', '', 'min="6" step="1"')}</div>
         <p class="sk-small">压力角 20°，标准渐开线（ISO 53）。分度圆 ${fmt(M.gear.m * M.gear.z1)} mm、齿顶圆 ${fmt(M.gear.m * (M.gear.z1 + 2))} mm${M.gear.pair ? `；中心距 ${fmt(M.gear.m * (M.gear.z1 + M.gear.z2) / 2)} mm（两个轴孔按这个距离打）` : ''}。模数相同的齿轮才能啮合；激光切建议模数 ≥ 1.5。</p>`;
+    } else if (M.kind === 'test') {
+      body = `<div class="sk-row">${num('test', 'rows', '行（速度）', '', 'min="1" max="12" step="1"')}${num('test', 'cols', '列（功率）', '', 'min="1" max="12" step="1"')}</div>
+        <div class="sk-row">${num('test', 'vmin', '速度', '')}${num('test', 'vmax', '→', 'mm/s')}</div>
+        <div class="sk-row">${num('test', 'pmin', '功率', '')}${num('test', 'pmax', '→', '%')}</div>
+        <div class="sk-row">${num('test', 's', '方块', 'mm', 'min="3" step="1"')}${num('test', 'gap', '间距', 'mm', 'min="0" step="0.5"')}</div>
+        <div class="sk-row"><label>方块用<select data-mk="test.mode">${[['engrave', '雕刻'], ['score', '描线'], ['cut', '切割']].map(([v, n]) => `<option value="${v}" ${M.test.mode === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+        <p class="sk-small">这里只画图纸（外框切下来就是一块测试板）：上面一排刻功率、左边一列刻速度。每个方块的功率和速度要在 LaserMaker / LightBurn 里按位置设，图纸本身不带参数。</p>`;
     } else {
       body = `<div class="sk-row"><label>形状<select data-mk="badge.shape">${[['circle', '圆形'], ['square', '方形'], ['shield', '盾牌']].map(([v, n]) => `<option value="${v}" ${M.badge.shape === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>${num('badge', 'd', '大小', 'mm', 'min="10" step="1"')}</div>
         <div class="sk-row"><label>文字<input data-mk="badge.text" type="text" maxlength="40" value="${escAttr(M.badge.text)}"></label></div>
         <div class="sk-row">${chk('badge', 'arc', '文字沿弧形')}${chk('badge', 'border', '边框')}${chk('badge', 'mirror', '镜像（做印章）')}</div>
         <p class="sk-small">外形切割，边框是描线，文字雕刻。做印章要勾「镜像」：印出来才是正的。</p>`;
     }
-    const tabs = [['box', '直角盒子'], ['rbox', '圆角盒子'], ['gear', '模数齿轮'], ['badge', '徽章 / 印章']];
+    const tabs = [['box', '直角盒子'], ['rbox', '圆角盒子'], ['gear', '模数齿轮'], ['badge', '徽章 / 印章'], ['test', '材料测试']];
     box.innerHTML = `<h4>一键造物</h4><div class="sk-seg sk-make-tabs">${tabs.map(([k, n]) => `<button data-mkind="${k}" class="${M.kind === k ? 'on' : ''}">${n}</button>`).join('')}</div>
       ${this.makeSchematic(M.kind)}${body}
-      ${this.sheetMode || M.kind === 'gear' || M.kind === 'badge' ? '' : '<p class="sk-warn">盒子要在自由设计的二维画板里生成（一块板的编辑里放不下多块板）。</p>'}
+      ${this.sheetMode || M.kind === 'gear' || M.kind === 'badge' || M.kind === 'test' ? '' : '<p class="sk-warn">盒子要在自由设计的二维画板里生成（一块板的编辑里放不下多块板）。</p>'}
       <div class="sk-row"><button data-mkgo class="primary sk-make-go">生成</button></div>`;
     box.querySelectorAll('[data-mkind]').forEach((b) => b.addEventListener('click', () => { M.kind = b.dataset.mkind; delete box.dataset.make; this.renderMake(box); }));
     box.querySelectorAll('[data-mk]').forEach((inp) => {
@@ -4004,6 +4029,7 @@ export class SketchEditor {
       if (M.kind === 'box') return this.makeBox(M.box);
       if (M.kind === 'rbox') return await this.makeRoundedBox(M.rbox);
       if (M.kind === 'gear') return this.makeGears(M.gear);
+      if (M.kind === 'test') return await this.makeTestMatrix(M.test);
       return await this.makeBadge(M.badge);
     } catch (e) {
       this.toast(`生成失败：${e && e.message ? e.message : e}`, 'error');
@@ -4451,6 +4477,141 @@ export class SketchEditor {
     this.commit(`已把 ${n0} 条线连成 ${its.length} 条${closed ? `（${closed} 条首尾接上，已闭合）` : ''}`);
   }
 
+  // 材料测试矩阵（C10）：只生成图纸——N × M 个小方块，上面刻功率、左边刻速度；参数由用户在激光软件里按位置设
+  async makeTestMatrix(o) {
+    const rows = Math.round(Number(o.rows)), cols = Math.round(Number(o.cols));
+    const s = Number(o.s), gap = Number(o.gap);
+    if (!(rows >= 1 && cols >= 1 && rows * cols <= 144) || !(s >= 3) || !(gap >= 0)) { this.toast('行列数 1 ~ 12、方块至少 3 mm', 'error'); return null; }
+    const lv = (a, b, i, n) => (n <= 1 ? Number(a) : Number(a) + (Number(b) - Number(a)) * i / (n - 1));
+    const Lw = 14, Th = 8, m = 4;
+    const gw = cols * s + (cols - 1) * gap, gh = rows * s + (rows - 1) * gap;
+    const W = m + Lw + gw + m, H = m + Th + gh + m;
+    const c = this.libDropPoint();
+    const x0 = c.x - W / 2, yTop = c.y + H / 2;
+    const gx = x0 + m + Lw, gy = yTop - m - Th;                            // 方块区域左上角
+    const grp = newId();
+    const made = [this.addItem({ mode: 'cut', group: grp, paths: [{ closed: true, segs: this.rectSegs(x0, yTop - H, W, H) }] })];
+    for (let r = 0; r < rows; r++) {
+      for (let k = 0; k < cols; k++) {
+        const x = gx + k * (s + gap), yt = gy - r * (s + gap);
+        made.push(this.addItem({ mode: o.mode || 'engrave', group: grp, paths: [{ closed: true, segs: this.rectSegs(x, yt - s, s, s) }] }));
+      }
+    }
+    const keep = this.opts.mode;
+    this.opts.mode = 'engrave';
+    const label = async (text, x, y, size) => {
+      const it = await this.buildText({ text, font: this.opts.font, size, spacing: 0, lineHeight: 1.25, align: 'center', arc: 0, weld: false, x, y });
+      if (it) { it.data.group = grp; made.push(it); }
+    };
+    try {
+      const fs = Math.min(3.5, s * 0.45);
+      for (let k = 0; k < cols; k++) await label(String(Math.round(lv(o.pmin, o.pmax, k, cols))), gx + k * (s + gap) + s / 2, gy + Th / 2, fs);
+      for (let r = 0; r < rows; r++) await label(String(Math.round(lv(o.vmin, o.vmax, r, rows))), x0 + m + Lw / 2 - 1, gy - r * (s + gap) - s / 2, fs);
+      await label('V\\P', x0 + m + Lw / 2 - 1, gy + Th / 2, Math.min(3, fs));
+    } finally {
+      this.opts.mode = keep;
+    }
+    this.sel = new Set(made);
+    const msg = `已生成材料测试矩阵：${rows} 行（速度 ${fmt(Number(o.vmin))} → ${fmt(Number(o.vmax))}）× ${cols} 列（功率 ${fmt(Number(o.pmin))} → ${fmt(Number(o.pmax))} %），共 ${rows * cols} 个方块`;
+    this.commit(msg);
+    this.status(msg + '。在激光软件里按位置给每个方块设对应的功率和速度');
+    return { cells: rows * cols };
+  }
+
+  // ---------------------------------------------------------------- 四点变形（C10）
+  // 选中图形的外框四个角当控制点，拖到新位置 → 按透视（单应性）变换所有点；曲线先细分成折线（误差 ≤ 0.25 mm），文字变成路径。
+
+  // 单位正方形 (0,0)(1,0)(1,1)(0,1) → 四边形 q[0..3] 的透视变换（Heckbert 1989）
+  static squareToQuad(q) {
+    const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = q;
+    const sx = x0 - x1 + x2 - x3, sy = y0 - y1 + y2 - y3;
+    let a, b, c, d, e, f, g, h;
+    if (Math.abs(sx) < 1e-9 && Math.abs(sy) < 1e-9) {           // 平行四边形：仿射
+      a = x1 - x0; b = x3 - x0; c = x0; d = y1 - y0; e = y3 - y0; f = y0; g = 0; h = 0;
+    } else {
+      const dx1 = x1 - x2, dx2 = x3 - x2, dy1 = y1 - y2, dy2 = y3 - y2;
+      const den = dx1 * dy2 - dx2 * dy1;
+      g = (sx * dy2 - dx2 * sy) / den; h = (dx1 * sy - sx * dy1) / den;
+      a = x1 - x0 + g * x1; b = x3 - x0 + h * x3; c = x0; d = y1 - y0 + g * y1; e = y3 - y0 + h * y3; f = y0;
+    }
+    return (u, v) => { const w = g * u + h * v + 1; return [(a * u + b * v + c) / w, (d * u + e * v + f) / w]; };
+  }
+
+  warpStart() {
+    if (!this.need(1, '先选中要变形的图形')) return;
+    const b = this.selBounds();
+    if (b.width < 1e-6 || b.height < 1e-6) { this.toast('选中的图形没有宽度或高度，没法变形', 'error'); return; }
+    const src = [[b.left, b.top], [b.right, b.top], [b.right, b.bottom], [b.left, b.bottom]];
+    this.warp = { items: [...this.sel], b, src, dst: src.map((p) => [...p]) };
+    this.drawWarp();
+    this.renderWarpCard();
+    this.status('四点变形：拖动四个橙色角点，满意后点右侧「应用变形」（Esc 取消）');
+  }
+
+  warpMap() {
+    const { b, dst } = this.warp;
+    const Q = SketchEditor.squareToQuad(dst);
+    return (x, y) => Q((x - b.left) / b.width, (y - b.top) / b.height);
+  }
+
+  drawWarp() {
+    if (this.warpLayer) this.warpLayer.remove();
+    if (!this.warp) { this.warpLayer = null; return; }
+    const g = new this.ps.Group({ parent: this.overlay });
+    const map = this.warpMap();
+    this.warp.items.forEach((it) => this.itemPaths(it).forEach((p) => {
+      const q = p.clone({ insert: false });
+      q.flatten(0.5);
+      g.addChild(new this.ps.Path({ segments: q.segments.map((sg) => map(sg.point.x, sg.point.y)), closed: q.closed, strokeColor: '#f97316', strokeWidth: 1, strokeScaling: false, dashArray: [4, 3] }));
+    }));
+    g.addChild(new this.ps.Path({ segments: this.warp.dst, closed: true, strokeColor: '#f97316', strokeWidth: 1, strokeScaling: false, opacity: 0.6 }));
+    const r = 5 / this.zoom;
+    this.warp.dst.forEach(([x, y]) => g.addChild(new this.ps.Path.Rectangle({ point: [x - r, y - r], size: [2 * r, 2 * r], fillColor: '#fff', strokeColor: '#f97316', strokeWidth: 2, strokeScaling: false })));
+    this.warpLayer = g;
+  }
+
+  warpHandleAt(pt) {
+    if (!this.warp) return -1;
+    let best = -1, bd = 9 / this.zoom;
+    this.warp.dst.forEach(([x, y], i) => { const d = pt.getDistance(new this.ps.Point(x, y)); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+
+  warpCancel(quiet) {
+    this.warp = null;
+    this.drawWarp();
+    this.renderWarpCard();
+    if (!quiet) this.status('已取消变形');
+  }
+
+  warpApply() {
+    if (!this.warp) return;
+    const map = this.warpMap();
+    const items = this.warp.items.filter((it) => it.parent);
+    items.forEach((it) => {
+      if (it.data.text) this.convertText(it);
+      if (it.data.code) it.data.code = null;
+      if (it.data.joints) it.data.joints = null;                 // 齿的形状变了，不再当卡榫
+      this.itemPaths(it).forEach((p) => {
+        p.flatten(0.25);
+        p.segments.forEach((sg) => { const [x, y] = map(sg.point.x, sg.point.y); sg.point = new this.ps.Point(x, y); });
+      });
+    });
+    this.warp = null;
+    this.drawWarp();
+    this.renderWarpCard();
+    this.commit(`已四点变形 ${items.length} 个图形`);
+  }
+
+  renderWarpCard() {
+    const box = this.$('.sk-warp-btns');
+    if (!box) return;
+    box.innerHTML = this.warp
+      ? '<button data-act="warpApply" class="sk-chip-btn">应用变形</button><button data-act="warpCancel">取消</button>'
+      : '<button data-act="warpStart">开始变形</button>';
+    box.querySelectorAll('[data-act]').forEach((bt) => bt.addEventListener('click', () => this.act(bt.dataset.act, bt)));
+  }
+
   // ---------------------------------------------------------------- 测量
 
   // 四种方式：pp 点到点（拖动或点两下）/ pl 点到线（垂直距离）/ ll 线到线（平行间距、最近距离、夹角）/ cc 圆（半径直径、圆心距）
@@ -4734,6 +4895,7 @@ export class SketchEditor {
       mirCopyH: () => this.mirrorCopy(true), mirCopyV: () => this.mirrorCopy(false),
       autoLayout: () => this.autoLayout(),
       slotFind: () => this.slotFind(), slotApply: () => this.slotApply(), joinPaths: () => this.joinPaths(),
+      warpStart: () => this.warpStart(), warpApply: () => this.warpApply(), warpCancel: () => this.warpCancel(),
       lock: () => this.lockSel(true), hide: () => this.hideSel(), unlockAll: () => this.unlockAll(), showAll: () => this.showAll(),
       toggle3d: () => {
         const box = this.$('.sk-3d');
@@ -5324,18 +5486,23 @@ export class SketchEditor {
     });
   }
 
-  // 图片描摹：阈值 → 黑白预览 → 后端合并成多边形
+  // 图片描摹：裁剪 / 亮度 / 对比度（C10）→ 阈值 → 黑白预览 → 后端合并成多边形
   imageDialog(name, img) {
     const g = grayOf(img, 500);
-    const auto = otsu(g.gray);
+    const auto0 = otsu(g.gray);
     const bb = this.boardBounds();
     const defW = Math.round(Math.min(bb.width, bb.height * g.w / g.h) * 0.6);
     const { el, close } = this.modal(`
       <h3>描摹图片 ${escAttr(name)}</h3>
       <div class="sk-trace">
-        <canvas class="sk-trace-cv"></canvas>
+        <div class="sk-trace-cvbox"><canvas class="sk-trace-cv"></canvas><div class="sk-trace-crop hidden"></div></div>
         <div class="sk-trace-opts">
-          <div class="sk-row"><label>阈值<input data-v="thr" type="range" min="1" max="254" value="${auto}"></label><b data-v="thrv">${auto}</b>
+          <div class="sk-row"><label>亮度<input data-v="bright" type="range" min="-100" max="100" value="0"></label><b data-v="brightv">0</b></div>
+          <div class="sk-row"><label>对比度<input data-v="contrast" type="range" min="-100" max="100" value="0"></label><b data-v="contrastv">0</b></div>
+          <div class="sk-row sk-trace-cropin"><span>裁掉</span>${[['cl', '左'], ['ct', '上'], ['cr', '右'], ['cb', '下']].map(([k, n]) =>
+            `<label>${n}<input data-v="${k}" type="number" min="0" max="95" step="1" value="0">%</label>`).join('')}<button data-v="cropReset" title="不裁剪">重置</button></div>
+          <p class="sk-small">也可以在左边的预览上拖一个框来裁剪。</p>
+          <div class="sk-row"><label>阈值<input data-v="thr" type="range" min="1" max="254" value="${auto0}"></label><b data-v="thrv">${auto0}</b>
             <button data-v="auto">自动</button></div>
           <div class="sk-row"><label class="sk-check"><input data-v="inv" type="checkbox">反色（描浅色部分）</label></div>
           <div class="sk-row"><label>平滑<input data-v="smooth" type="range" min="0" max="4" step="0.25" value="1"></label></div>
@@ -5343,36 +5510,75 @@ export class SketchEditor {
           <div class="sk-row"><label>宽度<input data-v="w" type="number" min="1" step="1" value="${defW}"> mm</label></div>
           <div class="sk-row"><label>加工方式<select data-v="mode">
             ${Object.entries(MODES).map(([k, m]) => `<option value="${k}" ${k === 'engrave' ? 'selected' : ''}>${m.name}</option>`).join('')}</select></label></div>
-          <p class="sk-small">黑色部分会变成图形。线稿、剪影、图标效果最好；照片先调高对比度。</p>
+          <p class="sk-small">黑色部分会变成图形。线稿、剪影、图标效果最好；照片先调亮度、对比度，再调阈值。</p>
         </div>
       </div>
       <div class="sk-btns sk-right"><button data-m="cancel">取消</button><button data-m="ok" class="sk-primary">描摹并导入</button></div>`);
     const cv = el.querySelector('.sk-trace-cv');
-    const thr = el.querySelector('[data-v=thr]');
-    const inv = el.querySelector('[data-v=inv]');
+    const q = (k) => el.querySelector(`[data-v=${k}]`);
+    const thr = q('thr');
+    const inv = q('inv');
     let rects = [];
-    const redraw = () => { el.querySelector('[data-v=thrv]').textContent = thr.value; rects = binarize(g, Number(thr.value), inv.checked, cv); };
-    thr.addEventListener('input', redraw);
+    let ga = g;
+    const params = () => ({ bright: Number(q('bright').value), contrast: Number(q('contrast').value), crop: ['cl', 'ct', 'cr', 'cb'].map((k) => Number(q(k).value) || 0) });
+    const redraw = () => {
+      q('thrv').textContent = thr.value;
+      q('brightv').textContent = q('bright').value;
+      q('contrastv').textContent = q('contrast').value;
+      ga = adjustGray(g, params());
+      rects = binarize(ga, Number(thr.value), inv.checked, cv);
+    };
+    this.traceState = () => ({ w: ga.w, h: ga.h, rects: rects.length, ...params(), thr: Number(thr.value) });   // 给测试用
+    ['thr', 'bright', 'contrast'].forEach((k) => q(k).addEventListener('input', redraw));
+    ['cl', 'ct', 'cr', 'cb'].forEach((k) => q(k).addEventListener('change', redraw));
     inv.addEventListener('change', redraw);
-    el.querySelector('[data-v=auto]').addEventListener('click', () => { thr.value = auto; redraw(); });
+    q('auto').addEventListener('click', () => { thr.value = otsu(ga.gray); redraw(); });
+    q('cropReset').addEventListener('click', () => { ['cl', 'ct', 'cr', 'cb'].forEach((k) => { q(k).value = 0; }); redraw(); });
+    // 在预览上拖框裁剪：框是相对「当前显示的（已裁剪的）图」的，换算回原图的百分比
+    const box = el.querySelector('.sk-trace-crop');
+    let drag = null;
+    const rel = (ev) => { const r = cv.getBoundingClientRect(); return [Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height)), r]; };
+    cv.addEventListener('pointerdown', (ev) => { const [x, y] = rel(ev); drag = { x, y }; cv.setPointerCapture(ev.pointerId); });
+    cv.addEventListener('pointermove', (ev) => {
+      if (!drag) return;
+      const [x, y, r] = rel(ev);
+      const pr = cv.parentElement.getBoundingClientRect();
+      Object.assign(box.style, { left: `${r.left - pr.left + Math.min(x, drag.x) * r.width}px`, top: `${r.top - pr.top + Math.min(y, drag.y) * r.height}px`,
+        width: `${Math.abs(x - drag.x) * r.width}px`, height: `${Math.abs(y - drag.y) * r.height}px` });
+      box.classList.remove('hidden');
+    });
+    cv.addEventListener('pointerup', (ev) => {
+      if (!drag) return;
+      const [x, y] = rel(ev);
+      const d = drag; drag = null;
+      box.classList.add('hidden');
+      if (Math.abs(x - d.x) < 0.02 || Math.abs(y - d.y) < 0.02) return;      // 只是点了一下
+      const [cl, ct, cr, cb] = params().crop.map((v) => v / 100);
+      const fw = 1 - cl - cr, fh = 1 - ct - cb;
+      const nx0 = cl + Math.min(x, d.x) * fw, nx1 = cl + Math.max(x, d.x) * fw;
+      const ny0 = ct + Math.min(y, d.y) * fh, ny1 = ct + Math.max(y, d.y) * fh;
+      q('cl').value = Math.round(nx0 * 100); q('cr').value = Math.round((1 - nx1) * 100);
+      q('ct').value = Math.round(ny0 * 100); q('cb').value = Math.round((1 - ny1) * 100);
+      redraw();
+    });
     redraw();
     el.querySelector('[data-m=ok]').addEventListener('click', async () => {
       const btn = el.querySelector('[data-m=ok]');
       btn.disabled = true;
       btn.textContent = '描摹中…';
-      const wmm = Number(el.querySelector('[data-v=w]').value) || defW;
-      const r = await this.api.trace_rects(rects, g.w, g.h, Number(el.querySelector('[data-v=smooth]').value),
-        Number(el.querySelector('[data-v=minA]').value), wmm);
+      const wmm = Number(q('w').value) || defW;
+      const r = await this.api.trace_rects(rects, ga.w, ga.h, Number(q('smooth').value), Number(q('minA').value), wmm);
       btn.disabled = false;
       btn.textContent = '描摹并导入';
       if (r.error) { this.toast(r.error, 'error'); return; }
-      if (!r.polys.length) { this.toast('没有描出图形：调一下阈值或反色', 'error'); return; }
+      if (!r.polys.length) { this.toast('没有描出图形：调一下阈值、亮度或反色', 'error'); return; }
       const c = bb.center;
       const paths = [];
       r.polys.forEach((p) => { paths.push(this.polyPath(p.outer, true)); p.holes.forEach((hh) => paths.push(this.polyPath(hh, true))); });
       paths.forEach((p) => p.segs.forEach((s) => { s[0] += c.x; s[1] += c.y; }));
-      const it = this.addItem({ mode: el.querySelector('[data-v=mode]').value, paths });
+      const it = this.addItem({ mode: q('mode').value, paths });
       close();
+      this.traceState = null;
       this.setTool('select');
       this.sel = new Set([it]);
       this.commit(`已描摹导入（${r.polys.length} 块，${fmt(r.size[0])} × ${fmt(r.size[1])} mm）`);
@@ -6110,7 +6316,7 @@ export class SketchEditor {
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
     else if (ev.key === 'Escape' && this.radialCfg) { this.closeRadialConfig(); }
     else if (ev.key === 'Escape' && this.tool === 'measure' && (this.meas && (this.meas.a || this.meas.has))) { this.clearMeasure(); this.status('已清除测量'); }
-    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.cancelPairing(); this.status('已取消配对：第一条边保留为没配对的卡榫边'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else if (this.dimState) { this.cancelDim(); this.status('已取消标注'); } else if (this.libArmed) { this.libArmed = null; this.status('已结束放置图库图形'); this.renderToolOpts(); } else { this.sel.clear(); this.refresh(); } }
+    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.cancelPairing(); this.status('已取消配对：第一条边保留为没配对的卡榫边'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else if (this.dimState) { this.cancelDim(); this.status('已取消标注'); } else if (this.libArmed) { this.libArmed = null; this.status('已结束放置图库图形'); this.renderToolOpts(); } else if (this.warp) { this.warpCancel(); } else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
       const s = ev.shiftKey ? 10 : (this.snapStep || 1);

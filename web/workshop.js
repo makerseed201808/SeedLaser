@@ -2397,7 +2397,7 @@ async function nameplateDialog() {
   const o = W.namesOpts || { w: 80, h: 28, r: 5, hole: true, holeD: 4, size: 12, font: (W.fonts[0] || {}).id || '', mode: 'engrave', border: false };
   m.innerHTML = `<div class="app-modal-box">
     <h3>📛 批量名牌</h3>
-    <p class="muted">每行一个名字，每个名字生成一块名牌板（会加到板件清单里）。文字太长会自动缩小。</p>
+    <p class="muted">每行一个名字，每个名字生成一块名牌板（会加到板件清单里）。文字太长会自动缩小。<br>也可以从表格里直接粘贴多列（名字、班级、编号……，用 Tab 或逗号分开）：第一列是大字，其余每列一行小字；第一行是「姓名 / 名字 / name」表头时会跳过。</p>
     <textarea data-n="names" rows="6" style="width:100%;box-sizing:border-box" placeholder="张三&#10;李四&#10;王五">${W.namesText || ''}</textarea>
     <div class="np-grid">
       <label>宽<input data-n="w" type="number" min="10" step="1" value="${o.w}"> mm</label>
@@ -2411,14 +2411,20 @@ async function nameplateDialog() {
         <option value="cut" ${o.mode === 'cut' ? 'selected' : ''}>镂空切割（自动焊接笔画）</option><option value="score" ${o.mode === 'score' ? 'selected' : ''}>描线</option></select></label>
       <label><input data-n="border" type="checkbox" ${o.border ? 'checked' : ''}>内圈装饰边框（描线）</label>
       <label><input data-n="qr" type="checkbox" ${o.qr ? 'checked' : ''}>右边加二维码（雕刻）</label>
-      <label>二维码内容<input data-n="qrText" type="text" value="${(o.qrText || '{名字}').replace(/"/g, '&quot;')}" title="{名字} 会换成每一行的名字，比如 https://example.com/?n={名字}"></label>
+      <label>二维码内容<input data-n="qrText" type="text" value="${(o.qrText || '{名字}').replace(/"/g, '&quot;')}" title="{名字} 会换成每一行的名字；表格粘贴时 {2}、{3} 是第 2、3 列。比如 https://example.com/?n={名字}"></label>
     </div>
     <div class="app-modal-actions"><button data-m="close">取消</button><button data-m="ok" class="primary">生成名牌</button></div></div>`;
   m.classList.remove('hidden');
   m.querySelector('[data-m=close]').addEventListener('click', () => m.classList.add('hidden'));
   m.querySelector('[data-m=ok]').addEventListener('click', async () => {
     const v = (k) => m.querySelector(`[data-n=${k}]`);
-    const names = v('names').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    // 一行一块名牌；表格粘贴（Tab / 逗号分列）时每列一个文字位（C10）
+    const lines = v('names').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    const sep = lines.some((l) => l.includes('\t')) ? '\t' : lines.some((l) => /[,，]/.test(l)) ? /[,，]/ : null;
+    let rows = lines.map((l) => (sep ? l.split(sep).map((x) => x.trim()) : [l]));
+    if (rows.length > 1 && /^(姓名|名字|name)$/i.test(rows[0][0] || '')) rows = rows.slice(1);
+    rows = rows.filter((r) => r[0]);
+    const names = rows.map((r) => r[0]);
     if (!names.length) { toast('先输入名字（每行一个）', 'error'); return; }
     const opt = { w: Number(v('w').value) || 80, h: Number(v('h').value) || 28, r: Number(v('r').value) || 0, hole: v('hole').checked,
       holeD: Number(v('holeD').value) || 4, size: Number(v('size').value) || 12, font: v('font').value, mode: v('mode').value, border: v('border').checked,
@@ -2435,26 +2441,40 @@ async function nameplateDialog() {
     const avail = opt.w - left - 4 - (opt.qr ? qrS + 3 : 0);
     if (avail < 8) { toast('名牌太窄，放不下文字和二维码：加宽一点或去掉二维码', 'error'); return; }
     let done = 0;
-    for (const name of names) {
+    for (const [ri, name] of names.entries()) {
+      const extra = rows[ri].slice(1).filter(Boolean);
       let size = opt.size;
       const params = { text: name, font: opt.font, size, weld: opt.mode === 'cut' };
       let r = await api().text_layout(params);
       if (r.error) { toast(r.error, 'error'); break; }
-      const maxH = opt.h - 8;
-      const k = Math.min(1, avail / Math.max(1e-6, r.size[0]), maxH / Math.max(1e-6, r.size[1]));
+      const subS = Math.max(2, opt.size * 0.45);                      // 小字（班级、编号…）字高
+      const maxH = opt.h - 8 - extra.length * subS * 1.35;
+      const k = Math.min(1, avail / Math.max(1e-6, r.size[0]), Math.max(0.2, maxH) / Math.max(1e-6, r.size[1]));
       if (k < 0.999) { size = Math.max(2, size * k * 0.98); r = await api().text_layout({ ...params, size }); }
       const cx = left + avail / 2;
       const cy = opt.h / 2;
+      const stackH = r.size[1] + extra.length * subS * 1.35;          // 大字 + 小字整体竖直居中
+      const ty = cy + stackH / 2 - r.size[1] / 2;
       const items = [{ id: 'outline', mode: 'cut', role: 'outline', paths: [{ closed: true, segs: roundRectSegs(opt.w, opt.h, opt.r) }] }];
       if (opt.hole) items.push({ id: 'hole', mode: 'cut', paths: [{ closed: true, segs: circleSegs(holeR + 3, opt.h / 2, holeR) }] });
       if (opt.border) {
         const segs = roundRectSegs(opt.w - 4, opt.h - 4, Math.max(0, opt.r - 2)).map((sg) => [sg[0] + 2, sg[1] + 2, sg[2], sg[3], sg[4], sg[5]]);
         items.push({ id: 'border', mode: 'score', paths: [{ closed: true, segs }] });
       }
-      items.push({ id: 'text', mode: opt.mode, text: { ...params, size, x: cx, y: cy, spacing: 0, lineHeight: 1.25, align: 'center', arc: 0 },
-        paths: r.polys.map((p) => ({ closed: true, segs: p.map(([x, y]) => [x + cx, y + cy, 0, 0, 0, 0]) })) });
+      items.push({ id: 'text', mode: opt.mode, text: { ...params, size, x: cx, y: ty, spacing: 0, lineHeight: 1.25, align: 'center', arc: 0 },
+        paths: r.polys.map((p) => ({ closed: true, segs: p.map(([x, y]) => [x + cx, y + ty, 0, 0, 0, 0]) })) });
+      for (const [ei, txt] of extra.entries()) {
+        const sp = { text: txt, font: opt.font, size: subS, weld: opt.mode === 'cut' };
+        let rr = await api().text_layout(sp);
+        if (rr.error) { toast(rr.error, 'error'); break; }
+        const kk = Math.min(1, avail / Math.max(1e-6, rr.size[0]));
+        if (kk < 0.999) { sp.size = Math.max(1.5, subS * kk * 0.98); rr = await api().text_layout(sp); }
+        const sy = ty - r.size[1] / 2 - subS * 1.35 * (ei + 0.5) - subS * 0.1;
+        items.push({ id: `text${ei + 2}`, mode: opt.mode, text: { ...sp, x: cx, y: sy, spacing: 0, lineHeight: 1.25, align: 'center', arc: 0 },
+          paths: rr.polys.map((p) => ({ closed: true, segs: p.map(([x, y]) => [x + cx, y + sy, 0, 0, 0, 0]) })) });
+      }
       if (opt.qr) {
-        const content = opt.qrText.replace(/\{名字\}/g, name);
+        const content = opt.qrText.replace(/\{名字\}/g, name).replace(/\{(\d)\}/g, (_m, d) => rows[ri][Number(d) - 1] || '');
         const q = await api().code_paths('qr', content, qrS);
         if (q.error) { toast(q.error, 'error'); break; }
         const qx = opt.w - 3 - qrS / 2;
