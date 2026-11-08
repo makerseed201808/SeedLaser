@@ -992,7 +992,7 @@ class Api:
         result = self._render(name, params, fmt=fmt, to_file=picked, project=project)
         if "error" in result:
             return result
-        out = {"path": picked, "notes": result.get("notes", []), "info": result.get("info", [])}
+        out = {"path": picked, "notes": result.get("notes", []) + result.get("warnings", []), "info": result.get("info", [])}
         if laser and laser.get("cut"):
             try:
                 out["sidecar"] = _write_laser_sheet(picked, name, params, laser, result.get("info") or [])
@@ -1060,6 +1060,7 @@ class Api:
                     instance.open()
                     instance.render()
                     info = list(instance.notes)
+                    warn = list(getattr(instance, "warnings", []))      # 需要用户注意的（导出时在提示里显示）
                     data = instance.close()
                     instance = None
                     if data is None:
@@ -1068,10 +1069,10 @@ class Api:
                     if to_file:
                         with open(to_file, "wb") as f:
                             f.write(raw)
-                        return {"ok": True, "bytes": len(raw), "notes": [], "info": info}
+                        return {"ok": True, "bytes": len(raw), "notes": [], "warnings": warn, "info": info}
                     if fmt in ("svg", "svg_Ponoko"):
-                        return {"svg": raw.decode("utf-8"), "notes": [], "info": info}
-                    return {"ok": True, "bytes": len(raw), "notes": [], "info": info}
+                        return {"svg": raw.decode("utf-8"), "notes": [], "warnings": warn, "info": info}
+                    return {"ok": True, "bytes": len(raw), "notes": [], "warnings": warn, "info": info}
                 instance.open()
                 need_rec = model or _project_has_content(project)
                 rec = model3d.Recorder(instance) if need_rec else None

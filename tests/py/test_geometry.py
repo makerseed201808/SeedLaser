@@ -202,5 +202,12 @@ proj['sketches'][pid]['items'].append({'id': 'tiny', 'mode': 'cut', 'paths': [P(
 out = os.path.join(tempfile.mkdtemp(), 'tiny.svg')
 api.dev_set_pick(out)
 r = api.save('FreeDesign', proj['params'], 'svg', {k: proj[k] for k in ('disabled', 'edits', 'poses', 'sketches', 'free')}, None, 'free')
-assert any('太小' in x for x in r.get('info', []) + r.get('notes', [])), r
-print('PASS test_geometry：导出时提示补偿后会消失的小孔')
+assert any('太小' in x for x in r.get('notes', [])), r          # notes 会显示在导出提示里
+# 一块板都没有（都在加工清单里取消了）：导出时提示
+d2 = {k: proj[k] for k in ('disabled', 'edits', 'poses', 'sketches', 'free')}
+d2['disabled'] = [q['id'] for q in proj['free']['parts']]
+out2 = os.path.join(tempfile.mkdtemp(), 'none.svg')
+api.dev_set_pick(out2)
+r2 = api.save('FreeDesign', proj['params'], 'svg', d2, None, 'none')
+assert any('没有可以导出的板件' in x for x in r2.get('notes', [])), r2
+print('PASS test_geometry：导出时提示补偿后会消失的小孔、没有板件可导出')

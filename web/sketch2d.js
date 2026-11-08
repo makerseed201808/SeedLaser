@@ -1008,8 +1008,7 @@ export class SketchEditor {
         return;
       }
     }
-    const res = this.content.hitTest(pt, { stroke: true, tolerance: tol,
-      match: (h) => { const it = this.topItem(h.item); return it && it.data.mode === 'cut' && it.data.role !== 'outline-locked'; } });
+    const res = this.strokeAt(pt, tol, (h) => { const it = this.topItem(h.item); return it && it.data.mode === 'cut' && it.data.role !== 'outline-locked'; });
     if (!res || !res.location) { this.status('请点在切割线上'); return; }
     const it = this.topItem(res.item);
     const p = res.location.point;
@@ -1138,14 +1137,18 @@ export class SketchEditor {
         && !(opts.exclude && opts.exclude.has(it)) && it.bounds.expand(tol * 2).contains(pt));
       const cands = [];
       const add = (q, kind, prio) => { const d = q.getDistance(pt); if (d < tol) cands.push({ q, kind, prio, d }); };
+      // 拖节点时（opts.skipSeg）：这个节点自己、和它相连的边的中点、它所在图形的中心和交点都跟着动，不能当吸附点，
+      // 否则节点会吸在自己的旧位置上拖不动
+      const sk = opts.skipSeg;
+      const movingItem = sk ? this.topItem(sk.path) : null;
       near.forEach((it) => this.itemPaths(it).forEach((p) => {
-        p.segments.forEach((sg) => add(sg.point, '端点', 0));
-        p.curves.forEach((c) => add(c.getPointAtTime(0.5), '中点', 2));
+        p.segments.forEach((sg) => { if (sg !== sk) add(sg.point, '端点', 0); });
+        p.curves.forEach((c) => { if (!sk || (c.segment1 !== sk && c.segment2 !== sk)) add(c.getPointAtTime(0.5), '中点', 2); });
       }));
       (opts.extra || []).forEach((q) => add(q, '端点', 0));
-      near.forEach((it) => add(it.bounds.center, it.className === 'Path' && it.segments.length === 4 && !it.segments[0].handleIn.isZero() ? '圆心' : '中心', 3));
+      near.forEach((it) => { if (it !== movingItem) add(it.bounds.center, it.className === 'Path' && it.segments.length === 4 && !it.segments[0].handleIn.isZero() ? '圆心' : '中心', 3); });
       if (near.length >= 1 && near.length <= 8) {
-        const paths = near.flatMap((it) => this.itemPaths(it));
+        const paths = near.filter((it) => it !== movingItem).flatMap((it) => this.itemPaths(it));
         for (let i = 0; i < paths.length; i++) {
           for (let k = i; k < paths.length; k++) {
             const ints = k === i ? paths[i].getIntersections() : paths[i].getIntersections(paths[k]);
@@ -1173,7 +1176,9 @@ export class SketchEditor {
     // 和其它图形的边 / 中线对齐（绿色辅助线）
     let ax = null; let ay = null;
     if (this.snapPoints && !opts.noPoints && !opts.noAlign) {
-      this.alignTargets(opts.exclude).forEach((b) => {
+      // 拖节点时，它所在图形的外框跟着变，不能拿来对齐（否则吸在自己身上）
+      const ex = opts.skipSeg ? new Set([...(opts.exclude || []), this.topItem(opts.skipSeg.path)]) : opts.exclude;
+      this.alignTargets(ex).forEach((b) => {
         if (x === null) [b.left, b.center.x, b.right].forEach((v) => { if (Math.abs(pt.x - v) < tol && (ax === null || Math.abs(pt.x - v) < Math.abs(pt.x - ax.v))) ax = { v, b }; });
         if (y === null) [b.top, b.center.y, b.bottom].forEach((v) => { if (Math.abs(pt.y - v) < tol && (ay === null || Math.abs(pt.y - v) < Math.abs(pt.y - ay.v))) ay = { v, b }; });
       });
@@ -2393,7 +2398,7 @@ export class SketchEditor {
 
   nodeDrag(d, pt, ev) {
     if (d.seg && d.part === 'point') {
-      const p = this.snap(pt, { exclude: new Set() , extra: [] });
+      const p = this.snap(pt, { exclude: new Set(), extra: [], skipSeg: d.seg });
       d.seg.point = p;
     } else if (d.seg) {
       const rel = pt.subtract(d.seg.point);
@@ -2433,6 +2438,11 @@ export class SketchEditor {
     if (!d) {
       this.drawing = new ps.Path({ parent: this.content, strokeColor: MODES[this.opts.mode].color, strokeWidth: 1.4, strokeScaling: false });
       this.drawing.data = { id: newId(), mode: this.opts.mode, drawing: true };
+    }
+    // 在上一个点上又点了一下（双击结束、手抖重复点）：不加点，避免零长度段
+    if (this.drawing.segments.length && p.getDistance(this.drawing.lastSegment.point) < 0.01) {
+      if (this.tool === 'pen') this.drag = { kind: 'penHandle', seg: this.drawing.lastSegment };
+      return;
     }
     this.drawing.add(p);
     if (this.tool === 'pen') this.drag = { kind: 'penHandle', seg: this.drawing.lastSegment };
@@ -2707,10 +2717,9 @@ export class SketchEditor {
   // 找到点击处两个交点之间的那一段
   trimPiece(pt) {
     const tol = 6 / this.zoom;
-    const res = this.content.hitTest(pt, { stroke: true, tolerance: tol,
-      match: (h) => { const it = this.topItem(h.item); return it && this.selectable(it) && !it.data.drawing; } });
+    const res = this.strokeAt(pt, tol, (h) => { const it = this.topItem(h.item); return it && this.selectable(it) && !it.data.drawing; });
     if (!res || !res.location) return null;
-    const path = res.item.className === 'Path' ? res.item : res.location.path;
+    const path = res.location.path || res.item;
     if (!path) return null;
     const L = path.length;
     const off = path.getNearestLocation(pt).offset;
@@ -2721,7 +2730,12 @@ export class SketchEditor {
       ints.forEach((i) => offs.push(i.offset));
     });
     // 路径自己的节点不算交点；开放路径两端是天然断点
-    const uniq = [...new Set(offs.map((o) => Math.round(o * 1e4) / 1e4))].filter((o) => o > 1e-6 && o < L - 1e-6).sort((a, b) => a - b);
+    // 闭合路径的起点也可能正好是交点（比如横线穿过圆左右两个节点）：起点 = 终点 = 0，要保留；
+    // 开放路径的两端本来就是断点，不算交点
+    const r4 = (o) => Math.round(o * 1e4) / 1e4;
+    const uniq = path.closed
+      ? [...new Set(offs.map((o) => (o > L - 1e-4 || o < 1e-4 ? 0 : r4(o))))].sort((a, b) => a - b)
+      : [...new Set(offs.map(r4))].filter((o) => o > 1e-6 && o < L - 1e-6).sort((a, b) => a - b);
     let a; let b;
     if (path.closed) {
       if (uniq.length < 2) return { path, whole: true, preview: path.clone({ insert: false }) };
@@ -2822,8 +2836,7 @@ export class SketchEditor {
 
   jointEdge(pt) {
     const tol = 6 / this.zoom;
-    const res = this.content.hitTest(pt, { stroke: true, tolerance: tol,
-      match: (h) => { const it = this.topItem(h.item); return it && this.selectable(it) && it.data.mode === 'cut'; } });
+    const res = this.strokeAt(pt, tol, (h) => { const it = this.topItem(h.item); return it && this.selectable(it) && it.data.mode === 'cut'; });
     if (!res || !res.location) return null;
     const curve = res.location.curve;
     if (!curve || !curve.isStraight() || curve.length < 1) return null;
@@ -3117,6 +3130,19 @@ export class SketchEditor {
     return path;
   }
 
+  // 鼠标下的线（返回带 location 的命中结果）。paper.js 在正好点中圆的节点时 stroke 命中会漏掉，
+  // 所以没命中时再按节点找一次，换成这条路径上离鼠标最近的位置。水口、修剪、卡榫都用它。
+  strokeAt(pt, tol, match) {
+    const res = this.content.hitTest(pt, { stroke: true, tolerance: tol, match });
+    if (res && res.location) return res;
+    const seg = this.content.hitTest(pt, { segments: true, tolerance: tol, match });
+    if (seg && seg.segment && seg.segment.path) {
+      const path = seg.segment.path;
+      return { type: 'stroke', item: seg.item, location: path.getNearestLocation(pt) };
+    }
+    return res;
+  }
+
   // 鼠标下的一条边（线段 / 弧），任何图层的图形都可以量
   pickCurve(pt) {
     // segments: paper.js 在正好点中圆的节点时，stroke 命中会漏掉，所以节点也算
@@ -3405,7 +3431,10 @@ export class SketchEditor {
     if (this.tool === 'node' && this.activeSeg && this.activeSeg.path) {
       const seg = this.activeSeg;
       this.activeSeg = null;
-      if (seg.path.segments.length > 2) { seg.remove(); this.commit('已删除节点'); return; }
+      const min = seg.path.closed ? 3 : 2;      // 闭合图形至少 3 个节点，开放线至少 2 个
+      if (seg.path.segments.length > min) { seg.remove(); this.commit('已删除节点'); return; }
+      this.toast(seg.path.closed ? '闭合图形至少要 3 个节点，不能再删了（要删整个图形请用选择工具）' : '线至少要 2 个节点，不能再删了', 'error');
+      return;
     }
     if (!this.need(1)) return;
     this.sel.forEach((it) => it.remove());
@@ -3462,8 +3491,13 @@ export class SketchEditor {
       else res = res.exclude(o, opts);
     }
     const before = base;
+    // 结果为空（比如两个图形根本不重叠时求交集）：原图形都保留，只提示。原来会把选中的图形全删掉
+    if (!res || res.isEmpty() || Math.abs(res.area) < 1e-9) {
+      this.toast(op === 'intersect' ? '选中的图形没有重叠的部分，交集为空，图形保持不变'
+        : op === 'subtract' ? '相减后什么都不剩（被完全盖住了），图形保持不变；要删掉请直接删除' : '运算结果为空，图形保持不变', 'error');
+      return;
+    }
     items.forEach((it) => { if (it !== before) it.remove(); });
-    if (!res || res.isEmpty()) { before.remove(); this.sel.clear(); this.commit('结果为空'); return; }
     res.data = { id: newId(), mode, role: op === 'subtract' || op === 'unite' ? role : null, locked: false, text: null,
       pid: op === 'subtract' || op === 'unite' ? base.data.pid || null : null };
     if (res.data.role === 'outline') res.data.locked = true;
@@ -3703,6 +3737,16 @@ export class SketchEditor {
     }
     const mats = this.arrayMatrices();
     if (!mats.length) { this.toast('数量至少为 2', 'error'); return; }
+    // 间距为 0：复制品和原图形（或彼此）完全叠在一起，激光会把同一条线切两遍
+    const seen = new Set(['0,0']);
+    const stacked = mats.some((m) => {
+      if (Math.abs(m.a - 1) > 1e-9 || Math.abs(m.b) > 1e-9 || Math.abs(m.c) > 1e-9 || Math.abs(m.d - 1) > 1e-9) return false;
+      const key = `${Math.round(m.tx * 1e4)},${Math.round(m.ty * 1e4)}`;
+      if (seen.has(key)) return true;
+      seen.add(key);
+      return false;
+    });
+    if (stacked) { this.toast('间距为 0：复制出来的图形会和原图形叠在一起（激光会重复切同一条线），请把间距改大一些', 'error'); return; }
     if (mats.length * this.sel.size > 2000) { this.toast('复制太多了（超过 2000 份）', 'error'); return; }
     const src = [...this.sel];
     let n = 0;
@@ -3824,7 +3868,9 @@ export class SketchEditor {
     svg.removeAttribute('height');
     const ps = this.ps;
     ps.activate();
+    if (doc.getElementsByTagName('parsererror').length || svg.nodeName.toLowerCase() !== 'svg') throw new Error('这不是有效的 SVG 文件（打不开）');
     const g = ps.project.importSVG(new XMLSerializer().serializeToString(svg), { insert: false, expandShapes: true });
+    if (!g) throw new Error('这不是有效的 SVG 文件（打不开）');
     const out = [];
     const chain = (it) => {
       const m = new ps.Matrix();
@@ -3873,7 +3919,8 @@ export class SketchEditor {
 
   // 矢量导入：缩放、放到板中心、选加工方式
   vectorDialog(name, rawPaths) {
-    const paths = rawPaths.map((p) => (p.segs ? p : { closed: p.closed, segs: p.pts.map(([x, y]) => [x, y, 0, 0, 0, 0]) }));
+    // 首尾相接的开放线（CAD 里矩形常是 4 条独立的线）先连起来，连成环的就是闭合图形，才能识别成板
+    const paths = joinOpenPaths(rawPaths.map((p) => (p.segs ? p : { closed: p.closed, segs: p.pts.map(([x, y]) => [x, y, 0, 0, 0, 0]) })));
     let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
     paths.forEach((p) => p.segs.forEach((s) => { x0 = Math.min(x0, s[0]); x1 = Math.max(x1, s[0]); y0 = Math.min(y0, s[1]); y1 = Math.max(y1, s[1]); }));
     const w = Math.max(0.01, x1 - x0); const h = Math.max(0.01, y1 - y0);
@@ -4256,6 +4303,12 @@ export class SketchEditor {
     else if (k === 'y') this.sel.forEach((it) => it.translate(new this.ps.Point(0, this.dataY(v) - rp.y)));   // 输入的是显示坐标（Y 往下）
     else if (k === 'w' || k === 'h') {
       if (v <= 0) return;
+      // 水平线没有高度、竖直线没有宽度：不能按比例拉到指定尺寸（会除以 0）
+      if ((k === 'w' && b.width < 1e-9) || (k === 'h' && b.height < 1e-9)) {
+        this.toast(k === 'w' ? '选中的图形没有宽度（竖直线），不能改宽' : '选中的图形没有高度（水平线），不能改高', 'error');
+        this.updateNumeric();
+        return;
+      }
       let sx = k === 'w' ? v / b.width : 1;
       let sy = k === 'h' ? v / b.height : 1;
       if (this.lockRatio) { if (k === 'w') sy = sx; else sx = sy; }
@@ -4654,6 +4707,56 @@ export function splitRing(pts, depth = 0) {
     }
   }
   return [pts];
+}
+
+/** 把首尾相接（< CLOSE_TOL）的开放路径连成一条；连成环的变成闭合路径。只在恰好两条线相接的点连（T 字路口不连）。
+ *  paths: [{ closed, segs: [[x, y, inx, iny, outx, outy], ...] }]，返回新数组。 */
+export function joinOpenPaths(paths) {
+  const open = []; const out = [];
+  paths.forEach((p) => { if (!p.closed && p.segs && p.segs.length >= 2) open.push({ segs: p.segs.map((s) => [...s]) }); else out.push(closeNearlyClosed(p)); });
+  if (!open.length) return out;
+  const key = (s) => `${Math.round(s[0] / CLOSE_TOL)},${Math.round(s[1] / CLOSE_TOL)}`;
+  const deg = new Map();
+  open.forEach((p) => [p.segs[0], p.segs[p.segs.length - 1]].forEach((s) => deg.set(key(s), (deg.get(key(s)) || 0) + 1)));
+  const rev = (segs) => segs.slice().reverse().map((s) => [s[0], s[1], s[4], s[5], s[2], s[3]]);
+  const used = new Array(open.length).fill(false);
+  const ends = new Map();         // 端点 → [路径序号]
+  open.forEach((p, i) => [p.segs[0], p.segs[p.segs.length - 1]].forEach((s) => { const k = key(s); if (!ends.has(k)) ends.set(k, []); ends.get(k).push(i); }));
+  const take = (k, self) => {
+    if (deg.get(k) !== 2) return -1;
+    const j = (ends.get(k) || []).find((q) => q !== self && !used[q]);
+    return j === undefined ? -1 : j;
+  };
+  for (let i = 0; i < open.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+    let segs = open[i].segs;
+    for (let guard = 0; guard < open.length; guard++) {          // 往后接
+      const k = key(segs[segs.length - 1]);
+      const j = take(k, i);
+      if (j < 0) break;
+      used[j] = true;
+      let nx = open[j].segs;
+      if (key(nx[0]) !== k) nx = rev(nx);
+      const last = segs[segs.length - 1];
+      last[4] = nx[0][4]; last[5] = nx[0][5];                    // 接点：入控制柄留前一条的，出控制柄用后一条的
+      segs = segs.concat(nx.slice(1));
+    }
+    for (let guard = 0; guard < open.length; guard++) {          // 往前接
+      const k = key(segs[0]);
+      if (key(segs[segs.length - 1]) === k) break;
+      const j = take(k, i);
+      if (j < 0) break;
+      used[j] = true;
+      let pv = open[j].segs;
+      if (key(pv[pv.length - 1]) !== k) pv = rev(pv);
+      const first = segs[0];
+      first[2] = pv[pv.length - 1][2]; first[3] = pv[pv.length - 1][3];
+      segs = pv.slice(0, -1).concat(segs);
+    }
+    out.push(closeNearlyClosed({ closed: false, segs }));
+  }
+  return out;
 }
 
 /** 闭合环的真实面积（自相交的按拆开后各瓣面积之和）。 */

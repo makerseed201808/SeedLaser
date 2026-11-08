@@ -170,6 +170,7 @@ class FreeDesign(boxes.Boxes):
             help="共边切割：排版时板件紧挨着，相邻的边只切一次（省时间，边缘不易烧焦）")
         self.design: dict | None = None
         self.notes: list[str] = []
+        self.warnings: list[str] = []   # 导出时提示用户注意（显示在导出结果里）
 
     def render(self) -> None:
         from boxes.Color import Color
@@ -178,9 +179,11 @@ class FreeDesign(boxes.Boxes):
         items = part_sketches(self.design)
         sw, sh = float(self.sheet_w or 0), float(self.sheet_h or 0)
         gap = max(0.0, float(self.part_gap or 0)) + 2 * burn
+        if not items:
+            self.warnings.append("没有可以导出的板件（画板上没有闭合的切割轮廓，或者在加工清单里都取消了），文件里只有校准尺")
         for p, sk in items:
             for w in sketch2d.export_warnings(sk, burn):
-                self.notes.append(f"{p.get('name') or '板件'}：{w}")
+                self.warnings.append(f"{p.get('name') or '板件'}：{w}")
         if (sw <= 0 or sh <= 0) and placed_on_sheet(items):
             # 二维画板：所见即所切，按画板上的位置导出
             sheet = ((self.design or {}).get("free") or {}).get("sheet") or {}

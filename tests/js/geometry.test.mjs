@@ -1,6 +1,6 @@
 // node tests/js/geometry.test.mjs —— A3 几何边界情况（前端 sketch2d.js 的纯函数，和后端 tests/py/test_geometry.py 对应）
 import assert from 'node:assert/strict';
-import { flattenPath, splitRing, loopArea, closeNearlyClosed, sketchPolys, curveSteps } from '../../web/sketch2d.js';
+import { flattenPath, splitRing, loopArea, closeNearlyClosed, sketchPolys, curveSteps, joinOpenPaths } from '../../web/sketch2d.js';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -85,4 +85,18 @@ t('贝塞尔（S 形、尖弯）展平偏差 ≤ 0.05 mm；段数和后端 curve
   assert.equal(curveSteps([5, 0], [5, 2.761423749], [2.761423749, 5], [0, 5]), 13);
 });
 
-console.log(`PASS geometry.test：${n} 项（自相交拆分、差一点闭合、重合节点、曲线展平精度）`);
+t('导入：首尾相接的 4 条线连成闭合矩形（方向乱也行）；T 字路口不连；不相接的不连', () => {
+  const L = (a, b) => P([a, b], false);
+  const r = joinOpenPaths([L([0, 0], [40, 0]), L([40, 30], [40, 0]), L([40, 30], [0, 30]), L([0, 0.001], [0, 30])]);
+  assert.equal(r.length, 1); assert.equal(r[0].closed, true); assert.equal(r[0].segs.length, 4);
+  assert.ok(Math.abs(loopArea(flattenPath(r[0])) - 1200) < 0.1);
+  const t = joinOpenPaths([L([0, 0], [10, 0]), L([10, 0], [20, 0]), L([10, 0], [10, 10])]);   // T 字：三条线交于 (10,0)
+  assert.equal(t.length, 3);
+  const s = joinOpenPaths([L([0, 0], [10, 0]), L([20, 0], [30, 0]), P([[0, 50], [10, 50], [10, 60]])]);
+  assert.equal(s.length, 3);
+  // 曲线段连接时控制柄保留
+  const c = joinOpenPaths([{ closed: false, segs: [[0, 0, 0, 0, 5, 5], [10, 0, -5, 5, 0, 0]] }, { closed: false, segs: [[10, 0, 0, 0, 5, -5], [20, 0, -5, -5, 0, 0]] }]);
+  assert.equal(c.length, 1); assert.deepEqual(c[0].segs[1], [10, 0, -5, 5, 5, -5]);
+});
+
+console.log(`PASS geometry.test：${n} 项（自相交拆分、差一点闭合、重合节点、曲线展平精度、导入时连接首尾相接的线）`);
