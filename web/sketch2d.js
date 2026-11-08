@@ -846,11 +846,11 @@ export class SketchEditor {
     this.restore(this.redoStack.pop());
   }
 
-  refresh() {
+  refresh(selOnly) {
     this.content.children.forEach((c) => { if (c.data && c.data.mode) this.style(c); });
     for (const it of [...this.sel]) if (!it.parent) this.sel.delete(it);
     this.content.children.forEach((c) => { c.fullySelected = this.tool === 'node' && this.sel.has(c); });
-    this.drawBoard();
+    if (!selOnly) this.drawBoard();         // 只改了选中（图形没变）时，板面不用重画
     this.drawSelection();
     this.updateNumeric();
     this.renderToolOpts();
@@ -1455,7 +1455,10 @@ export class SketchEditor {
   static loopDepths(loops) {
     const n = loops.length;
     const area = loops.map((p) => Math.abs(p.area));
-    const inside = (a, b) => a !== b && area[b] > area[a] && loops[b].bounds.contains(loops[a].bounds)
+    // 外框先算好成数字（paper 的 bounds 每次访问都要查缓存，200 个图形时是 4 万次）
+    const bb = loops.map((p) => { const r = p.bounds; return [r.left, r.top, r.right, r.bottom]; });
+    const boxIn = (a, b) => bb[b][0] <= bb[a][0] && bb[b][1] <= bb[a][1] && bb[b][2] >= bb[a][2] && bb[b][3] >= bb[a][3];
+    const inside = (a, b) => a !== b && area[b] > area[a] && boxIn(a, b)
       && loops[b].contains(loops[a].firstSegment.point) && !loops[a].getIntersections(loops[b]).length;
     const depth = new Array(n).fill(0);
     const parent = new Array(n).fill(-1);
@@ -1470,8 +1473,13 @@ export class SketchEditor {
   }
 
   static pathLoopArea(p) {
+    // 平移 / 旋转不改变面积和周长：用它们做缓存键，拖动时不用每次重新展平、拆自相交
+    const key = `${p.segments.length}|${p.area.toFixed(6)}|${p.length.toFixed(6)}`;
+    if (p._loopKey === key) return p._loopArea;
     const segs = p.segments.map((sg) => [sg.point.x, sg.point.y, sg.handleIn.x, sg.handleIn.y, sg.handleOut.x, sg.handleOut.y]);
-    return loopArea(flattenPath({ closed: true, segs }));
+    p._loopKey = key;
+    p._loopArea = loopArea(flattenPath({ closed: true, segs }));
+    return p._loopArea;
   }
 
   recognizeParts() {
@@ -1537,7 +1545,10 @@ export class SketchEditor {
       this.$('.sk-dims').parentNode.appendChild(box);
     }
     box.innerHTML = '';
-    const { parts, loose } = this.recognizeParts();
+    if (this.drag) return;            // 拖动中不重新识别板件（每帧都算太慢），松手提交时再更新
+    // 只改选中时图形没变：同一个已提交状态只识别一次
+    if (!this.current || this._plKey !== this.current) { this._plR = this.recognizeParts(); this._plKey = this.current; }
+    const { parts, loose } = this._plR;
     const names = this.part.names || {};
     const v = this.ps.view;
     // 画布上不再贴「板件 N · 尺寸」标签（影响观感，用户要求）；选中后在右侧「图形信息」里看
@@ -1961,6 +1972,8 @@ export class SketchEditor {
     } else if (d.kind === 'rotate') {                 // 拖完：角度框留在上方，可以直接改成精确值
       this.commit(d.label);
       this.showRotLabel(d.center, -d.applied, true);
+    } else if (d.kind === 'move' && !d.live && !this._altCopy) {
+      // 单击选中、没有拖动：图形没变，按下时已经刷新过选中状态，不用再提交（200 个图形时省掉一次序列化和整板重画）
     } else if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'node') this.commit(d.label || '已修改');
     else if (d.kind === 'marquee') {
       if (d.box) {
@@ -1975,7 +1988,7 @@ export class SketchEditor {
         if (e.event.shiftKey && this.sel.has(d.clickPick)) this.groupOf(d.clickPick).forEach((c) => this.sel.delete(c));
         else { this.groupOf(d.clickPick).forEach((c) => this.sel.add(c)); this.keyItem = d.clickPick; }
       } else if (!e.event.shiftKey) this.sel.clear();
-      this.refresh();
+      this.refresh(true);
     } else if (d.kind === 'shape') this.shapeFinish(d);
     else if (d.kind === 'penHandle') { /* 点已加入 */ }
     else if (d.kind === 'trim') { if (d.changed) this.commit('已修剪'); }
@@ -2048,15 +2061,16 @@ export class SketchEditor {
     if (it) {
       if (e.event.shiftKey) {
         if (this.sel.has(it)) this.groupOf(it).forEach((c) => this.sel.delete(c)); else { this.groupOf(it).forEach((c) => this.sel.add(c)); this.keyItem = it; }
-        this.refresh();
+        this.refresh(true);
         return;
       }
-      if (!this.sel.has(it)) { this.sel.clear(); this.groupOf(it).forEach((c) => this.sel.add(c)); this.refresh(); }
+      if (!this.sel.has(it)) { this.sel.clear(); this.groupOf(it).forEach((c) => this.sel.add(c)); this.refresh(true); }
       this.keyItem = it;
       if (e.event.altKey) {   // Alt 拖动 = 复制
         const copies = this.regroup([...this.sel].map((s) => this.cloneItem(s)));
         this.sel = new Set(copies);
-      }
+        this._altCopy = true;
+      } else this._altCopy = false;
       const b = this.selBounds();
       this.drag = { kind: 'move', start: pt, anchor: this.nearestCorner(b, pt), moved: new this.ps.Point(0, 0), label: '已移动',
         box0: b.clone(), targets: this.alignTargets(this.sel), circ: this.sel.size === 1 ? this.circleOf([...this.sel][0]) : null,
