@@ -12,7 +12,9 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 block_cipher = None
 IS_WIN = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
-APP_VERSION = '0.1.0'
+import re as _re
+# 版本号从 version.py 读（和 pyproject.toml 一致，tests/py/test_version.py 检查）
+APP_VERSION = _re.search(r'__version__\s*=\s*"([^"]+)"', open('version.py', encoding='utf-8').read()).group(1)
 
 # boxes 项目根目录（含 locale/、static/）— 从已安装的 boxes 包反推。
 # uv sync 时从上游 git 拉到 .venv，也兼容编辑式 path 安装。
@@ -200,7 +202,7 @@ if IS_MAC:
         upx=False,
         console=False,
         disable_windowed_traceback=False,
-        argv_emulation=False,
+        argv_emulation=True,            # macOS：双击 .seedlaser 启动时，把「打开文件」事件变成命令行参数（app.py 读取）
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
@@ -229,6 +231,19 @@ if IS_MAC:
             'CFBundleDevelopmentRegion': 'zh_CN',
             'NSHighResolutionCapable': True,
             'LSMinimumSystemVersion': '11.0',
+            # .seedlaser 项目文件：双击用 SeedLaser 打开
+            'CFBundleDocumentTypes': [{
+                'CFBundleTypeName': 'SeedLaser 项目',
+                'CFBundleTypeRole': 'Editor',
+                'LSHandlerRank': 'Owner',
+                'LSItemContentTypes': ['com.makerseed.seedlaser.project'],
+            }],
+            'UTExportedTypeDeclarations': [{
+                'UTTypeIdentifier': 'com.makerseed.seedlaser.project',
+                'UTTypeDescription': 'SeedLaser 项目',
+                'UTTypeConformsTo': ['public.json', 'public.data'],
+                'UTTypeTagSpecification': {'public.filename-extension': ['seedlaser']},
+            }],
         },
     )
 else:

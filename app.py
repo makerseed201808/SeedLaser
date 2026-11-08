@@ -6,7 +6,8 @@ import sys
 
 import webview
 
-from backend import Api
+from backend import Api, launch_file_from_argv
+from version import __version__
 
 
 def _apply_win_icon(window: webview.Window, ico_path: str, title: str) -> None:
@@ -61,7 +62,7 @@ def get_web_path() -> str:
 def main() -> None:
     api = Api()
     web_dir = get_web_path()
-    title = "SeedLaser v0.2"
+    title = f"SeedLaser v{__version__}"
     window = webview.create_window(
         title=title,
         url=os.path.join(web_dir, "index.html"),
@@ -73,6 +74,8 @@ def main() -> None:
         text_select=False,
     )
     api.set_window(window)
+    # 双击 .seedlaser 打开（macOS 打包时 argv_emulation 把「打开文件」事件变成命令行参数；Windows 是「打开方式」传进来的路径）
+    api.set_launch_file(launch_file_from_argv(sys.argv))
     # 开发模式下替换窗口 / 任务栏（Windows）或程序坞（macOS）图标。
     # PyInstaller 打包后由 .spec 的 icon 参数控制（不依赖这两个函数）。
     if hasattr(sys, "_MEIPASS"):

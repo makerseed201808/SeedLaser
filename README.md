@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <img src="https://img.shields.io/badge/python-3.10-blue.svg" alt="Python" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey.svg" alt="Platform" />
-  <a href="https://github.com/makerseed201808/SeedLaser/releases/tag/v0.2.0"><img src="https://img.shields.io/badge/release-v0.2.0-brightgreen.svg" alt="Release" /></a>
+  <a href="https://github.com/makerseed201808/SeedLaser/releases/tag/v0.3.0"><img src="https://img.shields.io/badge/release-v0.3.0-brightgreen.svg" alt="Release" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/更新日志-CHANGELOG-orange.svg" alt="Changelog" /></a>
 </p>
 
@@ -213,7 +213,7 @@ uv run python tests/py/test_recent.py      # 最近项目 / 打开旧项目
 
 ## 版本管理
 
-- 版本号：`主版本.次版本.修订`，在 `pyproject.toml` 和 `app.py` 窗口标题里；每个版本在 [CHANGELOG.md](CHANGELOG.md) 写一节，并打标签 `vX.Y.Z`。
+- 版本号：`主版本.次版本.修订`，写在 `pyproject.toml` 和 `version.py`（窗口标题、打包都读它，`tests/py/test_version.py` 检查两处一致）；每个版本在 [CHANGELOG.md](CHANGELOG.md) 写一节，并打标签 `vX.Y.Z`。
 - 推送：在 Mac 上运行一次 `scripts/setup_autopush.command`，之后有新提交或新标签会在后台自动推到 GitHub 并弹通知；也可以随时双击 `scripts/push_github.command` 手动推送。
 - 本地开发分支推到 GitHub 的 `main`。
 

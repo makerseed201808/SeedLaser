@@ -583,6 +583,14 @@ def project_dir() -> str:
     return os.environ.get("SEEDLASER_PROJECT_DIR") or os.path.join(os.path.expanduser("~"), "Documents", "SeedLaser")
 
 
+def launch_file_from_argv(argv: list[str]) -> str | None:
+    """命令行 / 双击项目文件启动时带进来的项目路径（.seedlaser，旧版 .seedbox.json）。"""
+    for a in argv[1:]:
+        if isinstance(a, str) and _EXT_RE.search(a) and os.path.isfile(a):
+            return os.path.abspath(a)
+    return None
+
+
 def _remember_recent(path: str, project: dict[str, Any]) -> None:
     import time
     path = os.path.abspath(path)
@@ -867,6 +875,15 @@ class Api:
             return []
 
     # ---- 文件对话框（统一入口；浏览器调试 / 自动测试时没有窗口，用 dev_set_pick 预先给出路径）----
+    def set_launch_file(self, path: str | None) -> None:
+        self._launch_file = path
+
+    def launch_file(self) -> dict[str, Any]:
+        """前端启动时取一次：双击项目文件打开 SeedLaser 时要打开的文件（取过就清掉）."""
+        path = getattr(self, "_launch_file", None)
+        self._launch_file = None
+        return {"path": path}
+
     def dev_set_pick(self, path: str | None) -> dict[str, Any]:
         """只在没有窗口（调试服务器）时有效：下一次文件对话框直接返回这个路径（None = 取消）."""
         if self._window is not None:

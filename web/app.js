@@ -1112,4 +1112,9 @@ window.addEventListener('beforeunload', (ev) => { if (tabs.list.some(tabDirty)) 
   await whenApiReady();
   showView('home');
   await Promise.all([loadFormats(), loadGroups()]);
+  // 双击 .seedlaser 文件启动：直接打开它
+  try {
+    const lf = await window.pywebview.api.launch_file();
+    if (lf && lf.path) await doOpenProject(lf.path);
+  } catch (e) { /* 没有就算了 */ }
 })();
