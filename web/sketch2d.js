@@ -87,6 +87,15 @@ const BAR_ICONS = {
   file: '<path d="M4 1.5h5.5L12.5 4.5v10H4z"/><path d="M9.5 1.5v3h3"/><path d="M6 8.5h4.5M6 11h4.5"/>',
 };
 const barIcon = (k) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${BAR_ICONS[k]}</svg>`;
+// 对象原点（参考点）：9 个位置，t / m / b = 屏幕上的上 / 中 / 下，l / c / r = 左 / 中 / 右
+const REF_KEYS = ['tl', 'tc', 'tr', 'ml', 'mc', 'mr', 'bl', 'bc', 'br'];
+const REF_NAMES = { tl: '左上角', tc: '上边中点', tr: '右上角', ml: '左边中点', mc: '中心', mr: '右边中点', bl: '左下角', bc: '下边中点', br: '右下角' };
+const refIcon = (k, size = 18) => {
+  const i = REF_KEYS.indexOf(k); const cx = 2.5 + (i % 3) * 5.5; const cy = 2.5 + Math.floor(i / 3) * 5.5;
+  return `<svg viewBox="0 0 16 16" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.1">` +
+    '<rect x="2.5" y="2.5" width="11" height="11" rx="0.5"/><path d="M8 2.5v11M2.5 8h11" stroke-opacity=".45"/>' +
+    `<circle cx="${cx}" cy="${cy}" r="2.1" fill="#1f6feb" stroke="#fff" stroke-width="0.9"/></svg>`;
+};
 const alignIcon = (k) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3">${ALIGN_ICONS[k]}</svg>`;
 
 import { parseDXF, loadImage, grayOf, otsu, binarize, readFile } from './sketch-import.js';
@@ -166,8 +175,9 @@ export class SketchEditor {
         <span class="sk-ctx-sel hidden">
           <b class="sk-ctx-count"></b>
           <i class="sk-sep sk-num-sep"></i>
-          <label title="左下角 X（回车生效）">X<input data-num="x" type="number" step="0.1"></label>
-          <label title="左下角 Y（回车生效）">Y<input data-num="y" type="number" step="0.1"></label>
+          <button class="sk-refbtn" data-refbtn title="对象原点：X / Y 用图形的哪个点；改宽高、输入角度时这个点不动"></button>
+          <label class="sk-refx">X<input data-num="x" type="number" step="0.1"></label>
+          <label class="sk-refy">Y<input data-num="y" type="number" step="0.1"></label>
           <label title="宽（回车生效）">宽<input data-num="w" type="number" step="0.1" min="0.1"></label>
           <button class="sk-ratio on" data-act="ratio" title="锁定宽高比">🔗</button>
           <label title="高（回车生效）">高<input data-num="h" type="number" step="0.1" min="0.1"></label>
@@ -322,6 +332,7 @@ export class SketchEditor {
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
     h.querySelector('[data-filemenu]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleFileMenu(); });
     h.querySelector('.sk-file').addEventListener('click', () => this.startRename());
+    h.querySelector('[data-refbtn]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleRefMenu(); });
     h.querySelectorAll('[data-menu]').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleMenu(b.dataset.menu); }));
     h.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => {
       const v = this.ps.view;
@@ -350,7 +361,8 @@ export class SketchEditor {
     });
     h.querySelectorAll('[data-opt]').forEach((el) => el.addEventListener('change', () => this.optChanged(el)));
     h.querySelectorAll('[data-num]').forEach((el) => {
-      el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { this.numericApply(el.dataset.num, el.value); el.blur(); } });
+      // 回车 = 失焦，由 change 统一应用一次（原来回车和 change 各应用一次，旋转会转两倍）
+      el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') el.blur(); });
       el.addEventListener('change', () => this.numericApply(el.dataset.num, el.value));
     });
 
@@ -4115,7 +4127,9 @@ export class SketchEditor {
     this.$('.sk-ctx-sel').classList.toggle('hidden', !b);
     if (!b) { ['x', 'y', 'w', 'h'].forEach((k) => set(k, '')); set('rot', 0); this.renderCtxData(); return; }
     this.$('.sk-ctx-count').textContent = `选中 ${this.sel.size} 个`;
-    set('x', fmt(b.left)); set('y', fmt(b.top)); set('w', fmt(b.width)); set('h', fmt(b.height)); set('rot', 0);
+    this.renderRefBtn();
+    const rp = this.refPoint(b);
+    set('x', fmt(rp.x)); set('y', fmt(rp.y)); set('w', fmt(b.width)); set('h', fmt(b.height)); set('rot', 0);
   }
 
   renderCtxData() {
@@ -4134,21 +4148,84 @@ export class SketchEditor {
     el.innerHTML = html;
   }
 
+  // ---------------------------------------------------------------- 对象原点（参考点）
+  get refKey() {
+    if (!this._refKey) { try { this._refKey = localStorage.getItem('seedboxes.refPoint') || 'bl'; } catch (e) { this._refKey = 'bl'; } }
+    return REF_KEYS.includes(this._refKey) ? this._refKey : 'bl';
+  }
+
+  set refKey(k) {
+    this._refKey = k;
+    try { localStorage.setItem('seedboxes.refPoint', k); } catch (e) { /* 只在这次有效 */ }
+  }
+
+  // 外框上参考点的坐标（y 向上：屏幕上方 = paper 的 bottom）
+  refPoint(b, key = this.refKey) {
+    const x = key[1] === 'l' ? b.left : key[1] === 'r' ? b.right : b.center.x;
+    const y = key[0] === 't' ? b.bottom : key[0] === 'b' ? b.top : b.center.y;
+    return new this.ps.Point(x, y);
+  }
+
+  renderRefBtn() {
+    const btn = this.$('[data-refbtn]');
+    if (!btn) return;
+    const k = this.refKey;
+    btn.innerHTML = refIcon(k, 20);
+    btn.title = `对象原点：${REF_NAMES[k]}（X / Y 是这个点的坐标；改宽高、输入角度时它不动）。点一下换`;
+    this.$('.sk-refx').title = `${REF_NAMES[k]}的 X（回车生效）`;
+    this.$('.sk-refy').title = `${REF_NAMES[k]}的 Y（回车生效）`;
+  }
+
+  toggleRefMenu() {
+    if (this.refMenu) { this.closeRefMenu(); return; }
+    const btn = this.$('[data-refbtn]');
+    const box = document.createElement('div');
+    box.className = 'sk-refmenu';
+    box.innerHTML = `<div class="sk-refgrid">${REF_KEYS.map((k) => `<button data-ref="${k}" class="${k === this.refKey ? 'on' : ''}" title="${REF_NAMES[k]}">${refIcon(k, 22)}</button>`).join('')}</div>
+      <div class="sk-refcap">对象原点：<b>${REF_NAMES[this.refKey]}</b></div>`;
+    box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    box.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-ref]');
+      if (!b) return;
+      this.refKey = b.dataset.ref;
+      this.closeRefMenu();
+      this.renderRefBtn();
+      this.updateNumeric();
+      this.status(`对象原点：${REF_NAMES[this.refKey]}。X / Y 显示这个点的坐标，改宽高、输入角度时它保持不动`);
+    });
+    const r = btn.getBoundingClientRect(); const hr = this.host.getBoundingClientRect();
+    box.style.left = `${r.left - hr.left}px`;
+    box.style.top = `${r.bottom - hr.top + 4}px`;
+    this.host.appendChild(box);
+    this.refMenu = box;
+    btn.classList.add('on');
+    this._refClose = (ev) => { if (!box.contains(ev.target) && ev.target !== btn) this.closeRefMenu(); };
+    setTimeout(() => document.addEventListener('pointerdown', this._refClose), 0);
+  }
+
+  closeRefMenu() {
+    if (this.refMenu) { this.refMenu.remove(); this.refMenu = null; }
+    if (this._refClose) { document.removeEventListener('pointerdown', this._refClose); this._refClose = null; }
+    const btn = this.$ && this.$('[data-refbtn]');
+    if (btn) btn.classList.remove('on');
+  }
+
   numericApply(k, val) {
     const v = Number(val);
     if (!this.sel.size || !isFinite(v)) return;
     const b = this.selBounds();
-    if (k === 'x') this.sel.forEach((it) => it.translate(new this.ps.Point(v - b.left, 0)));
-    else if (k === 'y') this.sel.forEach((it) => it.translate(new this.ps.Point(0, v - b.top)));
+    const rp = this.refPoint(b);
+    if (k === 'x') this.sel.forEach((it) => it.translate(new this.ps.Point(v - rp.x, 0)));
+    else if (k === 'y') this.sel.forEach((it) => it.translate(new this.ps.Point(0, v - rp.y)));
     else if (k === 'w' || k === 'h') {
       if (v <= 0) return;
       let sx = k === 'w' ? v / b.width : 1;
       let sy = k === 'h' ? v / b.height : 1;
       if (this.lockRatio) { if (k === 'w') sy = sx; else sx = sy; }
-      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.scale(sx, sy, b.topLeft); });
+      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.scale(sx, sy, rp); });       // 对象原点不动
     } else if (k === 'rot') {
       if (!v) return;
-      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.rotate(v, b.center); });   // 正数 = 逆时针（数据坐标 y 向上，paper 的正角 = 逆时针）
+      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.rotate(v, rp); });           // 绕对象原点   // 正数 = 逆时针（数据坐标 y 向上，paper 的正角 = 逆时针）
     }
     this.commit('已修改尺寸 / 位置');
   }
@@ -4457,6 +4534,7 @@ export class SketchEditor {
     else if (mod && k === 'o') this.fileCmd('open');
     else if (mod && k === 'n') this.fileCmd('new');
     else if (ev.key === 'Escape' && this.fileMenu) this.closeFileMenu();
+    else if (ev.key === 'Escape' && this.refMenu) this.closeRefMenu();
     else if (ev.key === '?' || (ev.shiftKey && ev.key === '/')) this.showKeys();
     else if (mod && k === 'a') { this.sel = new Set(this.content.children.filter((c) => this.selectable(c))); this.setTool('select'); }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
