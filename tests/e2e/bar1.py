@@ -24,10 +24,18 @@ async def main():
         assert not await pg.is_visible(H + '.sk-ctx-sel')
         await pg.screenshot(path=OUT + 'bar1_idle.png', clip={'x': 0, 'y': 0, 'width': 1500, 'height': 110})
         # 缩放
-        z0 = await pg.inner_text(H + '.sk-zoom')
+        z0 = await pg.input_value(H + '.sk-zoom')
         await pg.click(H + '[data-zoom=in]')
-        z1 = await pg.inner_text(H + '.sk-zoom')
+        z1 = await pg.input_value(H + '.sk-zoom')
         assert int(z1[:-1]) > int(z0[:-1]), (z0, z1)
+        # 缩放比例直接输入：150 回车 → 150%；Esc 取消；输入框里按 v 不切换工具
+        await pg.click(H + '.sk-zoom'); await pg.keyboard.type('150'); await pg.keyboard.press('Enter')
+        zv = await pg.input_value(H + '.sk-zoom'); assert zv == '150%', zv
+        assert abs(await pg.evaluate(f"{ED}.zoom") - 1.5 * 96 / 25.4) < 1e-6
+        await pg.click(H + '.sk-zoom'); await pg.keyboard.type('v300'); await pg.keyboard.press('Escape')
+        assert await pg.input_value(H + '.sk-zoom') == '150%' and await pg.evaluate(f"{ED}.tool") == 'select'
+        await pg.click(H + '.sk-zoom'); await pg.keyboard.type('80%'); await pg.click(H + '.sk-ctx-data')
+        assert await pg.input_value(H + '.sk-zoom') == '80%'
         # 选中：位置尺寸 + 复制一份
         await pg.evaluate(f"(()=>{{const e={ED}; e.sel=new Set([e.content.children[0]]); e.refresh();}})()")
         assert await pg.is_visible(H + '.sk-ctx-sel') and not await pg.is_visible(H + '.sk-ctx-idle')
@@ -70,6 +78,6 @@ async def main():
         await pg.wait_for_selector('.sk-modal-box')
         await b.close()
     assert not errs, errs
-    print('PASS bar1：编辑 / 对齐 / 旋转 / 帮助菜单、缩放 −/+ 和百分比、上下文栏（材料数据 / 位置尺寸 + 复制删除）')
+    print('PASS bar1：编辑 / 对齐 / 旋转 / 帮助菜单、缩放 −/+ 和输入百分比、上下文栏（材料数据 / 位置尺寸 + 复制删除）')
 
 asyncio.run(main())

@@ -1245,3 +1245,9 @@ input, textarea, select { font: inherit; user-select: text; }
   background: #fff !important; border: 1px solid #c9d6e6 !important; color: #1f2933; box-shadow: 0 1px 3px rgba(16,35,63,.12); font-variant-numeric: tabular-nums; }
 #sk-host .sk-dim:hover { border-color: #1f6feb !important; color: #1f6feb !important; box-shadow: 0 0 0 3px rgba(31,111,235,.12); }
 #sk-host .sk-dim-input { width: 76px; font-size: 13.5px; padding: 3px 6px; }
+
+/* 缩放比例输入框 */
+#sk-host input.sk-zoom { width: 52px; min-width: 52px; height: 26px; box-sizing: border-box; text-align: center; font-size: 12.5px; padding: 0 2px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: #33465f; cursor: text; font-variant-numeric: tabular-nums; }
+#sk-host input.sk-zoom:hover { border-color: #c9d6e6; background: #fff; }
+#sk-host input.sk-zoom:focus { border-color: #1f6feb; background: #fff; outline: none; box-shadow: 0 0 0 3px rgba(31,111,235,.15); }

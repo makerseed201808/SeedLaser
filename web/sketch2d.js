@@ -38,6 +38,7 @@ const WOOD = '#ead3ac';
 const SELECT = '#0ea5e9';
 const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='white' stroke-width='4.5'/><path d='M19 4v4h-4' stroke='white' stroke-width='4.5'/><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='%230ea5e9' stroke-width='2'/><path d='M19 4v4h-4' stroke='%230ea5e9' stroke-width='2'/></g></svg>") 12 12, alias`;   // 旋转手柄的光标（带白边的圆形箭头）
 const SMART = '#16a34a';
+const PX_PER_MM = 96 / 25.4;      // 缩放 100% = 1 mm 显示为 96 dpi 屏幕上的 1 mm
 const MEASURE = '#f97316';        // 测量线（橙色）          // 智能辅助线（对齐 / 贴边 / 相切）
 
 const TOOLS = [
@@ -147,7 +148,7 @@ export class SketchEditor {
         <div class="sk-group" title="视图">
           <button class="sk-ico" data-act="fit" title="适合窗口：显示整块材料（F）">${barIcon('fit')}</button>
           <button class="sk-ico" data-zoom="out" title="缩小（滚轮也可以缩放）">−</button>
-          <span class="sk-zoom" title="缩放比例（100% ≈ 屏幕上的实际大小）">100%</span>
+          <input class="sk-zoom" value="100%" title="缩放比例：点一下输入数字，回车生效（100% ≈ 屏幕上的实际大小）" spellcheck="false">
           <button class="sk-ico" data-zoom="in" title="放大">+</button>
         </div>
         <div class="sk-group" title="吸附">
@@ -328,7 +329,27 @@ export class SketchEditor {
       const v = this.ps.view;
       this.zoomAt(new this.ps.Point(v.viewSize.width / 2, v.viewSize.height / 2), b.dataset.zoom === 'in' ? 1.25 : 0.8);
     }));
-    h.querySelector('.sk-zoom').addEventListener('click', () => this.fit());
+    // 缩放比例：直接输入（比如 150 或 150%），回车 / 点别处生效，Esc 取消；以画面中心为准
+    const zi = h.querySelector('.sk-zoom');
+    const zShow = () => { zi.value = `${Math.round(this.zoom / PX_PER_MM * 100)}%`; };
+    zi.addEventListener('focus', () => { zi.value = String(Math.round(this.zoom / PX_PER_MM * 100)); zi.select(); zi._fresh = true; });
+    zi.addEventListener('mouseup', (ev) => { if (zi._fresh) { ev.preventDefault(); zi._fresh = false; } });   // 点进来时保持全选，直接输入就替换
+    zi.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') zi.blur();
+      else if (ev.key === 'Escape') { zi.dataset.cancel = '1'; zi.blur(); }
+    });
+    zi.addEventListener('blur', () => {
+      const v = parseFloat(String(zi.value).replace('%', ''));
+      if (!zi.dataset.cancel && isFinite(v) && v > 0) {
+        const c = this.center();
+        this.setView(v / 100 * PX_PER_MM, c.x, c.y);
+        const real = Math.round(this.zoom / PX_PER_MM * 100);
+        if (real !== Math.round(v)) this.status(`缩放范围是 ${Math.round(0.2 / PX_PER_MM * 100)}% ~ ${Math.round(200 / PX_PER_MM * 100)}%，已设为 ${real}%`);
+      }
+      delete zi.dataset.cancel;
+      zShow();
+    });
     h.querySelectorAll('[data-opt]').forEach((el) => el.addEventListener('change', () => this.optChanged(el)));
     h.querySelectorAll('[data-num]').forEach((el) => {
       el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { this.numericApply(el.dataset.num, el.value); el.blur(); } });
@@ -1025,7 +1046,7 @@ export class SketchEditor {
     this.drawSelection();
     if (this.marks) this.drawMarks();
     const zl = this.$ && this.$('.sk-zoom');
-    if (zl) zl.textContent = `${Math.round(this.zoom / (96 / 25.4) * 100)}%`;   // 100% ≈ 屏幕上的实际大小（96 dpi）
+    if (zl && document.activeElement !== zl) zl.value = `${Math.round(this.zoom / PX_PER_MM * 100)}%`;   // 100% ≈ 屏幕上的实际大小（96 dpi）
   }
 
   center() {
