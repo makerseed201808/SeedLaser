@@ -23,15 +23,16 @@ const RADIAL_CATALOG = [
     ['t:ellipse', '椭圆', '◯'], ['t:polygon', '多边形', '⬡'], ['t:text', '文字', 'T'], ['t:joint', '卡榫', '⊓'], ['t:mortise', '插槽', '▤'],
     ['t:bridge', '水口', '⫶'], ['t:trim', '修剪', '✂'], ['t:measure', '测量', '📏']] },
   { g: '编辑', items: [['a:undo', '撤销', '↶'], ['a:redo', '重做', '↷'], ['a:copy', '复制', '⎘', 1], ['a:paste', '粘贴', '📋'], ['a:dup', '复制一份', '⧉', 1],
-    ['a:delete', '删除', '🗑', 1], ['a:group', '编组', '▣', 1], ['a:ungroup', '取消编组', '▢', 1], ['a:breakApart', '拆分', '⋔', 1]] },
+    ['a:delete', '删除', '🗑', 1], ['a:group', '编组', '▣', 1], ['a:ungroup', '取消编组', '▢', 1], ['a:breakApart', '拆分', '⋔', 1],
+    ['a:lock', '锁定', '🔒', 1], ['a:hide', '隐藏', '🙈', 1], ['a:unlockAll', '全部解锁', '🔓'], ['a:showAll', '全部显示', '👁']] },
   { g: '形状运算', items: [['a:unite', '并集', '⬭', 1], ['a:subtract', '差集', '◐', 1], ['a:intersect', '交集', '◑', 1], ['a:exclude', '异或', '◒', 1], ['a:offset', '偏移', '⧈', 1]] },
   { g: '变换', items: [['x:rotate', '旋转…', '⟲', 1], ['a:rotL', '左转 90°', '↺', 1], ['a:rotR', '右转 90°', '↻', 1], ['a:flipH', '水平镜像', '⇆', 1], ['a:flipV', '垂直镜像', '⇅', 1],
     ['a:mirCopyH', '镜像复制', '⇋', 1], ['a:mirCopyV', '上下镜像复制', '⥮', 1], ['a:fillet', '圆角', '◜', 1], ['a:chamfer', '倒角', '◸', 1]] },
   { g: '面板 / 视图', items: [['p:align', '对齐', '⫴'], ['p:array', '阵列', '⁙'], ['p:transform', '变换面板', '⟲'], ['a:fit', '适合窗口', '⤢']] },
 ];
 const RADIAL_DEF = {
-  idle: ['t:line', 't:rect', 't:ellipse', 't:text', 't:joint', 'a:paste', 'a:undo', 'a:fit'],
-  sel: ['a:dup', 'a:subtract', 'a:unite', 'a:mirCopyH', 'x:rotate', 'a:fillet', 'p:array', 'a:delete'],
+  idle: ['t:line', 't:rect', 't:ellipse', 't:text', 't:joint', 'a:paste', 'a:unlockAll', 'a:fit'],
+  sel: ['a:dup', 'a:subtract', 'a:unite', 'a:mirCopyH', 'x:rotate', 'a:lock', 'p:array', 'a:delete'],
 };
 const RADIAL_KEY = 'seedboxes.radialMenu';
 const WOOD = '#ead3ac';
@@ -214,9 +215,10 @@ export class SketchEditor {
           <section class="sk-card sk-layers-card hidden">
             <h4>图层（加工方式）<button class="sk-card-x" data-act="hideLayers" title="收起（点左下角的颜色块可再打开）">✕</button></h4>
             <div class="sk-layers">${Object.entries(MODES).map(([k, m]) => `
-              <button class="sk-layer" data-mode="${k}"><i style="background:${m.color}"></i><b>${m.name}</b><em>${m.hint}</em><span class="sk-count" data-count="${k}">0</span></button>`).join('')}
+              <span class="sk-layer-row"><button class="sk-layer" data-mode="${k}"><i style="background:${m.color}"></i><b>${m.name}</b><em>${m.hint}</em><span class="sk-count" data-count="${k}">0</span></button><button class="sk-eye" data-eye="${k}" title="显示 / 隐藏这个图层（只是不显示，仍会导出）">👁</button></span>`).join('')}
             </div>
             <p class="sk-small">选中图形后点图层（或下方色块）即可改加工方式；新画的图形使用当前图层。</p>
+            <div class="sk-lockinfo hidden"><span class="sk-lockinfo-t"></span><button data-act="unlockAll">全部解锁</button><button data-act="showAll">全部显示</button></div>
           </section>
           <section class="sk-card sk-toolopts"></section>
           <section class="sk-card" data-panel="info" data-key="info">
@@ -281,6 +283,8 @@ export class SketchEditor {
             <div class="sk-btns">
               <button data-act="group" title="选中的图形编成一组，一起选中、移动（Ctrl+G）">编组</button>
               <button data-act="ungroup" title="取消编组（Ctrl+Shift+G）">取消编组</button>
+              <button data-act="lock" title="锁定：不能选中、移动、删除（防止误碰）。解锁：右键空白处「全部解锁」">🔒 锁定</button>
+              <button data-act="hide" title="隐藏：画板上不显示、不能选中，但仍会导出。显示：右侧「图层」卡片「全部显示」">🙈 隐藏</button>
             </div>
             <p class="sk-small">编成一组后点任意一个就整组选中、一起移动（Ctrl/⌘+G，取消 Ctrl/⌘+Shift+G）。</p>
           </section>
@@ -334,6 +338,7 @@ export class SketchEditor {
       this.lastPalette = null;
     });
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
+    h.querySelectorAll('[data-eye]').forEach((b) => b.addEventListener('click', () => this.toggleLayer(b.dataset.eye)));
     h.querySelector('[data-filemenu]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleFileMenu(); });
     h.querySelector('.sk-file').addEventListener('click', () => this.startRename());
     h.querySelector('[data-refbtn]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleRefMenu(); });
@@ -532,7 +537,7 @@ export class SketchEditor {
     let item;
     if (it.paths.length === 1) item = mk(it.paths[0]);
     else { item = new ps.CompoundPath({ insert: false }); item.addChildren(it.paths.map(mk)); }
-    item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked,
+    item.data = { id: it.id || newId(), mode: it.mode || 'cut', role: it.role || null, locked: !!it.locked, lock: !!it.lock, hidden: !!it.hidden,
                   text: it.text ? { ...it.text } : null, joints: it.joints ? it.joints.map((j) => ({ ...j })) : null,
                   group: it.group || null, pid: it.pid || null, origin: it.origin ? [...it.origin] : null, bridges: it.bridges ? it.bridges.map((b) => [...b]) : null };
     this.content.addChild(item);
@@ -552,6 +557,8 @@ export class SketchEditor {
     const out = { id: item.data.id, mode: item.data.mode, paths };
     if (item.data.role) out.role = item.data.role;
     if (item.data.locked) out.locked = true;
+    if (item.data.lock) out.lock = true;              // 用户锁定（不能选 / 动 / 删）
+    if (item.data.hidden) out.hidden = true;          // 用户隐藏（不显示、不选，仍导出）
     if (item.data.text) out.text = { ...item.data.text };
     if (item.data.group) out.group = item.data.group;
     if (item.data.pid) out.pid = item.data.pid;
@@ -604,6 +611,8 @@ export class SketchEditor {
     item.fillRule = 'evenodd';
     item.dashArray = null;                     // 描线也用实线（用户要求），只靠红色区分
     item.opacity = d.locked && this.outlineLocked !== false && outline ? 0.85 : 1;
+    if (d.lock) item.opacity = 0.45;                                   // 锁定：变淡
+    item.visible = !d.hidden && !this.layerHidden(d.mode);             // 隐藏：不画（仍导出）
   }
 
   // 卡榫信息（a、b = 边的两端，c = a + 朝外法线）跟着图形的移动 / 旋转 / 缩放 / 镜像一起变换
@@ -949,6 +958,17 @@ export class SketchEditor {
     Object.keys(c).forEach((k) => { this.$(`[data-count=${k}]`).textContent = c[k]; });
     const one = this.sel.size ? [...this.sel][0].data.mode : this.opts.mode;
     this.$$('.sk-layer').forEach((b) => b.classList.toggle('on', b.dataset.mode === one));
+    this.$$('.sk-eye').forEach((b) => { const off = this.layerHidden(b.dataset.eye); b.classList.toggle('off', off); b.textContent = off ? '🙈' : '👁'; });
+    const li = this.$('.sk-lockinfo');
+    if (li) {
+      let lk = 0; let hd = 0;
+      this.content.children.forEach((it) => { if (it.data) { if (it.data.lock) lk++; if (it.data.hidden) hd++; } });
+      const lh = this.hiddenLayers ? this.hiddenLayers.size : 0;
+      li.classList.toggle('hidden', !lk && !hd && !lh);
+      li.querySelector('.sk-lockinfo-t').textContent = [lk ? `🔒 ${lk} 个锁定` : '', hd ? `🙈 ${hd} 个隐藏` : '', lh ? `${lh} 个图层隐藏` : ''].filter(Boolean).join(' · ');
+      li.querySelector('[data-act=unlockAll]').classList.toggle('hidden', !lk);
+      li.querySelector('[data-act=showAll]').classList.toggle('hidden', !hd && !lh);
+    }
   }
 
   // 板的实体（木色）：所有闭合切割路径按奇偶规则填充
@@ -1911,7 +1931,58 @@ export class SketchEditor {
   // ================================================================ 命中
 
   selectable(it) {
-    return it && it.data && it.data.mode && !(it.data.locked && this.outlineLocked && it.data.role === 'outline');
+    return it && it.data && it.data.mode && !(it.data.locked && this.outlineLocked && it.data.role === 'outline')
+      && !it.data.lock && !it.data.hidden && !this.layerHidden(it.data.mode);
+  }
+
+  layerHidden(mode) { return !!(this.hiddenLayers && this.hiddenLayers.has(mode)); }
+
+  // 点在锁定 / 隐藏图形上（选不中）：返回它，用来提示
+  hitLocked(pt) {
+    const res = this.content.hitTest(pt, { stroke: true, segments: true, tolerance: 6 / this.zoom,
+      match: (h) => { const it = this.topItem(h.item); return it && it.data && it.data.lock && !it.data.hidden; } });
+    return res ? this.topItem(res.item) : null;
+  }
+
+  // 锁定 / 隐藏 / 全部解锁 / 全部显示（C2）
+  lockSel(on) {
+    if (!this.need(1)) return;
+    const n = this.sel.size;
+    this.sel.forEach((it) => { it.data.lock = on; });
+    if (on) { this.sel.clear(); this.$('.sk-layers-card').classList.remove('hidden'); }   // 让「全部解锁」看得见
+    this.commit(on ? `已锁定 ${n} 个图形（不能选中、移动、删除；右键空白处「全部解锁」）` : `已解锁 ${n} 个图形`);
+  }
+
+  hideSel() {
+    if (!this.need(1)) return;
+    const n = this.sel.size;
+    this.sel.forEach((it) => { it.data.hidden = true; });
+    this.sel.clear();
+    this.$('.sk-layers-card').classList.remove('hidden');                                  // 让「全部显示」看得见
+    this.commit(`已隐藏 ${n} 个图形（仍会导出；右侧「图层」卡片里「全部显示」）`);
+  }
+
+  unlockAll() {
+    let n = 0;
+    this.content.children.forEach((it) => { if (it.data && it.data.lock) { it.data.lock = false; n++; } });
+    if (!n) { this.toast('没有锁定的图形'); return; }
+    this.commit(`已解锁 ${n} 个图形`);
+  }
+
+  showAll() {
+    let n = 0;
+    this.content.children.forEach((it) => { if (it.data && it.data.hidden) { it.data.hidden = false; n++; } });
+    if (this.hiddenLayers && this.hiddenLayers.size) { n += this.hiddenLayers.size; this.hiddenLayers.clear(); }
+    if (!n) { this.toast('没有隐藏的图形'); return; }
+    this.commit('已全部显示');
+  }
+
+  toggleLayer(mode) {
+    this.hiddenLayers = this.hiddenLayers || new Set();
+    if (this.hiddenLayers.has(mode)) this.hiddenLayers.delete(mode); else this.hiddenLayers.add(mode);
+    for (const it of [...this.sel]) if (!this.selectable(it)) this.sel.delete(it);
+    this.refresh();
+    this.status(this.hiddenLayers.has(mode) ? `已隐藏「${MODES[mode].name}」图层（只是不显示，仍会导出）` : `已显示「${MODES[mode].name}」图层`);
   }
 
   hitItem(pt, opts = {}) {
@@ -2273,6 +2344,8 @@ export class SketchEditor {
     }
     let it = this.hitItem(pt);
     if (!it) {
+      const lk = this.hitLocked(pt);
+      if (lk) this.status('这个图形已锁定：不能选中、移动、删除。右键空白处 →「全部解锁」，或在右侧「图层」卡片里解锁');
       // 没点在线上：点在图形内部。已选中的图形可以从内部直接拖动；没选中的，单击（不拖）才选中，拖动仍是框选
       const inner = this.hitInside(pt);
       if (inner && this.sel.has(inner)) it = inner;
@@ -3649,6 +3722,7 @@ export class SketchEditor {
       keys: () => this.showKeys(), tour: () => this.startTour(),
       mirCopyH: () => this.mirrorCopy(true), mirCopyV: () => this.mirrorCopy(false),
       autoLayout: () => this.autoLayout(),
+      lock: () => this.lockSel(true), hide: () => this.hideSel(), unlockAll: () => this.unlockAll(), showAll: () => this.showAll(),
       toggle3d: () => {
         const box = this.$('.sk-3d');
         box.classList.toggle('min');

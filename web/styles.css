@@ -1351,3 +1351,10 @@ input, textarea, select { font: inherit; user-select: text; }
 /* 上下文栏里的按钮式 chip（自动排版） */
 .sk-host button.sk-chip-btn { cursor: pointer; border: 1px solid #93c5fd; background: #eff6ff; color: #1d4ed8; font: inherit; font-size: 12px; }
 .sk-host button.sk-chip-btn:hover { background: #dbeafe; }
+/* 图层卡片：显示 / 隐藏眼睛、锁定隐藏统计（C2） */
+.sk-layer-row { display: flex; gap: 4px; align-items: stretch; }
+.sk-layer-row .sk-layer { flex: 1; }
+.sk-host .sk-eye { width: 30px; padding: 0; font-size: 13px; border: 1px solid #e3e8ef; border-radius: 6px; background: #fff; cursor: pointer; }
+.sk-host .sk-eye.off { background: #f1f5f9; opacity: .7; }
+.sk-lockinfo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; color: #475569; }
+.sk-lockinfo.hidden { display: none; }
