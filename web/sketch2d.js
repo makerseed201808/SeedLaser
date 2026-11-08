@@ -1543,18 +1543,33 @@ export class SketchEditor {
       if (!byPair.has(e.j.pair)) byPair.set(e.j.pair, []);
       byPair.get(e.j.pair).push(e);
     });
+    const t = (this.part && this.part.thickness) || 3;
+    // 每条边自己的问题：齿深和板厚不一致。
+    // （板角上三块板会不会相碰，取决于在这个角相遇的三块板，只看一块板判断不了，交给 3D 检查，见 B4）
+    const own = (e) => {
+      const r = []; const f = [];
+      if (e.j.depth && Math.abs(e.j.depth - t) > 0.01) { r.push(`${e.name} 的${e.side}按板厚 ${fmt(e.j.depth)} mm 做的，现在板厚是 ${fmt(t)} mm`); f.push('depth'); }
+      return { r, f };
+    };
     byPair.forEach((list, pair) => {
-      const reasons = [];
-      if (list.length === 1) reasons.push('另一条边找不到了（可能被删掉或改成了普通边）');
-      if (list.length > 2) reasons.push(`有 ${list.length} 条边用了同一个配对`);
+      const reasons = []; const fixes = [];
+      if (list.length === 1) { reasons.push('另一条边找不到了（可能被删掉或改成了普通边）'); fixes.push('unpair'); }
+      if (list.length > 2) { reasons.push(`有 ${list.length} 条边用了同一个配对`); fixes.push('unpair'); }
       if (list.length === 2) {
         const [p, q] = list;
-        if (Math.abs(p.j.L - q.j.L) > 0.3) reasons.push(`两条边不一样长（${fmt(p.j.L)} / ${fmt(q.j.L)} mm）`);
+        const sameL = Math.abs(p.j.L - q.j.L) <= 0.3;
+        if (!sameL) reasons.push(`两条边不一样长（${fmt(p.j.L)} / ${fmt(q.j.L)} mm），要改板的尺寸`);
         const types = [p.j.type, q.j.type].sort().join('+');
-        if (types !== 'a+b') reasons.push(`齿不能互补（${typeName[p.j.type] || p.j.type} + ${typeName[q.j.type] || q.j.type}）`);
-        if (p.pid && p.pid === q.pid) reasons.push('两条边在同一块板上');
+        if (types !== 'a+b') { reasons.push(`齿不能互补（${typeName[p.j.type] || p.j.type} + ${typeName[q.j.type] || q.j.type}）`); fixes.push('complement'); }
+        else if (sameL && !SketchEditor.sameIv(p.j.iv, q.j.iv, p.j.L)) { reasons.push('齿位对不上（齿数或间隔不一样）'); fixes.push('match'); }
+        if (p.pid && p.pid === q.pid) { reasons.push('两条边在同一块板上'); fixes.push('unpair'); }
       }
-      out.pairs.push({ key: `p:${pair}`, pair, ends: list, L: list[0].j.L, k: list[0].j.k, ok: !reasons.length, reasons });
+      list.forEach((e) => { const o = own(e); reasons.push(...o.r); fixes.push(...o.f); });
+      out.pairs.push({ key: `p:${pair}`, pair, ends: list, L: list[0].j.L, k: list[0].j.k, ok: !reasons.length, reasons, fixes: [...new Set(fixes)] });
+    });
+    [...out.singles, ...out.mortises].forEach((x) => {
+      const o = own(x.ends[0]);
+      x.reasons = o.r; x.fixes = [...new Set(o.f.filter((f) => f === 'depth'))]; x.ok = !o.r.length;
     });
     // 有问题的排前面，其余按板件名
     out.pairs.sort((u, v) => (u.ok - v.ok) || u.ends[0].name.localeCompare(v.ends[0].name, 'zh'));
@@ -1569,11 +1584,12 @@ export class SketchEditor {
     const total = c.pairs.length + c.singles.length + c.mortises.length;
     if (!total && this.tool !== 'joint' && this.tool !== 'mortise') { card.classList.add('hidden'); return; }
     card.classList.remove('hidden');
-    const bad = c.pairs.filter((p) => !p.ok).length;
+    const bad = [...c.pairs, ...c.singles, ...c.mortises].filter((p) => !p.ok).length;
     this.$('.sk-conn-n').textContent = total ? `${c.pairs.length} 对${bad ? ` · ⚠ ${bad}` : ''}` : '';
     const who = (e) => `${escAttr(e.name)} · ${escAttr(e.side)}`;
-    const row = (x, title, sub, cls, why) => `<button class="sk-conn ${cls}" data-ck="${escAttr(x.key)}" title="点一下：在画板和 3D 里高亮这${x.ends.length > 1 ? '两' : ''}条边">
-      <span class="st">${cls === 'ok' ? '✓' : cls === 'warn' ? '⚠' : '·'}</span><span class="nm">${title}</span><span class="sub">${sub}</span>${why ? `<span class="why">${why}</span>` : ''}</button>`;
+    const FIX = { depth: '按现在板厚重做', match: '按 A 边重做齿位', complement: '做成互补的齿', unpair: '解除配对' };
+    const row = (x, title, sub, cls, why) => `<div class="sk-conn ${cls}" role="button" tabindex="0" data-ck="${escAttr(x.key)}" title="点一下：在画板和 3D 里高亮这${x.ends.length > 1 ? '两' : ''}条边">
+      <span class="st">${cls === 'ok' ? '✓' : cls === 'warn' ? '⚠' : '·'}</span><span class="nm">${title}</span><span class="sub">${sub}</span>${why ? `<span class="why">${why}</span>` : ''}${(x.fixes || []).length ? `<span class="fixes">${x.fixes.map((f) => `<button data-fix="${f}">${FIX[f]}</button>`).join('')}</span>` : ''}</div>`;
     let html = '';
     c.pairs.forEach((x) => {
       const t = x.ends.length >= 2 ? `${who(x.ends[0])} ↔ ${who(x.ends[1])}` : `${who(x.ends[0])} ↔ ？`;
@@ -1581,17 +1597,59 @@ export class SketchEditor {
     });
     if (c.singles.length) {
       html += '<div class="sk-conn-h">还没配对的卡榫边</div>';
-      c.singles.forEach((x) => { html += row(x, who(x.ends[0]), `${x.type} · ${fmt(x.L)} mm`, 'single', ''); });
+      c.singles.forEach((x) => { html += row(x, who(x.ends[0]), `${x.type} · ${fmt(x.L)} mm`, x.ok ? 'single' : 'warn', x.reasons.map(escAttr).join('；')); });
     }
     if (c.mortises.length) {
       html += '<div class="sk-conn-h">插槽</div>';
-      c.mortises.forEach((x) => { html += row(x, escAttr(x.ends[0].name), `插槽 · ${fmt(x.L)} mm · ${x.k} 个孔`, 'single', ''); });
+      c.mortises.forEach((x) => { html += row(x, escAttr(x.ends[0].name), `插槽 · ${fmt(x.L)} mm · ${x.k} 个孔`, x.ok ? 'single' : 'warn', x.reasons.map(escAttr).join('；')); });
     }
     if (!total) html = '<p class="sk-small">还没有连接：用「卡榫」工具先点一块板的边，再点另一块板要和它拼在一起的边，就配成一对。</p>';
     const list = this.$('.sk-conn-list');
     list.innerHTML = html;
-    list.querySelectorAll('[data-ck]').forEach((b) => b.addEventListener('click', () => this.highlightConn(b.dataset.ck)));
+    list.querySelectorAll('[data-ck]').forEach((b) => b.addEventListener('click', (ev) => {
+      const f = ev.target.closest('[data-fix]');
+      if (f) { ev.stopPropagation(); this.fixConn(b.dataset.ck, f.dataset.fix); return; }
+      this.highlightConn(b.dataset.ck);
+    }));
     if (this._hlKey) list.querySelectorAll('[data-ck]').forEach((b) => b.classList.toggle('on', b.dataset.ck === this._hlKey));
+  }
+
+  // 同一对边的齿位一致（B 边用的是 A 边的区间；方向相反时按镜像比）
+  static sameIv(u, v, L) {
+    const eq = (x, y) => x.length === y.length && x.every((q, i) => Math.abs(q[0] - y[i][0]) < 0.02 && Math.abs(q[1] - y[i][1]) < 0.02);
+    const mir = (x) => x.map(([s0, e0]) => [L - e0, L - s0]).reverse();
+    return eq(u || [], v || []) || eq(mir(u || []), v || []);
+  }
+
+  // 一键修复（B2）：整个修复只算一步撤销
+  fixConn(key, kind) {
+    const c = this.connections();
+    const x = [...c.pairs, ...c.singles, ...c.mortises].find((q) => q.key === key);
+    if (!x) return;
+    const live = (e) => {
+      const item = this.content.children.find((ch) => ch.data && ch.data.id === e.item.data.id);
+      const joint = item && (item.data.joints || []).find((q) => q.id === e.j.id);
+      return item && joint ? { item, joint } : null;
+    };
+    const t = (this.part && this.part.thickness) || 3;
+    let done = 0; let failed = 0;
+    const run = (e, opts) => { const L = live(e); if (L && this.remakeJoint(L.item, L.joint, opts)) done++; else failed++; };
+    let label = '';
+    if (kind === 'unpair') {
+      x.ends.forEach((e) => { const L = live(e); if (L) { delete L.joint.pair; done++; } });
+      label = '已解除配对（两条边保留为没配对的卡榫边）';
+    } else if (kind === 'depth') {
+      x.ends.filter((e) => e.j.depth && Math.abs(e.j.depth - t) > 0.01).forEach((e) => run(e, { depth: t }));
+      label = `已按板厚 ${fmt(t)} mm 重做齿深`;
+    } else if (kind === 'match' || kind === 'complement') {
+      // 以 A 边为准（两条都是同一种时以第一条为准），另一条按它的齿位做成互补的
+      const [p, q] = x.ends[0].j.type === 'a' || x.ends[1].j.type !== 'a' ? x.ends : [x.ends[1], x.ends[0]];
+      run(q, { type: p.j.type === 'a' ? 'b' : 'a', iv: p.j.iv });
+      label = `已按「${p.name} 的${p.side}」重做「${q.name} 的${q.side}」，两边的齿互补`;
+    }
+    if (!done) { this.toast(failed ? '这条边被改动过，没法自动修复；可以撤销后重做卡榫' : '没有需要修复的', 'error'); this.refresh(); return; }
+    this.commit(label + (failed ? `；有 ${failed} 条边被改动过，没能自动修复` : ''));
+    this.highlightConn(key);
   }
 
   // 点连接清单的一行：画板上高亮这对边并移到画面中间；3D 预览里也高亮（onHighlight 由 workshop 接上）
@@ -3166,8 +3224,24 @@ export class SketchEditor {
     const ia = path.segments.findIndex((s) => s.point.getDistance(a) < 1e-3);
     const { pts, n } = this.jointPoints(a, b, (q) => path.contains(q), this.opts.jointType, iv, depth);
     path.insertSegments(ia + 1, pts.map((q) => new this.ps.Segment(q)));
-    item.data.joints.push({ id: joint.id, ...this.jointMeta(this.opts.jointType, iv, depth, a, b, n) });
+    // 配对号要留着（原来修改后丢了，配对的另一条边就变成「半个配对」）
+    item.data.joints.push({ id: joint.id, ...(joint.pair ? { pair: joint.pair } : {}), ...this.jointMeta(this.opts.jointType, iv, depth, a, b, n) });
     this.commit(`已修改卡榫（${iv.length} 个 A 齿）`);
+  }
+
+  // 按给定的类型 / 齿区间 / 齿深重做一条卡榫边（编号、配对号、齿数设置都保留）。不提交，调用方统一 commit。
+  remakeJoint(item, joint, { type = joint.type, iv = joint.iv, depth = joint.depth } = {}) {
+    if (joint.type === 'mortise') return false;
+    const path = this.straightenEdge(item, joint);
+    if (!path) return false;
+    const a = new this.ps.Point(joint.a[0], joint.a[1]);
+    const b = new this.ps.Point(joint.b[0], joint.b[1]);
+    const ia = path.segments.findIndex((sg) => sg.point.getDistance(a) < 1e-3);
+    const { pts, n } = this.jointPoints(a, b, (q) => path.contains(q), type, iv, depth);
+    path.insertSegments(ia + 1, pts.map((q) => new this.ps.Segment(q)));
+    const k = item.data.joints.findIndex((q) => q.id === joint.id);
+    item.data.joints[k] = { ...joint, type, iv: iv.map(([s0, e0]) => [r3(s0), r3(e0)]), k: iv.length, depth, c: [a.x + n.x, a.y + n.y] };
+    return true;
   }
 
   // ---------------------------------------------------------------- 插槽（T 型连接）

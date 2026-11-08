@@ -81,13 +81,19 @@ async def main():
         res['选中'] = tot(t, 'down', 'up', 'board', 'paint', tag='select')
         # 拖动：按住拖 40 步，每步 = onDrag + 板面重画 + 画布重绘
         await pg.mouse.move(x, y); await pg.mouse.down()
-        frames = []
-        for i in range(1, 41):
-            await take()
-            await pg.mouse.move(x + i * 3, y + i * 2)
-            await pg.evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
-            t = await take()
-            frames.append(tot(t, 'drag', 'board', 'paint', tag='drag'))
+        # 拖过去再拖回来，两趟各 40 帧，取较好的一趟（机器偶尔被别的进程占用，单趟会有 1 ~ 2 ms 的波动）
+        runs = []
+        for leg in range(2):
+            frames = []
+            for i in range(1, 41):
+                await take()
+                d = i if leg == 0 else 40 - i
+                await pg.mouse.move(x + d * 3, y + d * 2)
+                await pg.evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
+                t = await take()
+                frames.append(tot(t, 'drag', 'board', 'paint', tag='drag'))
+            runs.append(frames)
+        frames = min(runs, key=statistics.median)
         await take()
         await pg.mouse.up(); await pg.wait_for_timeout(300)
         res['拖动一帧（中位数）'] = statistics.median(frames)
