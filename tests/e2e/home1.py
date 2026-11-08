@@ -29,7 +29,7 @@ async def main():
         await pg.screenshot(path=OUT + 'quick_lib.png')
         await pg.evaluate("window.SeedApp.select('ABox')"); await pg.wait_for_timeout(2500)
         assert await pg.evaluate(VIS('#btn-to-design'))
-        assert (await pg.inner_text('#btn-to-design')).startswith('放进设计')
+        assert (await pg.inner_text('#btn-to-design')).startswith('放进新设计')
         await pg.click('#btn-to-design')
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=40000)
         await pg.wait_for_timeout(800)
@@ -48,7 +48,7 @@ async def main():
         await pg.screenshot(path=OUT + 'quick_assembled.png')
         # 设计中途：去模型库再放一个 → 放进当前设计
         await pg.evaluate("window.SeedApp.select('ABox')"); await pg.wait_for_timeout(2500)
-        assert (await pg.inner_text('#btn-to-design')).startswith('放进当前设计')
+        assert (await pg.inner_text('#btn-to-design')).startswith('放进「')
         await pg.click('#btn-to-design')
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=40000)
         await pg.wait_for_timeout(800)

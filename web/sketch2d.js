@@ -694,6 +694,7 @@ export class SketchEditor {
       <div class="sk-fm-h">导出图纸（给激光机）</div>
       ${(fmts.length ? fmts : [{ value: 'svg', label: 'SVG' }]).map((f) => `<button data-fc="export" data-fa="${f.value}" class="sub"><span>${escAttr(f.label)}</span></button>`).join('')}
       <hr>
+      <button data-fc="close"><span>关闭这个项目</span></button>
       <button data-fc="home"><span>回到主页</span></button>`;
     box.addEventListener('pointerdown', (ev) => ev.stopPropagation());
     box.addEventListener('click', (ev) => {

@@ -57,25 +57,33 @@ async def main():
         assert os.path.exists(SVG) and '<path' in open(SVG, encoding='utf-8').read(), '应导出 SVG'
 
         # 改动后「新建」：先问；选「不保存」→ 空白新设计
+        # 多开：改动后「新建」= 开新标签（不问、原项目留着）
         await add_rect(90); await pg.wait_for_timeout(300)
-        await pg.keyboard.press(f'{mod}+n')
-        await pg.wait_for_selector('.sk-confirm')
-        await pg.click('.sk-confirm [data-r=cancel]')
-        assert await label() in ('测试设计 ●', '测试设计'), await label()
-        await pg.keyboard.press(f'{mod}+n'); await pg.click('.sk-confirm [data-r=discard]')
-        await pg.wait_for_timeout(2500)
+        await pg.keyboard.press(f'{mod}+n'); await pg.wait_for_timeout(2500)
+        assert not await pg.query_selector('.sk-confirm')
         assert await label() == '未命名设计', await label()
         assert await count() == n0, await count()
-
-        # 打开刚才的文件：回到 2 个新图形的版本
+        assert await pg.evaluate("document.querySelectorAll('#doc-tabs .dt-tab').length") == 2
+        # 打开已经开着的文件 → 切到那个标签（带着没保存的第 3 个图形）
+        await pick(PROJ)
+        await pg.keyboard.press(f'{mod}+o'); await pg.wait_for_timeout(3000)
+        assert await label() == '测试设计 ●', await label()
+        assert await count() == n0 + 3, (await count(), n0)
+        # 关闭这个标签：先问，选「不保存」→ 回到空白的标签
+        await pg.click('#doc-tabs .dt-tab.on .dt-x'); await pg.wait_for_selector('.sk-confirm')
+        await pg.click('.sk-confirm [data-r=discard]'); await pg.wait_for_timeout(2500)
+        assert await pg.evaluate("document.querySelectorAll('#doc-tabs .dt-tab').length") == 1
+        assert await label() == '未命名设计', await label()
+        # 再打开文件：空白标签直接复用，内容是保存过的版本（2 个新图形）
         await pick(PROJ)
         await pg.keyboard.press(f'{mod}+o'); await pg.wait_for_timeout(3000)
         await pg.wait_for_selector('#sk-host:not(.hidden)')
         assert await label() == '测试设计', await label()
         assert await count() == n0 + 2, (await count(), n0)
+        assert await pg.evaluate("document.querySelectorAll('#doc-tabs .dt-tab').length") == 1
         await pg.screenshot(path='/tmp/seedboxes-e2e/file1.png')
         await b.close()
     assert not errs, errs
-    print('PASS file1：文件菜单 新建 / 保存 / 再保存不弹框 / 导出 SVG / 改动确认 / 打开 / 最近打开；标题紧凑')
+    print('PASS file1：文件菜单 新建 / 保存 / 再保存不弹框 / 导出 SVG / 新建开新标签 / 打开已开文件切标签 / 关闭标签先确认 / 空白标签复用 / 最近打开；标题紧凑')
 
 asyncio.run(main())

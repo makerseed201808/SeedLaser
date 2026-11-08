@@ -2645,6 +2645,13 @@ window.SeedWorkshop = {
   wantSheet() { W.wantSheet = true; W.freeStash = null; },          // 新建设计：不接着上一个
   startWith(ex) { W.startEx = ex; W.freeStash = null; },
   hasDesign() { return !!W.freeStash; },
+  // 多开：快速建模「放进某个标签的设计」——把那个标签的项目数据当作要接着用的设计；null = 放进新设计
+  setStash(data) {
+    if (!data) { W.freeStash = null; W.freeStashParams = null; return; }
+    W.freeStash = JSON.parse(JSON.stringify({ disabled: data.disabled || [], edits: data.edits || {}, poses: data.poses || {},
+      sketches: data.sketches || {}, free: data.free || null }));
+    W.freeStashParams = data.params ? { ...data.params } : null;
+  },
   importToDesign() { return importToDesign(); },
   openSheet() { return openSheet(); },
   reset(name) {
@@ -2706,6 +2713,13 @@ window.SeedWorkshop = {
   },
   hasContent,
   flush() { if (sketchEd && sketchEd.opened) sketchEd.flushChange(); },
+  // 多开项目：切到别的标签 / 回主页前，把画板内容写回项目并关掉画板（不去 3D）
+  park() {
+    if (sketchEd && sketchEd.opened) sketchEd.flushChange();
+    closeEditor(true);
+    if (SF.open) { SF.open = false; $('#sf-host').classList.add('hidden'); $('#btn-sf').classList.remove('on'); }
+  },
+  get stage() { return W.stage; },
   setFileLabel(t) { if (sketchEd) sketchEd.setFileLabel(t); },
   paramsChanged: debounce(() => {
     W.stale = true;

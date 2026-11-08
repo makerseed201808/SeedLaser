@@ -36,6 +36,7 @@ function setStatus(msg) { $('#status').textContent = msg; }
 // ---- 视图切换 ----
 function showView(view) {
   state.view = view;
+  setTimeout(() => { if (typeof renderTabs === 'function') renderTabs(); }, 0);
   // 主页和自由设计不显示左侧模型库；模型库 / 分组 / 模型参数页显示
   const free = view === 'editor' && state.current === 'FreeDesign';
   $('#app').classList.toggle('no-sidebar', view === 'home' || free);
@@ -249,6 +250,18 @@ function applyThumb(el, uri, kind) {
 
 // ---- 选择生成器 → 进入编辑器 ----
 async function selectGenerator(name) {
+  if (!tabs.loading) {
+    // 在设计里去模型库：当前标签先暂存（之后「放进当前设计」回到这个标签）
+    if (name !== 'FreeDesign' && tabs.active) { tabs.returnTo = tabs.active; parkActiveKeepStash(); }
+    // 从模型库「放进设计」：回到原来的标签，或开一个新标签
+    if (name === 'FreeDesign' && !tabs.active) {
+      const back = tabs.returnTo && window.SeedWorkshop && window.SeedWorkshop.hasDesign() ? tabs.list.find((t) => t.id === tabs.returnTo) : null;
+      if (back) { back.data = null; tabs.active = back.id; state.projectPath = back.path || null; state.forcedDirty = true; }
+      else { const t = { id: `t${++tabs.seq}`, path: null, data: null, dirty: false }; tabs.list.push(t); tabs.active = t.id; state.projectPath = null; state.forcedDirty = false; }
+      tabs.returnTo = null;
+      setTimeout(renderTabs, 0);
+    }
+  }
   const myReq = ++state.reqId;
   state.current = name;
   state.hasPreview = false;
@@ -258,7 +271,10 @@ async function selectGenerator(name) {
   });
   $('#gen-name').textContent = name === 'FreeDesign' ? '设计' : name;
   $('#btn-to-design').classList.toggle('hidden', name === 'FreeDesign');
-  $('#btn-to-design').textContent = window.SeedWorkshop && window.SeedWorkshop.hasDesign() ? '放进当前设计 →' : '放进设计 →';
+  // 多开：主按钮放进最近编辑的那个设计（标签），旁边「放进新设计」开新标签
+  const target = tabs.list.find((t) => t.id === tabs.lastActive);
+  $('#btn-to-design').textContent = target ? `放进「${tabTitle(target)}」→` : '放进新设计 →';
+  $('#btn-to-new').classList.toggle('hidden', name === 'FreeDesign' || !target);
   $('#editor-back-home').querySelector('span:last-child').textContent = name === 'FreeDesign' ? '主页' : '模型库';
   $('#gen-desc').textContent = '加载中…';
   const ownerGroup = state.byName.get(name);
@@ -645,7 +661,9 @@ function fileBase(forExport) {
 }
 
 function isDirty() {
-  if (!state.current || state.savedSnap == null) return false;
+  if (!state.current) return false;
+  if (state.forcedDirty) return true;               // 从标签切回来、之前就有没保存的改动
+  if (state.savedSnap == null) return false;
   return projectSnap() !== state.savedSnap;
 }
 
@@ -661,6 +679,7 @@ function refreshFileLabel() {
   if (!ws || !ws.setFileLabel) return;
   const name = fileBase(false) || (state.current === 'FreeDesign' ? '未命名设计' : state.current || '');
   ws.setFileLabel(`${name}${isDirty() ? ' ●' : ''}`);
+  renderTabs();
   document.title = `${name}${isDirty() ? ' ●' : ''} — SeedLaser`;
 }
 
@@ -674,6 +693,7 @@ async function doSaveProject(asNew) {
     if (r.cancelled) return false;
     if (r.error) { toast(r.error, 'error'); return false; }
     state.projectPath = r.path;
+    state.forcedDirty = false;
     state.savedSnap = projectSnap();
     refreshFileLabel();
     toast(`已保存：${r.path.split(/[\\/]/).pop()}`, 'success');
@@ -693,6 +713,7 @@ async function saveNamed(name) {
     const r = await window.pywebview.api.save_project_named(project, name, state.projectPath || null);
     if (r.error) { toast(r.error, 'error'); refreshFileLabel(); return false; }
     state.projectPath = r.path;
+    state.forcedDirty = false;
     state.savedSnap = projectSnap();
     refreshFileLabel();
     const where = r.renamed ? '已改名并保存' : '已保存';
@@ -730,26 +751,13 @@ async function fileCommand(cmd, arg) {
   if (cmd === 'saveas') { await doSaveProject(true); return; }
   if (cmd === 'export') { await doSave(arg); return; }
   if (cmd === 'rename') { await saveNamed(arg); return; }
-  if (cmd === 'new') {
-    if (!(await askSaveFirst('新建'))) return;
-    state.projectPath = null;
-    if (window.SeedWorkshop) window.SeedWorkshop.wantSheet();
-    await selectGenerator('FreeDesign');
-    settleSnap();
-    return;
-  }
-  if (cmd === 'open' || cmd === 'openPath') {
-    if (!(await askSaveFirst('打开别的文件'))) return;
-    await doOpenProject(cmd === 'openPath' ? arg : undefined);
-    return;
-  }
-  if (cmd === 'home') {
-    if (!(await askSaveFirst('回到主页'))) return;
-    showView('home');
-    renderRecent();
-  }
+  if (cmd === 'new') { await newTab(); return; }                     // 多开：新建 = 新标签，当前项目留着
+  if (cmd === 'open' || cmd === 'openPath') { await doOpenProject(cmd === 'openPath' ? arg : undefined); return; }
+  if (cmd === 'close') { if (tabs.active) await closeTab(tabs.active); return; }
+  if (cmd === 'home') { goHome(); }
 }
 
+// 打开项目文件（对话框或路径）→ 在标签里打开：已经开着就切过去，当前是空白设计就复用，否则开新标签
 async function doOpenProject(path) {
   let r;
   try {
@@ -760,26 +768,181 @@ async function doOpenProject(path) {
   }
   if (!r || r.cancelled) return;
   if (r.error) { toast(r.error, 'error'); if (state.view === 'home') renderRecent(); return; }
-  const p = r.project;
-  if (p.generator === 'FreeDesign' && window.SeedWorkshop) window.SeedWorkshop.wantSheet();   // 设计项目：直接进二维画板
-  await selectGenerator(p.generator);
-  state.projectPath = r.path || null;
-  const form = $('#param-form');
-  Object.entries(p.params || {}).forEach(([k, v]) => {
-    const el = form.querySelector(`[name="${CSS.escape(k)}"]`);
-    if (!el) return;
-    if (el.type === 'checkbox') el.checked = String(v) === '1' || v === true || String(v).toLowerCase() === 'true';
-    else el.value = v;
-  });
-  if (p.laser && p.laser.cut) { state.laser = p.laser; saveLaser(); }
-  if (p.format) {
-    const opt = $('#format-select').querySelector(`option[value="${CSS.escape(p.format)}"]`);
-    if (opt) $('#format-select').value = p.format;
+  const same = r.path && tabs.list.find((t) => t.path && samePath(t.path, r.path));
+  if (same) { await activateTab(same.id); toast(`「${tabTitle(same)}」已经开着，切换过去了`, 'info'); return; }
+  const cur = activeTab();
+  if (cur && !state.projectPath && !isDirty() && !state.forcedDirty) {        // 空白新设计：直接用这个标签
+    await loadProjectData(r.project, r.path);
+  } else {
+    parkActive();
+    const t = { id: `t${++tabs.seq}`, path: r.path, data: null, dirty: false };
+    tabs.list.push(t);
+    tabs.active = t.id;
+    await loadProjectData(r.project, r.path);
   }
-  if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits, poses: p.poses, sketches: p.sketches, free: p.free });
   toast(`已打开：${fileBase(false) || '项目'}`, 'success');
-  doPreview();
-  settleSnap();
+  renderTabs();
+}
+
+// 把项目数据载入到当前界面（打开文件、切换标签共用）
+async function loadProjectData(p, path, opts = {}) {
+  tabs.loading = true;
+  try {
+    if (p.generator === 'FreeDesign' && window.SeedWorkshop) window.SeedWorkshop.wantSheet();   // 设计项目：直接进二维画板
+    await selectGenerator(p.generator);
+    state.projectPath = path || null;
+    const form = $('#param-form');
+    Object.entries(p.params || {}).forEach(([k, v]) => {
+      const el = form.querySelector(`[name="${CSS.escape(k)}"]`);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = String(v) === '1' || v === true || String(v).toLowerCase() === 'true';
+      else el.value = v;
+    });
+    if (p.laser && p.laser.cut) { state.laser = p.laser; saveLaser(); }
+    if (p.format) {
+      const opt = $('#format-select').querySelector(`option[value="${CSS.escape(p.format)}"]`);
+      if (opt) $('#format-select').value = p.format;
+    }
+    if (window.SeedWorkshop) window.SeedWorkshop.setProject({ disabled: p.disabled, edits: p.edits, poses: p.poses, sketches: p.sketches, free: p.free });
+    state.forcedDirty = !!opts.dirty;
+    doPreview();
+    settleSnap();
+  } finally {
+    tabs.loading = false;
+  }
+}
+
+// 去模型库时用：标签记下文件和改动状态，但设计内容由 workshop 的 freeStash 带着（为了「放进当前设计」）
+function parkActiveKeepStash() {
+  const t = activeTab();
+  if (!t) return;
+  if (window.SeedWorkshop) window.SeedWorkshop.flush();
+  t.data = state.current ? buildProject() : null;
+  t.path = state.projectPath;
+  t.dirty = isDirty() || !!state.forcedDirty;
+  t.title = tabTitle(t);
+  tabs.lastActive = t.id;
+  tabs.active = null;
+  renderTabs();
+}
+
+// ---- 多开项目：顶部标签栏（参考 Fusion）----
+// 当前标签的内容就是界面上的内容；其他标签把项目数据（buildProject）暂存在 t.data 里，切回来时再载入
+const tabs = { list: [], active: null, seq: 0, loading: false, returnTo: null };
+const activeTab = () => tabs.list.find((t) => t.id === tabs.active) || null;
+const samePath = (a, b) => String(a).replace(/\\/g, '/').toLowerCase() === String(b).replace(/\\/g, '/').toLowerCase();
+
+function tabTitle(t) {
+  if (t.id === tabs.active) return fileBase(false) || (state.current && state.current !== 'FreeDesign' ? state.current : '未命名设计');
+  return t.title || '未命名设计';
+}
+
+function tabDirty(t) {
+  return t.id === tabs.active ? (isDirty() || !!state.forcedDirty) : !!t.dirty;
+}
+
+// 当前标签 → 暂存（数据、文件、是否有改动），关掉画板。之后 tabs.active = null（调用方再决定去哪）
+function parkActive() {
+  const t = activeTab();
+  if (!t) return;
+  if (window.SeedWorkshop) window.SeedWorkshop.flush();
+  t.data = state.current ? buildProject() : null;
+  t.path = state.projectPath;
+  t.dirty = isDirty() || !!state.forcedDirty;
+  t.title = tabTitle(t);
+  if (window.SeedWorkshop && window.SeedWorkshop.park) window.SeedWorkshop.park();
+  tabs.lastActive = t.id;
+  tabs.active = null;
+}
+
+async function activateTab(id) {
+  if (tabs.active === id && state.view !== 'home') return;
+  const t = tabs.list.find((q) => q.id === id);
+  if (!t) return;
+  if (tabs.active !== id) parkActive();
+  tabs.active = id;
+  if (t.data) await loadProjectData(t.data, t.path, { dirty: t.dirty });
+  else await startBlankDesign();
+  t.data = null;
+  renderTabs();
+}
+
+async function startBlankDesign() {
+  tabs.loading = true;
+  try {
+    state.projectPath = null;
+    state.forcedDirty = false;
+    if (window.SeedWorkshop) window.SeedWorkshop.wantSheet();
+    await selectGenerator('FreeDesign');
+    settleSnap();
+  } finally {
+    tabs.loading = false;
+  }
+}
+
+async function newTab() {
+  parkActive();
+  const t = { id: `t${++tabs.seq}`, path: null, data: null, dirty: false };
+  tabs.list.push(t);
+  tabs.active = t.id;
+  await startBlankDesign();
+  renderTabs();
+}
+
+async function closeTab(id) {
+  const t = tabs.list.find((q) => q.id === id);
+  if (!t) return;
+  if (tabDirty(t)) {
+    if (tabs.active !== id) await activateTab(id);           // 先切过去，再问要不要保存
+    if (!(await askSaveFirst('关闭'))) return;
+  }
+  const i = tabs.list.indexOf(t);
+  const wasActive = tabs.active === id;
+  if (wasActive && window.SeedWorkshop && window.SeedWorkshop.park) window.SeedWorkshop.park();
+  tabs.list.splice(i, 1);
+  if (wasActive) {
+    tabs.active = null;
+    const next = tabs.list[i] || tabs.list[i - 1];
+    if (next) await activateTab(next.id); else goHome();
+  }
+  renderTabs();
+}
+
+function goHome() {
+  parkActive();
+  showView('home');
+  renderTabs();
+}
+
+function renderTabs() {
+  const bar = $('#doc-tabs');
+  if (!bar) return;
+  const esc = escapeHtml;
+  const home = state.view === 'home' || !tabs.active;
+  bar.innerHTML = `<button class="dt-home${home ? ' on' : ''}" data-dt="home" title="主页">⌂</button>
+    <div class="dt-list">${tabs.list.map((t) => {
+      const on = t.id === tabs.active && !home;
+      const dirty = tabDirty(t);
+      return `<div class="dt-tab${on ? ' on' : ''}" data-tab="${t.id}" title="${esc(t.path || tabTitle(t))}">
+        <span class="dt-ico">◆</span><span class="dt-name">${esc(tabTitle(t))}</span>${dirty ? '<i class="dt-dot" title="有改动还没保存"></i>' : ''}
+        <button class="dt-x" data-close="${t.id}" title="关闭">×</button></div>`;
+    }).join('')}</div>
+    <button class="dt-new" data-dt="new" title="新建设计（新标签）">＋</button>`;
+}
+
+function bindTabs() {
+  const bar = $('#doc-tabs');
+  bar.addEventListener('click', async (ev) => {
+    const x = ev.target.closest('[data-close]');
+    if (x) { ev.stopPropagation(); await closeTab(x.dataset.close); return; }
+    const b = ev.target.closest('[data-dt]');
+    if (b && b.dataset.dt === 'home') { goHome(); return; }
+    if (b && b.dataset.dt === 'new') { await newTab(); return; }
+    const t = ev.target.closest('[data-tab]');
+    if (t) await activateTab(t.dataset.tab);
+  });
+  bar.addEventListener('auxclick', (ev) => { const t = ev.target.closest('[data-tab]'); if (t && ev.button === 1) closeTab(t.dataset.tab); });  // 中键关闭
+  renderTabs();
 }
 
 // ---- 主页：最近项目、示例 ----
@@ -807,9 +970,10 @@ async function startExample(ex) {
 
 // ---- 事件 ----
 function bindEvents() {
+  bindTabs();
   $('#btn-preview').addEventListener('click', doPreview);
   $('#btn-laser').addEventListener('click', openLaserDialog);
-  $('#free-entry').addEventListener('click', async () => { state.projectPath = null; if (window.SeedWorkshop) window.SeedWorkshop.wantSheet(); await selectGenerator('FreeDesign'); settleSnap(); });
+  $('#free-entry').addEventListener('click', () => newTab());
   $('#btn-save').addEventListener('click', doSave);
   $('#btn-save-project').addEventListener('click', doSaveProject);
   $('#btn-open-project').addEventListener('click', doOpenProject);
@@ -826,7 +990,19 @@ function bindEvents() {
   $('#home-open').addEventListener('click', doOpenProject);
   document.querySelectorAll('[data-go-home]').forEach((b) => b.addEventListener('click', () => showView('home')));
   document.querySelectorAll('#home [data-ex]').forEach((b) => b.addEventListener('click', () => startExample(b.dataset.ex)));
-  $('#btn-to-design').addEventListener('click', () => window.SeedWorkshop && window.SeedWorkshop.importToDesign());
+  $('#btn-to-design').addEventListener('click', () => {
+    if (!window.SeedWorkshop) return;
+    const target = tabs.list.find((t) => t.id === tabs.lastActive);
+    window.SeedWorkshop.setStash(target ? target.data : null);
+    tabs.returnTo = target ? target.id : null;
+    window.SeedWorkshop.importToDesign();
+  });
+  $('#btn-to-new').addEventListener('click', () => {
+    if (!window.SeedWorkshop) return;
+    window.SeedWorkshop.setStash(null);
+    tabs.returnTo = null;
+    window.SeedWorkshop.importToDesign();
+  });
   $('#editor-back-group').addEventListener('click', () => {
     const g = state.byName.get(state.current);
     if (g) browseGroup(g.name); else showView('welcome');
@@ -847,7 +1023,7 @@ window.SeedApp = {
   changed: () => setTimeout(refreshFileLabel, 50),      // 画板有改动：马上刷新标题上的 ●
 };
 setInterval(refreshFileLabel, 3000);
-window.addEventListener('beforeunload', (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
+window.addEventListener('beforeunload', (ev) => { if (tabs.list.some(tabDirty)) { ev.preventDefault(); ev.returnValue = ''; } });
 
 // ---- 启动 ----
 (async () => {

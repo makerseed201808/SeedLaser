@@ -1276,3 +1276,34 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-refcap b { color: #1f2933; }
 /* 上下文栏固定高度：选中 / 没选中切换时画布不跳 */
 #sk-host .sk-numeric { height: 42px; min-height: 42px; max-height: 42px; box-sizing: border-box; padding-top: 0; padding-bottom: 0; flex: none; }
+
+/* ===== 多开项目：顶部标签栏 ===== */
+:root { --tabs-h: 36px; }
+.doc-tabs { position: fixed; top: 0; left: 0; right: 0; height: var(--tabs-h); z-index: 1050; display: flex; align-items: flex-end; gap: 4px;
+  padding: 0 8px; box-sizing: border-box; background: #e8ecf2; border-bottom: 1px solid #d3dbe6; }
+.layout { height: calc(100vh - var(--tabs-h)); margin-top: var(--tabs-h); }
+.home { height: calc(100vh - var(--tabs-h)); }
+.sk-host { top: var(--tabs-h) !important; }
+.sf-host { top: var(--tabs-h) !important; }
+.dt-home, .dt-new { flex: none; width: 32px; height: 28px; margin-bottom: 4px; padding: 0 !important; border: none !important; border-radius: 6px;
+  background: transparent; color: #4a5a70; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; }
+.dt-home:hover, .dt-new:hover { background: #d9e0ea; }
+.dt-home.on { background: #fff; color: #1f6feb; box-shadow: 0 1px 2px rgba(16,35,63,.1); }
+.dt-list { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.dt-list::-webkit-scrollbar { display: none; }
+.dt-tab { position: relative; display: flex; align-items: center; gap: 6px; height: 31px; box-sizing: border-box; padding: 0 6px 0 12px;
+  min-width: 120px; max-width: 220px; border-radius: 8px 8px 0 0; color: #4a5a70; cursor: default; flex: none; }
+.dt-tab:hover { background: #dde3ec; }
+.dt-tab.on { background: #fff; color: #10233f; box-shadow: 0 -1px 3px rgba(16,35,63,.08); }
+.dt-tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: #fff; }
+.dt-tab + .dt-tab:not(.on)::before { content: ""; position: absolute; left: -1px; top: 8px; bottom: 8px; width: 1px; background: #c7d0dc; }
+.dt-tab.on + .dt-tab::before, .dt-tab:hover::before { display: none; }
+.dt-ico { color: #f08c2e; font-size: 11px; flex: none; }
+.dt-tab.on .dt-ico { color: #f97316; }
+.dt-name { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-tab.on .dt-name { font-weight: 600; }
+.dt-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #f97316; }
+.dt-x { flex: none; width: 20px; height: 20px; padding: 0 !important; border: none !important; border-radius: 4px; background: transparent;
+  color: #7a8799; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; opacity: .6; }
+.dt-tab:hover .dt-x, .dt-tab.on .dt-x { opacity: 1; }
+.dt-x:hover { background: #c9d3e0; color: #1f2933; }

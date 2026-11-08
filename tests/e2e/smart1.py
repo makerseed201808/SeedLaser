@@ -51,7 +51,7 @@ async def main():
 
         # 2) 小圆拖到和大圆外切附近（圆心距 18.5，应吸到 18）
         import math
-        await pg.mouse.click(10, 10)
+        await pg.evaluate(f"{ED}.sel.clear(); {ED}.refresh()")
         await drag('window.__D', [110 + 13.1, 30 + 13.1])   # 距离 ≈ 18.53
         st = await pg.inner_text('.sk-status')
         await pg.screenshot(path=OUT + 'smart1_tangent.png')
