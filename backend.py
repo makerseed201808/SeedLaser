@@ -454,7 +454,7 @@ def _render_fallback_svg(name: str) -> str | None:
         data = instance.close()
         if data is None:
             return None
-        svg_bytes = data.getvalue() if hasattr(data, "getvalue") else bytes(data)
+        svg_bytes = _as_bytes(data)
         uri = "data:image/svg+xml;base64," + base64.b64encode(svg_bytes).decode("ascii")
         _cache_put(name, uri)
         return uri
@@ -576,6 +576,21 @@ def _forget_recent(path: str) -> None:
     path = os.path.abspath(path)
     _save_recent([r for r in _load_recent() if os.path.abspath(r.get("path", "")) != path])
 
+
+
+def _as_bytes(data):
+    """Boxes 的 close() 可能返回 BytesIO、文件对象（DXF 等经 pstoedit 转换的格式）或 bytes。"""
+    if hasattr(data, "getvalue"):
+        return data.getvalue()
+    if hasattr(data, "read"):
+        try:
+            return data.read()
+        finally:
+            try:
+                data.close()
+            except Exception:
+                pass
+    return bytes(data)
 
 class Api:
     def __init__(self) -> None:
@@ -1049,7 +1064,7 @@ class Api:
                     instance = None
                     if data is None:
                         return {"error": "渲染失败：无输出"}
-                    raw = data.getvalue() if hasattr(data, "getvalue") else bytes(data)
+                    raw = _as_bytes(data)
                     if to_file:
                         with open(to_file, "wb") as f:
                             f.write(raw)
@@ -1076,7 +1091,7 @@ class Api:
                 instance = None  # close 已成功，关闭善后
                 if data is None:
                     return {"error": "渲染失败：无输出"}
-                raw = data.getvalue() if hasattr(data, "getvalue") else bytes(data)
+                raw = _as_bytes(data)
                 if to_file:
                     with open(to_file, "wb") as f:
                         f.write(raw)

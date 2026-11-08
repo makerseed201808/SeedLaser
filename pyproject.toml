@@ -31,6 +31,10 @@ dependencies = [
 build = [
     "pyinstaller>=6.0",
 ]
+# 开发 / 测试用：tests/py/test_export.py 用 ezdxf 读回 DXF 校验（uv sync --extra dev）
+dev = [
+    "ezdxf>=1.1",
+]
 
 # boxes 通过 git 直接拉上游 release-1.2 标签（不污染本仓库 + 锁版本可复现）
 [tool.uv.sources]

@@ -233,7 +233,7 @@ class FreeDesign(boxes.Boxes):
             for lines in shared:
                 lines, saved = sketch2d.dedupe_lines(lines)
                 saved_total += saved
-                for pts, closed, outer in lines:
+                for pts, closed, outer in sorted(lines, key=lambda t: bool(t[2])):     # 先内孔、后外轮廓
                     self.set_source_color(Color.OUTER_CUT if outer else Color.INNER_CUT)
                     self.ctx.move_to(*pts[0])
                     for pt in pts[1:]:

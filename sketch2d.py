@@ -226,7 +226,8 @@ def draw(box: Any, sketch: dict, burn: float = 0.0, cut: bool = True, marks: boo
         ctx.stroke()
 
     if cut:
-        for pts, closed, outer in cut_polylines(sketch, burn):
+        # 先切内孔、最后切外轮廓（外轮廓先切断，零件会松动，再切内孔就会切偏）
+        for pts, closed, outer in sorted(cut_polylines(sketch, burn), key=lambda t: bool(t[2])):
             box.set_source_color(Color.OUTER_CUT if outer else Color.INNER_CUT)
             poly(pts, closed)
         box.set_source_color(Color.INNER_CUT)
