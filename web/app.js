@@ -917,7 +917,7 @@ function goHome() {
 
 function renderTabs() {
   const bar = $('#doc-tabs');
-  if (!bar) return;
+  if (!bar || tabs.renaming) return;                 // 正在标签上改名：不重画（会把输入框冲掉）
   const esc = escapeHtml;
   const home = state.view === 'home' || !tabs.active;
   bar.innerHTML = `<button class="dt-home${home ? ' on' : ''}" data-dt="home" title="主页">⌂</button>
@@ -925,10 +925,47 @@ function renderTabs() {
       const on = t.id === tabs.active && !home;
       const dirty = tabDirty(t);
       return `<div class="dt-tab${on ? ' on' : ''}" data-tab="${t.id}" title="${esc(t.path || tabTitle(t))}">
-        <span class="dt-ico">◆</span><span class="dt-name">${esc(tabTitle(t))}</span>${dirty ? '<i class="dt-dot" title="有改动还没保存"></i>' : ''}
+        <span class="dt-ico">◆</span><span class="dt-name" title="${on ? '点一下改名并保存' : '双击改名'}">${esc(tabTitle(t))}</span>${dirty ? '<i class="dt-dot" title="有改动还没保存"></i>' : ''}
         <button class="dt-x" data-close="${t.id}" title="关闭">×</button></div>`;
     }).join('')}</div>
     <button class="dt-new" data-dt="new" title="新建设计（新标签）">＋</button>`;
+}
+
+// 在标签上直接改项目名称：回车 / 点别处 = 保存（没保存过的存到「文稿/SeedLaser」，保存过的原地改名）；Esc 取消
+function startTabRename(id) {
+  if (tabs.renaming || id !== tabs.active) return;
+  const el = $(`#doc-tabs [data-tab="${id}"] .dt-name`);
+  if (!el) return;
+  const t = activeTab();
+  const cur = tabTitle(t);
+  const blank = !state.projectPath;
+  tabs.renaming = true;
+  const inp = document.createElement('input');
+  inp.className = 'dt-input';
+  inp.value = blank && cur === '未命名设计' ? '' : cur;
+  inp.placeholder = '输入项目名称，回车保存';
+  inp.maxLength = 80;
+  el.replaceWith(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    tabs.renaming = false;
+    const name = inp.value.trim();
+    renderTabs();
+    if (!save || !name) return;
+    if (name !== cur || blank) await saveNamed(name);
+    else await doSaveProject(false);
+  };
+  inp.addEventListener('keydown', (ev) => {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') finish(true);
+    else if (ev.key === 'Escape') finish(false);
+  });
+  inp.addEventListener('blur', () => finish(true));
+  inp.addEventListener('click', (ev) => ev.stopPropagation());
+  inp.addEventListener('dblclick', (ev) => ev.stopPropagation());
 }
 
 function bindTabs() {
@@ -940,7 +977,16 @@ function bindTabs() {
     if (b && b.dataset.dt === 'home') { goHome(); return; }
     if (b && b.dataset.dt === 'new') { await newTab(); return; }
     const t = ev.target.closest('[data-tab]');
-    if (t) await activateTab(t.dataset.tab);
+    if (!t) return;
+    // 点当前标签的名字 = 改名
+    if (t.dataset.tab === tabs.active && state.view !== 'home' && ev.target.closest('.dt-name')) { startTabRename(t.dataset.tab); return; }
+    await activateTab(t.dataset.tab);
+  });
+  bar.addEventListener('dblclick', async (ev) => {          // 双击任意标签 = 切过去并改名
+    const t = ev.target.closest('[data-tab]');
+    if (!t || ev.target.closest('[data-close]')) return;
+    if (t.dataset.tab !== tabs.active || state.view === 'home') await activateTab(t.dataset.tab);
+    startTabRename(t.dataset.tab);
   });
   bar.addEventListener('auxclick', (ev) => { const t = ev.target.closest('[data-tab]'); if (t && ev.button === 1) closeTab(t.dataset.tab); });  // 中键关闭
   renderTabs();

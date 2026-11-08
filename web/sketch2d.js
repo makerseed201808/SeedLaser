@@ -440,6 +440,7 @@ export class SketchEditor {
     this.redoStack = [];
     this.outlineLocked = !part.free;
     this.sheetMode = !!part.sheet;
+    this.host.classList.toggle('sheet', this.sheetMode);   // 设计画板：项目名称在顶部标签上改，这里不再显示名称块
     const oldLabels = this.$('.sk-plabels');
     if (oldLabels) oldLabels.innerHTML = '';
     this.$('[data-act=reset]').classList.toggle('hidden', this.sheetMode);

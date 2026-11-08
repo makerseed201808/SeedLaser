@@ -1307,3 +1307,12 @@ input, textarea, select { font: inherit; user-select: text; }
   color: #7a8799; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; opacity: .6; }
 .dt-tab:hover .dt-x, .dt-tab.on .dt-x { opacity: 1; }
 .dt-x:hover { background: #c9d3e0; color: #1f2933; }
+
+/* 项目名称移到顶部标签：设计画板里不再显示名称块；单块板编辑时只显示板名 */
+#sk-host.sheet .sk-proj { display: none; }
+#sk-host:not(.sheet) .sk-proj .sk-file, #sk-host:not(.sheet) .sk-proj .sk-savestate { display: none; }
+#sk-host:not(.sheet) .sk-proj { width: auto; }
+.dt-tab.on .dt-name { cursor: text; border-radius: 4px; padding: 1px 3px; margin: 0 -3px; }
+.dt-tab.on .dt-name:hover { background: #eef2f7; }
+.dt-input { flex: 1; min-width: 0; width: 140px; font-size: 12.5px; font-weight: 600; padding: 2px 5px; border: 1px solid #1f6feb; border-radius: 5px;
+  outline: none; box-shadow: 0 0 0 3px rgba(31,111,235,.15); background: #fff; color: #10233f; }
