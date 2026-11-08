@@ -59,7 +59,7 @@ SeedLaser 是 [种子创客工坊（MakerSeed）](https://github.com/makerseed) 
 - 板件数量、哪些要切，只在这里设置。
 - 导出 **SVG / LightBurn（lbrn2）**；安装 pstoedit / Ghostscript 后还可以导出 **DXF / PDF / GCode / PLT**。
 - 加工参数（速度、功率、遍数）随图纸写出一份说明。
-- **卡扣测试样**：新机器、新板材先切一组，填入卡尺读数，自动算出切缝补偿和插槽间隙。
+- **卡榫测试样**：新机器、新材料先切一组，填入卡尺读数，自动算出切缝补偿和插槽间隙。
 
 ### 主页与快速建模
 
@@ -68,7 +68,7 @@ SeedLaser 是 [种子创客工坊（MakerSeed）](https://github.com/makerseed) 
   <img src="docs/screenshots/quick.png" alt="快速建模" width="440" />
 </p>
 
-- **主页**：新建设计 / 快速建模 / 打开项目三个入口，最近项目和示例（卡扣测试样、批量名牌、基础收纳盒）。
+- **主页**：新建设计 / 快速建模 / 打开项目三个入口，最近项目和示例（卡榫测试样、批量名牌、基础收纳盒）。
 - **快速建模**：Boxes.py 的 170 多个生成器，中文界面和作品参考图；「放进设计 →」把板件连同装配位置放进二维画板。
 - **多开项目**：顶部标签栏像 Fusion 一样同时开多个项目，点标签切换，⌂ 回主页，＋ 新建。
 - **文件**：二维画板左上角「文件」菜单：新建、打开、最近打开、保存（⌘S）、另存为（⇧⌘S）、导入 SVG / DXF / 图片描摹（⌘I）、导出图纸。项目文件扩展名为 `.seedbox.json`。
@@ -172,7 +172,7 @@ SeedLaser/
 │   ├── workshop.js            设计三板块、3D 视图与装配、二维画板 ↔ 项目数据
 │   ├── sketch2d.js            二维画板（工具、属性面板、辅助线、测量、文件菜单…）
 │   ├── sketch-import.js       DXF 解析、图片二值化（描摹）
-│   ├── fit-calc.js            卡扣测试样的换算
+│   ├── fit-calc.js            卡榫测试样的换算
 │   ├── dev-bridge.js          浏览器调试时模拟 pywebview
 │   └── vendor/                paper.js、three.js
 ├── web_sketchforge/           内嵌 3D 编辑器（SketchForge-3D 构建产物，AGPL-3.0）
@@ -203,11 +203,11 @@ SeedLaser/
 ```bash
 uv run python scripts/dev_server.py &      # 先启动调试服务器
 tests/e2e/run.sh                           # 全部端到端测试（也可以 run.sh file1 bar1 只跑几个）
-node tests/js/fit_calc.test.mjs            # 卡扣测试样换算
+node tests/js/fit_calc.test.mjs            # 卡榫测试样换算
 uv run python tests/py/test_recent.py      # 最近项目 / 打开旧项目
 ```
 
-端到端测试都带断言，覆盖画板的主要操作（画图、选择移动、旋转、形状运算、测量、文件菜单、菜单栏……）和设计流程（快速建模放进设计、3D 装配无穿透、卡扣测试样换算）。每次改动后全部跑一遍。
+端到端测试都带断言，覆盖画板的主要操作（画图、选择移动、旋转、形状运算、测量、文件菜单、菜单栏……）和设计流程（快速建模放进设计、3D 装配无穿透、卡榫测试样换算）。每次改动后全部跑一遍。
 
 ---
 

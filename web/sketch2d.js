@@ -52,7 +52,7 @@ const TOOLS = [
   { id: 'text', key: 't', icon: 'T', name: '文字', tip: '单击放置文字，右侧修改内容、字体、字号（T）' },
   { id: 'joint', key: 'j', icon: '⊓', name: '卡榫', tip: '单击板的一条直边，把它做成指接卡榫 / 凹槽（深度 = 板厚）（J）' },
   { id: 'mortise', key: 'k', icon: '▤', name: '插槽', tip: '在板面上开一排插槽孔，让另一块板的指接 A 边插进来（T 型连接）；拖出插槽中线，或先在右侧选配对边再单击（K）' },
-  { id: 'bridge', key: 'b', icon: '⫶', name: '水口', tip: '在切割线上点一下加水口：留一小段不切，零件切完还连在板上不会掉，取下时用刀片划断；再点一次删除（B）' },
+  { id: 'bridge', key: 'b', icon: '⫶', name: '水口', tip: '在切割线上点一下加水口：留一小段不切，板件切完还连在材料上不会掉，取下时用刀片划断；再点一次删除（B）' },
   { id: 'trim', key: 'x', icon: '✂', name: '修剪', tip: '单击或拖过线段，删掉两个交点之间的那一段（X）' },
   { id: 'measure', key: 'm', icon: '📏', name: '测量', tip: '测量：点到点 / 点到线 / 线到线（间距、夹角）/ 圆（半径、圆心距），方式在右侧选（M）' },
   // 下面是「功能面板」：画布上照常可以选择 / 移动，右侧只显示对应的参数卡片
@@ -105,7 +105,7 @@ const newId = () => 's' + Date.now().toString(36) + (uid++).toString(36);
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const fmt = (v) => (Math.round(v * 100) / 100).toString();
 
-// 卡扣测试样校准出的插槽间隙（workshop.js 的测试样对话框写入）
+// 卡榫测试样校准出的插槽间隙（workshop.js 的测试样对话框写入）
 function savedJointPlay() {
   try { const v = Number(localStorage.getItem('seedboxes.jointPlay')); return Number.isFinite(v) ? v : 0; } catch (e) { return 0; }
 }
@@ -257,10 +257,10 @@ export class SketchEditor {
             <h4>镜像</h4>
             <div class="sk-btns">
               <button data-act="flipH" title="左右翻过来">水平镜像</button><button data-act="flipV" title="上下翻过来">垂直镜像</button>
-              <button data-act="mirCopyH" title="复制出左右对称的另一半：板上的孔 / 刻字以这块板的中线对称；其他图形紧贴在右边">左右镜像复制</button>
-              <button data-act="mirCopyV" title="复制出上下对称的另一半：板上的孔 / 刻字以这块板的中线对称；其他图形紧贴在下边">上下镜像复制</button>
+              <button data-act="mirCopyH" title="复制出左右对称的另一半：板上的孔 / 文字以这块板的中线对称；其他图形紧贴在右边">左右镜像复制</button>
+              <button data-act="mirCopyV" title="复制出上下对称的另一半：板上的孔 / 文字以这块板的中线对称；其他图形紧贴在下边">上下镜像复制</button>
             </div>
-            <p class="sk-small">「镜像」翻转选中的图形本身；「镜像复制」保留原图，再复制出对称的一份：板上的孔、刻字按这块板的中线对称；独立的图形紧贴在右边（上下镜像紧贴在下边），画一半镜像一下就是完整的对称形状。</p>
+            <p class="sk-small">「镜像」翻转选中的图形本身；「镜像复制」保留原图，再复制出对称的一份：板上的孔、文字按这块板的中线对称；独立的图形紧贴在右边（上下镜像紧贴在下边），画一半镜像一下就是完整的对称形状。</p>
           </section>
           <section class="sk-card" data-panel="transform" data-key="t-rotate">
             <h4>旋转</h4>
@@ -445,7 +445,7 @@ export class SketchEditor {
     if (oldLabels) oldLabels.innerHTML = '';
     this.$('[data-act=reset]').classList.toggle('hidden', this.sheetMode);
     this.$('.sk-back').textContent = this.sheetMode ? '3D 装配 →' : '完成 ✓';
-    this.$('.sk-back').title = this.sheetMode ? '按画好的板件生成 3D，去装配和检查' : '保存修改，回到 3D';
+    this.$('.sk-back').title = this.sheetMode ? '进入 3D 装配：按画好的板件拼装和检查' : '保存修改，回到 3D';
     this.$('.sk-name').classList.toggle('hidden', this.sheetMode);   // 设计画板：标题位置只显示文件名
     this.content.removeChildren();
     this.sel.clear();
@@ -4391,7 +4391,7 @@ export class SketchEditor {
       } else {
         html = `<h4>${editing ? '修改插槽' : '插槽（T 型连接）'}</h4>` + sizeRows + `
           <div class="sk-row"><label>孔宽<input data-o="jointDepth" type="number" min="0.1" step="0.1" value="${depth}"> mm</label>
-            <label title="插槽比板厚宽多少；用「🧪 卡扣测试样」实测得到">间隙<input data-o="jointPlay" type="number" min="-0.3" step="0.05" value="${o.jointPlay || 0}"> mm</label></div>
+            <label title="插槽比板厚宽多少；用「🧪 卡榫测试样」实测得到">间隙<input data-o="jointPlay" type="number" min="-0.3" step="0.05" value="${o.jointPlay || 0}"> mm</label></div>
           <div class="sk-row"><label class="sk-check"><input data-o="mortiseVertical" type="checkbox" ${o.mortiseVertical ? 'checked' : ''}>竖向放置</label></div>`;
       }
       if (editing) {
@@ -4407,7 +4407,7 @@ export class SketchEditor {
         <div class="sk-row"><label>宽度<input data-o="bridgeW" type="number" min="0.2" step="0.1" value="${this.opts.bridgeW}"> mm</label></div>
         <div class="sk-row"><label>每个图形<input data-o="bridgeN" type="number" min="1" step="1" value="${this.opts.bridgeN || 2}"> 个</label>
           <button data-bridge="auto">自动加</button><button data-bridge="clear">清除</button></div>
-        <p class="sk-small">在切割线上单击加一个；点橙色标记删除。「自动加」作用于选中的图形（没选时作用于所有镂空）。切完用刀片划断水口即可取下。<br>建议：每个零件 2 个、放在相对的直边上；不要放在卡榫 / 插槽边上，留下的小凸起会让榫插不进去。</p>`;
+        <p class="sk-small">在切割线上单击加一个；点橙色标记删除。「自动加」作用于选中的图形（没选时作用于所有镂空）。切完用刀片划断水口即可取下。<br>建议：每块板件 2 个、放在相对的直边上；不要放在卡榫 / 插槽边上，留下的小凸起会让榫插不进去。</p>`;
     } else if (t === 'measure') {
       const mm = this.measMode;
       const tips = { pp: '拖动，或先后点两个点（会吸附端点、中点、圆心）。Shift = 水平 / 垂直 / 45°。',
@@ -4570,7 +4570,7 @@ export class SketchEditor {
           <input type="number" data-sheet="h" value="${fmt(p.sheet.h)}" min="10" step="10" style="width:64px"> mm</p>
         <p class="sk-small">板厚（材料厚度）：
           <input type="number" data-thick value="${fmt(p.thickness || 3)}" min="0.5" max="30" step="0.1" style="width:64px"> mm</p>
-        <p class="sk-small">卡榫的齿深、插槽宽度和 3D 里板的厚度都按它来。最好用卡尺量实际厚度（或用「🧪 卡扣测试样」）。</p>
+        <p class="sk-small">卡榫的齿深、插槽宽度和 3D 里板的厚度都按它来。最好用卡尺量实际厚度（或用「🧪 卡榫测试样」）。</p>
         ${this.staleJointsHtml()}
         <p class="sk-small">每个<b>最外层的闭合切割轮廓</b>就是一块板；画在它里面的孔、雕刻和文字都属于这块板。</p>
         <p class="sk-small">两块板要拼在一起：用「卡榫」工具先点 A 板的一条边，再点 B 板的一条边，自动配成一对，3D 里会按它自动拼装。</p>

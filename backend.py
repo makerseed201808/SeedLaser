@@ -245,6 +245,12 @@ _EXTRA_TR = {
     "WallMounted": "壁挂",
     "Hole patterns": "孔洞图案",
     "Parts and Samples": "零件与示例",
+    # 术语统一（见 CLAUDE.md 术语表）：finger joint = 卡榫，不叫「榫卯结构」
+    "Finger Joint": "指接卡榫",
+    "Settings for Finger Joints": "指接卡榫的设置",
+    "finger joints": "指接卡榫",
+    "add current date etching to each piece": "在每块板件上雕刻当前日期",
+    "add identifier etching to each piece": "在每块板件上雕刻编号",
     "Misc": "其他",
     "Unstable": "实验性",
     "Generators are still untested or need manual adjustment to be useful.":
@@ -254,7 +260,7 @@ _EXTRA_TR = {
     "size of latch in multiples of thickness": "锁扣尺寸（厚度倍数）",
     "name of resulting file": "输出文件名",
     "spacing around parts (multiples of thickness [: extra space in mm])":
-        "零件之间的间距（厚度倍数 [: 额外空间(mm)]）",
+        "板件之间的间距（厚度倍数 [: 额外空间(mm)]）",
     "play when sliding the lid on (if applicable)": "盖子滑动余量（如适用）",
     "None": "无", "none": "无",
     "hbar": "横条", "vbar": "竖条",
@@ -482,7 +488,7 @@ def _write_laser_sheet(path: str, name: str, params: dict[str, Any], laser: dict
     for title, color, v in rows:
         lines.append(f"{title:<12}{color:<16}{v.get('speed', ''):>10}{v.get('power', ''):>8}{v.get('passes', ''):>6}")
     lines += ["", "红色 #FF0000 是标注（尺寸、说明），不要加工。",
-              "建议加工顺序：雕刻 → 描线 → 内孔切割 → 外轮廓切割（外轮廓最后切，零件不会提前掉落移位）。",
+              "建议加工顺序：雕刻 → 描线 → 内孔切割 → 外轮廓切割（外轮廓最后切，板件不会提前掉落移位）。",
               "参考值按 40～60W CO₂ 激光机估计；第一次请先在边角料上试切再调整。"]
     if info:
         lines += [""] + [f"· {x}" for x in info]

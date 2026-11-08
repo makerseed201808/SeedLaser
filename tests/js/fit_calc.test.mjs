@@ -1,4 +1,4 @@
-// node tests/js/fit_calc.test.mjs —— 卡扣测试样换算的单元测试
+// node tests/js/fit_calc.test.mjs —— 卡榫测试样换算的单元测试
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const src = readFileSync(new URL('../../web/fit-calc.js', import.meta.url), 'utf8');

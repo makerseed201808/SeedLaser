@@ -18,7 +18,7 @@ tests/e2e/run.sh keep1      # 单个
 | tx1 | 修改文字后直接点画布生效；文字自身不标红 | `red lens 0`，`['种子创客']` |
 | bool1 | 单选差集 = 刀 | 只剩一块板，面积 < 6000 |
 | bh | 形状运算按钮悬停示意图 | 无报错，4 张截图 |
-| fit1 | 🧪 卡扣测试样：生成 → 后端按补偿算切割线，断言 9 条槽宽 / 方块尺寸；填测量结果 → 应用 | `PASS fit1`（带断言） |
+| fit1 | 🧪 卡榫测试样：生成 → 后端按补偿算切割线，断言 9 条槽宽 / 方块尺寸；填测量结果 → 应用 | `PASS fit1`（带断言） |
 | rot1 | 旋转手柄：单击弹框输入角度（正数逆时针）；左右拖动微调（向右顺时针，2 像素 1°）；撤销 | `PASS rot1`（带断言） |
 | layers1 | 图层卡片默认收起，点左下角色块展开 / 再点收起 / ✕ 收起 | `PASS layers1`（带断言） |
 | panels1 | 右侧功能卡片随左侧「对齐 / 运算 / 阵列 / 变换」显示，画布仍可选择，再点或换工具收起 | `PASS panels1`（带断言） |
@@ -29,6 +29,6 @@ tests/e2e/run.sh keep1      # 单个
 | home1 | SeedLaser 主页三入口；快速建模 ABox「放进设计」：5 块板 + 装配位置带过来、无穿透；设计中途再放 = 放进当前设计 | `PASS home1`（带断言） |
 | sf5 | 3D 编辑器里删板 → 不改「使用」，再打开自动补回（需要 web_sketchforge 和 WebGL） | `disabled []`，`scene objects after reopen 4 map 4` |
 
-另有前端纯函数单元测试：`node tests/js/fit_calc.test.mjs`（卡扣测试样换算，含「以后切出的插槽 = 测试中最合适那条槽」不变量）。
+另有前端纯函数单元测试：`node tests/js/fit_calc.test.mjs`（卡榫测试样换算，含「以后切出的插槽 = 测试中最合适那条槽」不变量）。
 
 后端测试：`.venv/bin/python tests/py/test_recent.py`（最近项目、打开 SeedBoxes 时期的旧项目）。

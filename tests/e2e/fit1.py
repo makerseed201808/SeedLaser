@@ -1,4 +1,4 @@
-"""卡扣测试样：生成 → 取草图 → 用后端按补偿算出实际切割线，检查每条槽 / 方块的尺寸（带断言）。
+"""卡榫测试样：生成 → 取草图 → 用后端按补偿算出实际切割线，检查每条槽 / 方块的尺寸（带断言）。
 
 期望（补偿 b0 时，切割线 = 名义 ± b0）：
   槽宽 = t0 + c − 2·b0；外方 = 40 + 2·b0；内孔 = 20 − 2·b0
@@ -33,7 +33,7 @@ async def main():
         await pg.click('#free-entry')
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
         await pg.click('.sk-back'); await pg.wait_for_timeout(3000)
-        await pg.click('#stage-bar [data-stage=make]'); await pg.wait_for_timeout(2000)   # 卡扣测试样在「③ 加工作业」里
+        await pg.click('#stage-bar [data-stage=make]'); await pg.wait_for_timeout(2000)   # 卡榫测试样在「③ 加工作业」里
         await pg.evaluate("document.querySelector('#make-panel [data-k=fit]').click()"); await pg.wait_for_selector('#fit-modal:not(.hidden)')
         await pg.screenshot(path=OUT + 'fit_dialog.png')
         await pg.evaluate(f"window.__seedDebug.generateFitTest({T0}, {B0})")

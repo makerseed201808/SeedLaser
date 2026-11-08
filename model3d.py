@@ -498,7 +498,7 @@ def _part_name(p: dict, n: int) -> str:
             return backend.tr(label)
         except Exception:
             return label
-    return f"零件 {n}"
+    return f"板件 {n}"
 
 
 # ================================================================== 局部修改

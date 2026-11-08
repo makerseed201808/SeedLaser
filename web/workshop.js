@@ -574,7 +574,7 @@ async function loadModel() {
   else if (m.auto) {
     setNote(`自动装配（试验）：已拼上 ${m.placed} 块板${m.floating ? `，另有 ${m.floating} 块（隔板、盖子等）放在旁边` : ''}。` +
             '形状仅供参考，以图纸为准。', 'info');
-  } else setNote(m.assembled ? '' : '这个生成器暂不支持拼装预览，下面是所有板件平铺的样子（仍可开孔、刻字、禁用）。',
+  } else setNote(m.assembled ? '' : '这个生成器暂不支持拼装预览，下面是所有板件平铺的样子（仍可开孔、加文字、禁用）。',
                m.assembled ? '' : 'info');
   if (W.wantSheet && isFree()) { W.wantSheet = false; W.stage = 'design'; updateStageBar(); openSheet(); }
   if (isFree() && W.stage === 'make') { renderMakePanel(); if (window.SeedApp) window.SeedApp.doPreview(); }
@@ -667,7 +667,7 @@ async function openEditor(id) {
   const legacy = legacyEdits.map((e) => ({ polys: editPolys(e), mode: e.mode === 'cut' ? 'cut' : 'engrave' }));
   ED.part = p;
   const sub = p.kind === 'rect'
-    ? `内部尺寸 ${fmt(p.w)} × ${fmt(p.h)} mm · 从外面看${p.mirror ? '（导出时这块板会翻面，刻字面朝外）' : ''}`
+    ? `内部尺寸 ${fmt(p.w)} × ${fmt(p.h)} mm · 从外面看${p.mirror ? '（导出时这块板会翻面，文字面朝外）' : ''}`
     : `约 ${fmt(p.bbox[2] - p.bbox[0])} × ${fmt(p.bbox[3] - p.bbox[1])} mm`;
   await sketchEd.open({
     part: { name: p.name, sub: isFree() ? `约 ${fmt(p.w)} × ${fmt(p.h)} mm · 自由设计的板，外轮廓可以随意改` : sub, outline: partOutline(p),
@@ -940,7 +940,7 @@ function renderAssemblePanel(panel) {
   });
 }
 
-// ③ 加工作业：板件清单（是否切这块）、批量名牌、卡扣测试样；排版 / 补偿在左侧表单，导出用右上角「保存到文件」
+// ③ 加工作业：板件清单（是否切这块）、批量名牌、卡榫测试样；排版 / 补偿在左侧表单，导出用右上角「保存到文件」
 function renderMakePanel() {
   const panel = $('#make-panel');
   if (!panel) return;
@@ -954,7 +954,7 @@ function renderMakePanel() {
       <span class="mk-name">${esc(p.name)}</span><span class="mk-size">${fmt(p.w)}×${fmt(p.h)}</span></label>`).join('')}
     <div class="asm-actions">
       <button data-k="names" title="粘贴一列名字，自动生成一排名牌">📛 批量名牌</button>
-      <button data-k="fit" title="切一组小样，量出这台机器、这种板的切缝、实际板厚和插槽松紧">🧪 卡扣测试样</button>
+      <button data-k="fit" title="切一组小样，量出这台机器、这种板的切缝、实际板厚和插槽松紧">🧪 卡榫测试样</button>
     </div>
     <p class="asm-tip">左侧「排版」填材料尺寸可自动排版、共边切割；右上角「⚙ 加工参数」设速度功率，「保存到文件」导出图纸。</p>`;
   panel.querySelectorAll('input[data-id]').forEach((cb) => cb.addEventListener('change', () => {
@@ -1038,7 +1038,7 @@ function freePartForm() {
     <button data-k="auto" title="按卡榫配对把板自动拼起来">🧩 按卡榫自动拼装</button>
     <button data-k="flat" title="所有板平放在台面上">平铺</button>
     <button data-k="names" title="粘贴一列名字，自动生成一排名牌">📛 批量名牌</button>
-    <button data-k="fit" title="切一组小样，量出这台机器、这种板的切缝、实际板厚和插槽松紧">🧪 卡扣测试样</button>`;
+    <button data-k="fit" title="切一组小样，量出这台机器、这种板的切缝、实际板厚和插槽松紧">🧪 卡榫测试样</button>`;
   box.querySelector('[data-k=sheet]').addEventListener('click', () => openSheet());
   box.querySelector('[data-k=names]').addEventListener('click', () => nameplateDialog());
   box.querySelector('[data-k=fit]').addEventListener('click', () => fitTestDialog());
@@ -2169,7 +2169,7 @@ function circleSegs(cx, cy, r) {
   return [[cx + r, cy, 0, -k, 0, k], [cx, cy + r, k, 0, -k, 0], [cx - r, cy, 0, k, 0, -k], [cx, cy - r, -k, 0, k, 0]];
 }
 
-// ------------------------------------------------------------------ 卡扣测试样（实测切缝 / 板厚 / 插槽间隙）
+// ------------------------------------------------------------------ 卡榫测试样（实测切缝 / 板厚 / 插槽间隙）
 
 function rectSegs(x0, y0, w, h) {
   return [[x0, y0, 0, 0, 0, 0], [x0 + w, y0, 0, 0, 0, 0], [x0 + w, y0 + h, 0, 0, 0, 0], [x0, y0 + h, 0, 0, 0, 0]];
@@ -2229,7 +2229,7 @@ async function generateFitTest(t0, b0) {
 }
 
 async function fitTestDialog() {
-  if (!isFree()) { toast('请在「自由设计」里使用卡扣测试样', 'error'); return; }
+  if (!isFree()) { toast('请在「自由设计」里使用卡榫测试样', 'error'); return; }
   if (!W.fonts) W.fonts = await api().list_fonts();
   let m = document.getElementById('fit-modal');
   if (!m) { m = document.createElement('div'); m.id = 'fit-modal'; m.className = 'app-modal'; document.body.appendChild(m); }
@@ -2238,7 +2238,7 @@ async function fitTestDialog() {
   const ft = (W.project.free && W.project.free.fitTest) || null;
   const meas = W.fitMeas || {};
   m.innerHTML = `<div class="app-modal-box fit-box">
-    <h3>🧪 卡扣测试样</h3>
+    <h3>🧪 卡榫测试样</h3>
     <p class="muted">同一种板，不同机器、不同批次的切缝和实际厚度都不一样。切一组小样量一下，卡榫和插槽就能做到不松不紧。</p>
     <h4>① 生成测试样</h4>
     <p class="sk-small">按当前设置 <b>板厚 ${t0Now} mm · 补偿 ${b0Now} mm</b> 生成 3 块：插槽阶梯（9 条槽，比板厚窄 0.10 到宽 0.30 mm）、测量方块（外 ${FIT_SQ.outer} / 内 ${FIT_SQ.inner} mm）、插片。<b>切的时候不要改这两个参数。</b></p>
@@ -2278,7 +2278,7 @@ async function fitTestDialog() {
     q('gen').disabled = true;
     await generateFitTest(t0Now, b0Now);
     m.classList.add('hidden');
-    toast('已生成 3 块测试样。切的时候不要改板厚和补偿；切好后再点「🧪 卡扣测试样」填测量结果', 'success');
+    toast('已生成 3 块测试样。切的时候不要改板厚和补偿；切好后再点「🧪 卡榫测试样」填测量结果', 'success');
   });
   q('apply').addEventListener('click', () => {
     if (!res) return;
