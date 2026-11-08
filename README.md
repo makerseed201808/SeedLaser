@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <img src="https://img.shields.io/badge/python-3.10-blue.svg" alt="Python" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey.svg" alt="Platform" />
-  <a href="https://github.com/makerseed201808/SeedLaser/releases/tag/v0.3.0"><img src="https://img.shields.io/badge/release-v0.3.0-brightgreen.svg" alt="Release" /></a>
+  <a href="https://github.com/makerseed201808/SeedLaser/releases/tag/v0.4.0"><img src="https://img.shields.io/badge/release-v0.4.0-brightgreen.svg" alt="Release" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/更新日志-CHANGELOG-orange.svg" alt="Changelog" /></a>
 </p>
 

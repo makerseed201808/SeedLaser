@@ -1,6 +1,6 @@
 [project]
 name = "seedboxes"
-version = "0.3.0"
+version = "0.4.0"
 description = "SeedLaser — 面向 K12 的激光切割设计软件：二维设计 → 3D 装配 → 加工作业（PyWebView 桌面端，中文界面，Windows / macOS）"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
