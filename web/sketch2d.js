@@ -516,7 +516,8 @@ export class SketchEditor {
 
   addItem(it) {
     const ps = this.ps;
-    const mk = (p) => {
+    const mk = (p0) => {
+      const p = closeNearlyClosed(p0);            // 差一点闭合（导入文件常见）→ 闭合
       const path = new ps.Path({ insert: false });
       path.segments = p.segs.map((s) => new ps.Segment(new ps.Point(s[0], s[1]), new ps.Point(s[2], s[3]), new ps.Point(s[4], s[5])));
       path.closed = !!p.closed;
@@ -1468,12 +1469,20 @@ export class SketchEditor {
     return { depth, parent };
   }
 
+  static pathLoopArea(p) {
+    const segs = p.segments.map((sg) => [sg.point.x, sg.point.y, sg.handleIn.x, sg.handleIn.y, sg.handleOut.x, sg.handleOut.y]);
+    return loopArea(flattenPath({ closed: true, segs }));
+  }
+
   recognizeParts() {
     const loops = [];
     this.content.children.forEach((it) => {
       if (!it.data || it.data.mode !== 'cut') return;
       this.itemPaths(it).forEach((p) => {
-        if (p.closed && p.segments.length > 2 && Math.abs(p.area) > 1) loops.push({ item: it, path: p, area: Math.abs(p.area) });
+        if (!p.closed || p.segments.length <= 2) return;
+        // 自相交的环（蝴蝶结）paper 的 area 正负抵消接近 0，按拆开后的真实面积算
+        const area = SketchEditor.pathLoopArea(p);
+        if (area > 1) loops.push({ item: it, path: p, area });
       });
     });
     const dd = SketchEditor.loopDepths(loops.map((L) => L.path)).depth;
@@ -4575,7 +4584,68 @@ function escAttr(s) {
 }
 
 // ================================================================== 3D / 预览用：草图 → 多边形
-// 与 sketch2d.py 的 flatten_path 一致
+// 与 sketch2d.py 的 flatten_path / curve_steps / is_closed 一致
+
+const FLAT_TOL = 0.02;     // 曲线展平的最大偏差（mm）
+const CLOSE_TOL = 0.01;    // 开放路径首尾距离小于它就当成闭合（导入的文件常差 0.001 mm）
+
+/** 三次贝塞尔展平段数：按长度分段，再保证偏差 ≤ FLAT_TOL（偏差 ≤ max|B''| / 8n²，max|B''| ≤ 6 × 二阶差分）。 */
+export function curveSteps(p0, p1, p2, p3, steps = 16) {
+  const span = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) + Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) + Math.hypot(p3[0] - p2[0], p3[1] - p2[1]);
+  const m = Math.max(Math.hypot(p0[0] - 2 * p1[0] + p2[0], p0[1] - 2 * p1[1] + p2[1]),
+    Math.hypot(p1[0] - 2 * p2[0] + p3[0], p1[1] - 2 * p2[1] + p3[1]));
+  const need = m > 0 ? Math.ceil(Math.sqrt(6 * m / (8 * FLAT_TOL))) : 1;
+  return Math.max(4, Math.min(64, Math.floor(span / 1.5) + steps / 2), Math.min(1024, need));
+}
+
+/** 首尾几乎重合（< CLOSE_TOL）的开放路径 → 闭合路径（去掉重合的终点，它的入控制柄给起点）。返回新对象，不改原数据。 */
+export function closeNearlyClosed(p) {
+  const segs = p.segs || [];
+  if (p.closed || segs.length < 4) return p;
+  const f = segs[0]; const l = segs[segs.length - 1];
+  if (Math.hypot(f[0] - l[0], f[1] - l[1]) >= CLOSE_TOL) return p;
+  const out = segs.slice(0, -1);
+  out[0] = [f[0], f[1], l[2], l[3], f[4], f[5]];
+  return { ...p, closed: true, segs: out };
+}
+
+function ringArea(pts) {
+  let a = 0;
+  for (let i = 0, n = pts.length; i < n; i++) { const p = pts[i]; const q = pts[(i + 1) % n]; a += p[0] * q[1] - q[0] * p[1]; }
+  return a / 2;
+}
+
+/** 自相交的环（8 字形、蝴蝶结）在交叉点拆成几个简单环；没有自相交就原样返回 [pts]。与后端 make_valid 的结果一致。 */
+export function splitRing(pts, depth = 0) {
+  const n = pts.length;
+  if (n < 4 || depth > 64) return [pts];
+  const E = 1e-9;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i]; const b = pts[(i + 1) % n];
+    const minX = Math.min(a[0], b[0]); const maxX = Math.max(a[0], b[0]); const minY = Math.min(a[1], b[1]); const maxY = Math.max(a[1], b[1]);
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      const c = pts[j]; const d = pts[(j + 1) % n];
+      if (Math.max(c[0], d[0]) < minX || Math.min(c[0], d[0]) > maxX || Math.max(c[1], d[1]) < minY || Math.min(c[1], d[1]) > maxY) continue;
+      const rx = b[0] - a[0]; const ry = b[1] - a[1]; const sx = d[0] - c[0]; const sy = d[1] - c[1];
+      const den = rx * sy - ry * sx;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den;
+      const u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+      if (t <= E || t >= 1 - E || u <= E || u >= 1 - E) continue;
+      const x = [a[0] + t * rx, a[1] + t * ry];
+      const r1 = [x, ...pts.slice(i + 1, j + 1)];
+      const r2 = [x, ...pts.slice(j + 1), ...pts.slice(0, i + 1)];
+      return [r1, r2].filter((r) => r.length >= 3 && Math.abs(ringArea(r)) > 1e-9).flatMap((r) => splitRing(r, depth + 1));
+    }
+  }
+  return [pts];
+}
+
+/** 闭合环的真实面积（自相交的按拆开后各瓣面积之和）。 */
+export function loopArea(pts) {
+  return splitRing(pts).reduce((s, r) => s + Math.abs(ringArea(r)), 0);
+}
 
 export function flattenPath(path, steps = 16) {
   const segs = path.segs || [];
@@ -4590,8 +4660,7 @@ export function flattenPath(path, steps = 16) {
     if (!curved) { pts.push([b[0], b[1]]); continue; }
     const p0 = [a[0], a[1]]; const p1 = [a[0] + a[4], a[1] + a[5]];
     const p2 = [b[0] + b[2], b[1] + b[3]]; const p3 = [b[0], b[1]];
-    const span = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) + Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) + Math.hypot(p3[0] - p2[0], p3[1] - p2[1]);
-    const k = Math.max(4, Math.min(64, Math.floor(span / 1.5) + steps / 2));
+    const k = curveSteps(p0, p1, p2, p3, steps);
     for (let j = 1; j <= k; j++) {
       const t = j / k; const mt = 1 - t;
       const c0 = mt * mt * mt; const c1 = 3 * mt * mt * t; const c2 = 3 * mt * t * t; const c3 = t * t * t;
@@ -4609,12 +4678,13 @@ export function flattenPath(path, steps = 16) {
 export function sketchPolys(sketch) {
   const out = { cut: [], open: [], engrave: [], lines: [] };
   (sketch.items || []).forEach((it) => {
-    (it.paths || []).forEach((p) => {
+    (it.paths || []).forEach((p0) => {
+      const p = closeNearlyClosed(p0);
       const pts = flattenPath(p);
       if (pts.length < 2) return;
       const closed = p.closed && pts.length >= 3;
-      if (it.mode === 'cut') (closed ? out.cut : out.open).push(pts);
-      else if (it.mode === 'engrave' && closed) out.engrave.push(pts);
+      if (it.mode === 'cut') { if (closed) out.cut.push(...splitRing(pts)); else out.open.push(pts); }
+      else if (it.mode === 'engrave' && closed) out.engrave.push(...splitRing(pts));
       else out.lines.push(closed ? [...pts, pts[0]] : pts);
     });
   });

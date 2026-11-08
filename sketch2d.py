@@ -20,6 +20,8 @@ from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.ops import unary_union
 
 CURVE_STEPS = 16
+FLAT_TOL = 0.02        # 曲线展平的最大偏差（mm），保证 ≤ 0.05 mm 的精度要求
+CLOSE_TOL = 0.01       # 开放路径首尾距离小于它就当成闭合（导入的文件常差 0.001 mm）
 MODES = ("cut", "engrave", "score")
 
 
@@ -53,6 +55,26 @@ def _segments(path: dict) -> Iterable[tuple]:
         yield p0, p1, p2, p3, curved
 
 
+def curve_steps(p0, p1, p2, p3, steps: int = CURVE_STEPS) -> int:
+    """三次贝塞尔展平的段数：按长度分段，再保证偏差 ≤ FLAT_TOL。
+    均匀分 n 段时折线偏差 ≤ max|B''| / (8 n²)，而 max|B''| ≤ 6 × max(|p0 − 2p1 + p2|, |p1 − 2p2 + p3|)。
+    和 web/sketch2d.js 的 curveSteps 一致。"""
+    span = math.dist(p0, p1) + math.dist(p1, p2) + math.dist(p2, p3)
+    m = max(math.hypot(p0[0] - 2 * p1[0] + p2[0], p0[1] - 2 * p1[1] + p2[1]),
+            math.hypot(p1[0] - 2 * p2[0] + p3[0], p1[1] - 2 * p2[1] + p3[1]))
+    need = math.ceil(math.sqrt(6 * m / (8 * FLAT_TOL))) if m > 0 else 1
+    return max(4, min(64, int(span / 1.5) + steps // 2), min(1024, need))
+
+
+def is_closed(path: dict, pts: list) -> bool:
+    """闭合，或者首尾几乎重合（< CLOSE_TOL）的开放路径。"""
+    if len(pts) < 3:
+        return False
+    if path.get("closed"):
+        return True
+    return len(path.get("segs") or []) >= 4 and math.dist(pts[0], pts[-1]) < CLOSE_TOL
+
+
 def flatten_path(path: dict, steps: int = CURVE_STEPS) -> list[tuple[float, float]]:
     segs = path.get("segs") or []
     if not segs:
@@ -60,9 +82,7 @@ def flatten_path(path: dict, steps: int = CURVE_STEPS) -> list[tuple[float, floa
     pts = [(float(segs[0][0]), float(segs[0][1]))]
     for p0, p1, p2, p3, curved in _segments(path):
         if curved:
-            # 长曲线多分几段
-            span = math.dist(p0, p1) + math.dist(p1, p2) + math.dist(p2, p3)
-            pts.extend(_cubic(p0, p1, p2, p3, max(4, min(64, int(span / 1.5) + steps // 2))))
+            pts.extend(_cubic(p0, p1, p2, p3, curve_steps(p0, p1, p2, p3, steps)))
         else:
             pts.append(p3)
     if path.get("closed") and len(pts) > 2 and math.dist(pts[0], pts[-1]) < 1e-6:
@@ -74,18 +94,24 @@ def item_polylines(item: dict) -> list[tuple[list[tuple[float, float]], bool]]:
     out = []
     for path in item.get("paths") or []:
         pts = flatten_path(path)
-        if len(pts) >= 2:
-            out.append((pts, bool(path.get("closed")) and len(pts) >= 3))
+        if len(pts) < 2:
+            continue
+        closed = is_closed(path, pts)
+        if closed and not path.get("closed"):
+            pts = pts[:-1]          # 差一点闭合：去掉和起点几乎重合的终点
+        out.append((pts, closed))
     return out
 
 
 # ------------------------------------------------------------------ 几何
 
 def _valid(poly: Polygon):
+    """修复无效多边形。自相交（8 字形、蝴蝶结）用 make_valid 保留每一瓣；buffer(0) 会丢掉反向的那一瓣。"""
     if poly.is_valid:
         return poly
-    fixed = poly.buffer(0)
-    return fixed
+    from shapely import make_valid
+    fixed = unary_union(_polygons(make_valid(poly)))
+    return fixed if not fixed.is_empty else poly.buffer(0)
 
 
 def cut_solid(sketch: dict):
@@ -254,6 +280,21 @@ def draw(box: Any, sketch: dict, burn: float = 0.0, cut: bool = True, marks: boo
     box.set_source_color(Color.BLACK)
 
 
+def export_warnings(sketch: dict, burn: float = 0.0) -> list[str]:
+    """导出前的提示：比 2 × 补偿还小的孔，补偿后会消失（不会被切出来）。"""
+    out = []
+    if burn <= 0:
+        return out
+    gone = 0
+    for p in _polygons(cut_solid(sketch)):
+        for r in p.interiors:
+            if Polygon(r).buffer(-burn).is_empty:
+                gone += 1
+    if gone:
+        out.append(f"有 {gone} 个孔太小（比 2 × 激光补偿 {2 * burn:g} mm 还窄），补偿后会消失，不会切出来")
+    return out
+
+
 # ------------------------------------------------------------------ 编辑辅助（前端调用）
 
 def offset(paths: list[dict], distance: float, join: str = "round") -> list[list[tuple[float, float]]]:
@@ -264,7 +305,7 @@ def offset(paths: list[dict], distance: float, join: str = "round") -> list[list
         pts = flatten_path(path)
         if len(pts) < 2:
             continue
-        if path.get("closed") and len(pts) >= 3:
+        if is_closed(path, pts):
             geoms.append(_valid(Polygon(pts)).buffer(distance, join_style=js, mitre_limit=4))
         else:
             geoms.append(LineString(pts).buffer(abs(distance), join_style=js, mitre_limit=4))

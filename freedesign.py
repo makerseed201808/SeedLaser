@@ -178,6 +178,9 @@ class FreeDesign(boxes.Boxes):
         items = part_sketches(self.design)
         sw, sh = float(self.sheet_w or 0), float(self.sheet_h or 0)
         gap = max(0.0, float(self.part_gap or 0)) + 2 * burn
+        for p, sk in items:
+            for w in sketch2d.export_warnings(sk, burn):
+                self.notes.append(f"{p.get('name') or '板件'}：{w}")
         if (sw <= 0 or sh <= 0) and placed_on_sheet(items):
             # 二维画板：所见即所切，按画板上的位置导出
             sheet = ((self.design or {}).get("free") or {}).get("sheet") or {}
