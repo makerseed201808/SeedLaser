@@ -6,11 +6,13 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PY="$ROOT/.venv/bin/python"
 URL="${SEEDBOXES_URL:-http://127.0.0.1:8765}"
 export E2E_OUT="${E2E_OUT:-/tmp/seedboxes-e2e/}"
+# 标题直接保存（rename1）写到这个临时文件夹，不碰「文稿/SeedLaser」
+export SEEDLASER_PROJECT_DIR="${SEEDLASER_PROJECT_DIR:-/tmp/sl-proj}"
 if ! curl -s -o /dev/null "$URL/index.html"; then
   (cd "$ROOT" && "$PY" scripts/dev_server.py 8765 > "$E2E_OUT.devserver.log" 2>&1 &)
   for i in $(seq 1 40); do curl -s -o /dev/null "$URL/index.html" && break; sleep 0.5; done
 fi
-TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(sheet1 keep1 drag1 ov1 tx1 bool1 bh fit1 rot1 layers1 panels1 radial1 line1 thick1 stage1 home1 smart1 precise1 rcfg1 measure1 file1 info1 bar1 overview1 mirror1 sf5)
+TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(sheet1 keep1 drag1 ov1 tx1 bool1 bh fit1 rot1 layers1 panels1 radial1 line1 thick1 stage1 home1 smart1 precise1 rcfg1 measure1 file1 info1 bar1 overview1 mirror1 rename1 sf5)
 for t in "${TESTS[@]}"; do
   echo "=== $t"
   "$PY" "$ROOT/tests/e2e/$t.py" 2>&1 | grep -v "GL Driver"

@@ -117,7 +117,7 @@ export class SketchEditor {
       <div class="sk-top">
         <button class="sk-menubtn sk-filebtn" data-filemenu title="新建、打开、保存、另存为、导入、导出">文件 ▾</button>
         <button class="sk-menubtn" data-menu="edit" title="撤销、复制、粘贴、删除、编组……">编辑 ▾</button>
-        <div class="sk-title"><b class="sk-name">—</b><span class="sk-file" title="当前文件（● = 有改动还没保存）"></span></div>
+        <div class="sk-title"><b class="sk-name">—</b><span class="sk-file" title="点一下输入项目名称，回车就保存（● = 有改动还没保存）"></span></div>
         <div class="sk-group">
           <button class="sk-ico" data-act="undo" title="撤销（⌘Z）">↶</button>
           <button class="sk-ico" data-act="redo" title="重做（⇧⌘Z）">↷</button>
@@ -298,6 +298,7 @@ export class SketchEditor {
     });
     h.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => this.act(b.dataset.act, b)));
     h.querySelector('[data-filemenu]').addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleFileMenu(); });
+    h.querySelector('.sk-file').addEventListener('click', () => this.startRename());
     h.querySelectorAll('[data-menu]').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); this.toggleMenu(b.dataset.menu); }));
     h.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => {
       const v = this.ps.view;
@@ -709,7 +710,43 @@ export class SketchEditor {
 
   setFileLabel(text) {
     const el = this.$ && this.$('.sk-file');
-    if (el && el.textContent !== text) el.textContent = text;
+    if (el && !this.renaming && el.textContent !== text) el.textContent = text;
+  }
+
+  // 标题上直接改名：输入名字，回车 / 点别处 = 保存（没保存过的存到「文稿/SeedLaser」，保存过的原地改名）；Esc 取消
+  startRename() {
+    if (this.renaming) return;
+    const el = this.$('.sk-file');
+    const cur = (el.textContent || '').replace(/\s*●\s*$/, '');
+    const blank = !cur || cur === '未命名设计';
+    this.renaming = true;
+    el.classList.add('editing');
+    el.innerHTML = '';
+    const inp = document.createElement('input');
+    inp.className = 'sk-file-input';
+    inp.value = blank ? '' : cur;
+    inp.placeholder = '输入项目名称，回车保存';
+    inp.maxLength = 80;
+    el.appendChild(inp);
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      this.renaming = false;
+      el.classList.remove('editing');
+      el.textContent = cur || '未命名设计';
+      const name = inp.value.trim();
+      if (save && name && (name !== cur || blank)) this.fileCmd('rename', name);
+      else if (save && name && name === cur) this.fileCmd('save');
+    };
+    inp.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') finish(true);
+      else if (ev.key === 'Escape') finish(false);
+    });
+    inp.addEventListener('blur', () => finish(true));
+    inp.addEventListener('click', (ev) => ev.stopPropagation());
   }
 
   restore(json) {

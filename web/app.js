@@ -684,6 +684,26 @@ async function doSaveProject(asNew) {
   }
 }
 
+// 标题上直接输入名字保存：没保存过 → 存到「文稿/SeedLaser」；保存过 → 原地改名并保存
+async function saveNamed(name) {
+  if (!state.current) return false;
+  if (window.SeedWorkshop && window.SeedWorkshop.flush) window.SeedWorkshop.flush();
+  const project = buildProject();
+  try {
+    const r = await window.pywebview.api.save_project_named(project, name, state.projectPath || null);
+    if (r.error) { toast(r.error, 'error'); refreshFileLabel(); return false; }
+    state.projectPath = r.path;
+    state.savedSnap = projectSnap();
+    refreshFileLabel();
+    const where = r.renamed ? '已改名并保存' : '已保存';
+    toast(`${where}：${r.path.split(/[\\/]/).pop()}（${r.folder}）`, 'success');
+    return true;
+  } catch (err) {
+    toast('保存失败: ' + err, 'error');
+    return false;
+  }
+}
+
 // 有没保存的改动时先问一下：保存 / 不保存 / 取消（WKWebView 没有 confirm，自己画一个）
 function askSaveFirst(what) {
   if (!isDirty()) return Promise.resolve(true);
@@ -709,6 +729,7 @@ async function fileCommand(cmd, arg) {
   if (cmd === 'save') { await doSaveProject(false); return; }
   if (cmd === 'saveas') { await doSaveProject(true); return; }
   if (cmd === 'export') { await doSave(arg); return; }
+  if (cmd === 'rename') { await saveNamed(arg); return; }
   if (cmd === 'new') {
     if (!(await askSaveFirst('新建'))) return;
     state.projectPath = null;

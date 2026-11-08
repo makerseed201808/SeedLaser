@@ -837,6 +837,43 @@ class Api:
         _remember_recent(picked, project)
         return {"path": picked}
 
+    def save_project_named(self, project: dict[str, Any], name: str, current: str | None = None) -> dict[str, Any]:
+        """在标题上直接输入名字保存：
+        还没有文件 → 存到「文稿/SeedLaser」（或 SEEDLASER_PROJECT_DIR）；已经有文件 → 在同一文件夹里改名并保存。
+        已有同名文件时不覆盖，返回 {exists: True}。"""
+        import json
+        name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", str(name or "")).strip().strip(".")
+        name = re.sub(r"\.seedbox\.json$|\.json$", "", name, flags=re.I).strip()
+        if not name:
+            return {"error": "名字不能为空，也不能只有 / \\ : * ? \" < > | 这些符号"}
+        if len(name) > 80:
+            name = name[:80]
+        if current and os.path.isdir(os.path.dirname(current)):
+            folder = os.path.dirname(os.path.abspath(current))
+        else:
+            folder = os.environ.get("SEEDLASER_PROJECT_DIR") or os.path.join(os.path.expanduser("~"), "Documents", "SeedLaser")
+        target = os.path.join(folder, f"{name}.seedbox.json")
+        same = bool(current) and os.path.abspath(current) == os.path.abspath(target)
+        if not same and os.path.exists(target):
+            return {"exists": True, "path": target, "error": f"「{name}」已经有了（{folder}），换个名字，或用「文件 → 另存为」"}
+        try:
+            os.makedirs(folder, exist_ok=True)
+            tmp = target + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(project, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, target)
+        except Exception as exc:
+            return {"error": f"保存失败：{exc}"}
+        renamed = bool(current) and not same and os.path.exists(current)
+        if renamed:          # 改名：新文件写好后再删旧文件
+            try:
+                os.remove(current)
+            except Exception:
+                pass
+            _forget_recent(current)
+        _remember_recent(target, project)
+        return {"path": target, "folder": folder, "renamed": renamed}
+
     def open_project(self) -> dict[str, Any]:
         try:
             picked = self._pick(False, "", ("SeedLaser 项目 (*.json)", "All files (*.*)"))

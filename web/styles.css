@@ -1194,3 +1194,10 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-ctx-count { font-size: 12px; color: #1f6feb; white-space: nowrap; }
 .sk-top .sk-menubtn.on { background: #eef4ff !important; border-color: #1f6feb !important; color: #1f6feb !important; }
 .sk-dims { overflow: hidden; }
+
+/* 标题上直接改名 */
+.sk-file { cursor: text; padding: 2px 6px; border-radius: 6px; border: 1px solid transparent; }
+.sk-file:hover { border-color: #cfd8e3; background: #f7f9fc; }
+.sk-file.editing { padding: 0; border: none; background: none; }
+.sk-file-input { font-size: 13px; font-weight: 600; width: 180px; padding: 3px 6px; border: 1px solid #1f6feb; border-radius: 6px; outline: none; box-shadow: 0 0 0 3px rgba(31,111,235,.15); }
+.sk-title { max-width: 260px; }
