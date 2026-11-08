@@ -211,12 +211,43 @@ class View3D {
   clear() {
     this.objects.forEach((o) => { this.root.remove(o.group); disposeTree(o.group); });
     this.objects.clear();
+    this.hl = [];
+  }
+
+  // 连接清单点中的边：在对应板件的侧面上画橙色条（跟着板件的装配姿态走）。list: [{ pid, a, b }]（画板坐标）或 null
+  setHighlight(list) {
+    (this.hl || []).forEach(({ group, mesh }) => { group.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); });
+    this.hl = [];
+    this.hlList = list && list.length ? list : null;
+    if (!list || !list.length || !W.project.free) return;
+    const t = (W.model && W.model.thickness) || 3;
+    list.forEach(({ pid, a, b }) => {
+      const p = (W.project.free.parts || []).find((q) => q.id === pid);
+      const o = this.objects.get(pid);
+      if (!p || !o) return;
+      const toPart = ([x, y]) => {                    // 画板坐标 → 板件局部坐标（placeItem 的逆变换）
+        const dx = x - (p.sx || 0); const dy = y - (p.sy || 0);
+        const r = -(p.sa || 0) * Math.PI / 180;
+        return toLocal(p, [[dx * Math.cos(r) - dy * Math.sin(r), dx * Math.sin(r) + dy * Math.cos(r)]])[0];
+      };
+      const [ax, ay] = toPart(a); const [bx, by] = toPart(b);
+      const len = Math.hypot(bx - ax, by - ay);
+      if (len < 1e-6) return;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, 1.6, t + 0.8),
+        new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.85 }));
+      mesh.position.set((ax + bx) / 2, (ay + by) / 2, t / 2);
+      mesh.rotation.z = Math.atan2(by - ay, bx - ax);
+      mesh.userData.highlight = true;
+      o.group.add(mesh);
+      this.hl.push({ group: o.group, mesh });
+    });
   }
 
   setModel(model, overlay) {
     this.clear();
     model.parts.forEach((p, i) => this.buildPart(p, model.thickness, i));
     this.setOverlay(overlay);
+    if (this.hlList) this.setHighlight(this.hlList);     // 重建后保留连接清单的高亮
     this.refreshStates();
     this.fit(model);
   }
@@ -585,6 +616,7 @@ function rebuildPart(id) {
   const i = W.model.parts.findIndex((p) => p.id === id);
   if (i < 0) return;
   view.buildPart(W.model.parts[i], W.model.thickness, i);
+  if (view.hlList) view.setHighlight(view.hlList);
   view.refreshStates();
 }
 
@@ -660,6 +692,7 @@ async function openEditor(id) {
   if (!sketchEd) {
     sketchEd = new SketchEditor($('#sk-host'), { api: api(), toast });
     sketchEd.onPreviewResize = () => { if (view) { view.resize(); } };
+    sketchEd.onHighlight = (list) => { if (view && view.setHighlight) view.setHighlight(list); };
   }
   if (!W.fonts) W.fonts = await api().list_fonts();
   const legacyEdits = (W.project.edits[id] || []).filter(Boolean);
@@ -832,6 +865,7 @@ async function openSheet() {
   if (!sketchEd) {
     sketchEd = new SketchEditor($('#sk-host'), { api: api(), toast });
     sketchEd.onPreviewResize = () => { if (view) view.resize(); };
+    sketchEd.onHighlight = (list) => { if (view && view.setHighlight) view.setHighlight(list); };
   }
   if (!W.fonts) W.fonts = await api().list_fonts();
   const sheet = freeSheet();
@@ -843,7 +877,10 @@ async function openSheet() {
     sketch: composeSheet(), fonts: W.fonts, peers: [],
     onChange: (res) => {
       applySheet(res);
-      if (sketchEd.part) sketchEd.part.names = Object.fromEntries(freeParts().map((p) => [p.id, p.name]));
+      if (sketchEd.part) {
+        sketchEd.part.names = Object.fromEntries(freeParts().map((p) => [p.id, p.name]));
+        if (!sketchEd.drag) sketchEd.updateCards();         // 连接清单里的板件名跟着更新（新板刚有名字）
+      }
       clearTimeout(sheetTimer);
       sheetTimer = setTimeout(() => loadModel(), 900);    // 右下角 3D 实时预览
     },

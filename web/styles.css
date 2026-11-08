@@ -1324,3 +1324,20 @@ input, textarea, select { font: inherit; user-select: text; }
 .dt-tab.on .dt-name:hover { background: #eef2f7; }
 .dt-input { flex: 1; min-width: 0; width: 140px; font-size: 12.5px; font-weight: 600; padding: 2px 5px; border: 1px solid #1f6feb; border-radius: 5px;
   outline: none; box-shadow: 0 0 0 3px rgba(31,111,235,.15); background: #fff; color: #10233f; }
+
+/* 连接清单（B1） */
+.sk-conn-n { font-weight: 500; color: #64748b; font-size: 12px; margin-left: 4px; }
+.sk-conn-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+.sk-conn { display: grid; grid-template-columns: 18px 1fr; column-gap: 6px; text-align: left; width: 100%; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; cursor: pointer; font: inherit; }
+.sk-conn:hover { border-color: #93c5fd; background: #f8fbff; }
+.sk-host .sk-conn.on { border-color: #f97316; background: #fff7ed; color: inherit; }
+.sk-conn .st { grid-row: 1 / span 3; font-weight: 700; font-size: 13px; line-height: 18px; text-align: center; }
+.sk-conn.ok .st { color: #16a34a; }
+.sk-conn.warn { border-color: #fcd34d; background: #fffbeb; }
+.sk-host .sk-conn.warn.on { border-color: #f97316; background: #fff7ed; }
+.sk-conn.warn .st { color: #d97706; }
+.sk-conn.single .st { color: #94a3b8; }
+.sk-conn .nm { font-size: 12.5px; font-weight: 600; color: #0f172a; line-height: 18px; }
+.sk-conn .sub { font-size: 11.5px; color: #64748b; }
+.sk-conn .why { font-size: 11.5px; color: #b45309; margin-top: 2px; }
+.sk-conn-h { font-size: 11.5px; color: #64748b; margin: 6px 0 2px; }

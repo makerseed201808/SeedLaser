@@ -12,7 +12,7 @@ if ! curl -s -o /dev/null "$URL/index.html"; then
   (cd "$ROOT" && "$PY" scripts/dev_server.py 8765 > "$E2E_OUT.devserver.log" 2>&1 &)
   for i in $(seq 1 40); do curl -s -o /dev/null "$URL/index.html" && break; sleep 0.5; done
 fi
-TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(sheet1 keep1 drag1 ov1 tx1 bool1 bh fit1 rot1 layers1 panels1 radial1 line1 thick1 stage1 home1 smart1 precise1 rcfg1 measure1 file1 info1 bar1 overview1 mirror1 rename1 ref1 tabs1 migrate1 geo1 roundtrip1 boolinv1 perf1 tools_draw1 tools_edit1 tools_shape1 tools_joint1 tools_io1 exportburn1 sf5)
+TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(sheet1 keep1 drag1 ov1 tx1 bool1 bh fit1 rot1 layers1 panels1 radial1 line1 thick1 stage1 home1 smart1 precise1 rcfg1 measure1 file1 info1 bar1 overview1 mirror1 rename1 ref1 tabs1 migrate1 geo1 roundtrip1 boolinv1 perf1 tools_draw1 tools_edit1 tools_shape1 tools_joint1 tools_io1 exportburn1 conn1 sf5)
 for t in "${TESTS[@]}"; do
   echo "=== $t"
   "$PY" "$ROOT/tests/e2e/$t.py" 2>&1 | grep -v "GL Driver"

@@ -294,6 +294,10 @@ export class SketchEditor {
             <p class="sk-small">画图时这里显示当前工具的设置。右键画布有常用命令的快捷菜单。</p>
           </section>
           <section class="sk-card sk-boardinfo"></section>
+          <section class="sk-card sk-conns hidden" data-key="conns">
+            <h4>连接 <span class="sk-conn-n"></span></h4>
+            <div class="sk-conn-list"></div>
+          </section>
         </aside>
       </div>
       <div class="sk-bottom">
@@ -380,6 +384,7 @@ export class SketchEditor {
     this.guideLayer = L('guides');
     this.measureLayer = L('measure');      // 测量结果：留到下一次测量 / 换工具 / Esc
     this.overlay = L('overlay');
+    this.hlLayer = L('connhl');            // 连接清单点中的边（选择框重画时不清掉）
     this.content.activate();
     this.zoom = 4;
 
@@ -510,6 +515,7 @@ export class SketchEditor {
   // ================================================================ 数据 ↔ paper
 
   load(sketch) {
+    this.clearConnHighlight();
     this.content.removeChildren();
     sketch.items.forEach((it) => this.addItem(it));
   }
@@ -933,6 +939,7 @@ export class SketchEditor {
     if (hint) hint.classList.toggle('hidden', !idle);
     if (this.arrActive && !want.array) { this.arrActive = false; this.drawSelection(); }
     if (want.info) this.renderInfo();
+    this.renderConns(idle || this.tool === 'joint' || this.tool === 'mortise');
   }
 
   updateCounts() {
@@ -1487,6 +1494,141 @@ export class SketchEditor {
     return p._loopArea;
   }
 
+  // 同一个已提交状态只识别一次板件（只改选中、切工具时不重算）
+  partsCached() {
+    if (this.drag) return this._plR || this.recognizeParts();
+    if (!this.current || this._plKey !== this.current) { this._plR = this.recognizeParts(); this._plKey = this.current; }
+    return this._plR;
+  }
+
+  // ---------------------------------------------------------------- 连接清单（B1）
+  // 连接 = 两条带同一个 pair 的卡榫边（数据就在各图形的 data.joints 里，项目文件里本来就有）。
+  // 这里只是把它们整理成清单，不另存一份，避免两份数据对不上。
+  static edgeSide(j, b) {
+    const ax = j.a[0]; const ay = j.a[1]; const bx = j.b[0]; const by = j.b[1];
+    const tol = Math.max(0.5, (j.depth || 3) + 0.5);
+    if (Math.abs(ay - by) < 1e-6) {
+      if (Math.abs(ay - b.bottom) <= tol) return '上边';         // y 向上：屏幕上方 = paper 的 bottom
+      if (Math.abs(ay - b.top) <= tol) return '下边';
+      return '水平边';
+    }
+    if (Math.abs(ax - bx) < 1e-6) {
+      if (Math.abs(ax - b.left) <= tol) return '左边';
+      if (Math.abs(ax - b.right) <= tol) return '右边';
+      return '竖直边';
+    }
+    return '斜边';
+  }
+
+  connections() {
+    const out = { pairs: [], singles: [], mortises: [] };
+    if (!this.content) return out;
+    const { parts } = this.sheetMode ? this.partsCached() : { parts: [] };
+    const names = (this.part && this.part.names) || {};
+    const hostOf = (it) => parts.find((p) => p.item === it || p.members.includes(it));
+    const ends = [];
+    this.content.children.forEach((it) => {
+      (it.data && it.data.joints || []).forEach((j) => {
+        const host = hostOf(it);
+        const pid = host ? host.item.data.pid : null;
+        const name = host ? (names[pid] || `新板件 ${parts.indexOf(host) + 1}`) : '不在板里的图形';
+        ends.push({ item: it, j, pid, name, side: host ? SketchEditor.edgeSide(j, host.item.bounds) : '边' });
+      });
+    });
+    const typeName = { a: '指接 A', b: '指接 B', slot: '凹槽', mortise: '插槽' };
+    const byPair = new Map();
+    ends.forEach((e) => {
+      if (e.j.type === 'mortise') { out.mortises.push({ key: `m:${e.j.id}`, ends: [e], L: e.j.L, k: e.j.k }); return; }
+      if (!e.j.pair) { out.singles.push({ key: `s:${e.j.id}`, ends: [e], L: e.j.L, k: e.j.k, type: typeName[e.j.type] || e.j.type }); return; }
+      if (!byPair.has(e.j.pair)) byPair.set(e.j.pair, []);
+      byPair.get(e.j.pair).push(e);
+    });
+    byPair.forEach((list, pair) => {
+      const reasons = [];
+      if (list.length === 1) reasons.push('另一条边找不到了（可能被删掉或改成了普通边）');
+      if (list.length > 2) reasons.push(`有 ${list.length} 条边用了同一个配对`);
+      if (list.length === 2) {
+        const [p, q] = list;
+        if (Math.abs(p.j.L - q.j.L) > 0.3) reasons.push(`两条边不一样长（${fmt(p.j.L)} / ${fmt(q.j.L)} mm）`);
+        const types = [p.j.type, q.j.type].sort().join('+');
+        if (types !== 'a+b') reasons.push(`齿不能互补（${typeName[p.j.type] || p.j.type} + ${typeName[q.j.type] || q.j.type}）`);
+        if (p.pid && p.pid === q.pid) reasons.push('两条边在同一块板上');
+      }
+      out.pairs.push({ key: `p:${pair}`, pair, ends: list, L: list[0].j.L, k: list[0].j.k, ok: !reasons.length, reasons });
+    });
+    // 有问题的排前面，其余按板件名
+    out.pairs.sort((u, v) => (u.ok - v.ok) || u.ends[0].name.localeCompare(v.ends[0].name, 'zh'));
+    return out;
+  }
+
+  renderConns(show) {
+    const card = this.$('.sk-conns');
+    if (!card) return;
+    if (!this.sheetMode || !show || this.drag) { card.classList.add('hidden'); return; }
+    const c = this.connections();
+    const total = c.pairs.length + c.singles.length + c.mortises.length;
+    if (!total && this.tool !== 'joint' && this.tool !== 'mortise') { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    const bad = c.pairs.filter((p) => !p.ok).length;
+    this.$('.sk-conn-n').textContent = total ? `${c.pairs.length} 对${bad ? ` · ⚠ ${bad}` : ''}` : '';
+    const who = (e) => `${escAttr(e.name)} · ${escAttr(e.side)}`;
+    const row = (x, title, sub, cls, why) => `<button class="sk-conn ${cls}" data-ck="${escAttr(x.key)}" title="点一下：在画板和 3D 里高亮这${x.ends.length > 1 ? '两' : ''}条边">
+      <span class="st">${cls === 'ok' ? '✓' : cls === 'warn' ? '⚠' : '·'}</span><span class="nm">${title}</span><span class="sub">${sub}</span>${why ? `<span class="why">${why}</span>` : ''}</button>`;
+    let html = '';
+    c.pairs.forEach((x) => {
+      const t = x.ends.length >= 2 ? `${who(x.ends[0])} ↔ ${who(x.ends[1])}` : `${who(x.ends[0])} ↔ ？`;
+      html += row(x, t, `指接卡榫 · ${fmt(x.L)} mm · ${x.k} 个齿`, x.ok ? 'ok' : 'warn', x.reasons.map(escAttr).join('；'));
+    });
+    if (c.singles.length) {
+      html += '<div class="sk-conn-h">还没配对的卡榫边</div>';
+      c.singles.forEach((x) => { html += row(x, who(x.ends[0]), `${x.type} · ${fmt(x.L)} mm`, 'single', ''); });
+    }
+    if (c.mortises.length) {
+      html += '<div class="sk-conn-h">插槽</div>';
+      c.mortises.forEach((x) => { html += row(x, escAttr(x.ends[0].name), `插槽 · ${fmt(x.L)} mm · ${x.k} 个孔`, 'single', ''); });
+    }
+    if (!total) html = '<p class="sk-small">还没有连接：用「卡榫」工具先点一块板的边，再点另一块板要和它拼在一起的边，就配成一对。</p>';
+    const list = this.$('.sk-conn-list');
+    list.innerHTML = html;
+    list.querySelectorAll('[data-ck]').forEach((b) => b.addEventListener('click', () => this.highlightConn(b.dataset.ck)));
+    if (this._hlKey) list.querySelectorAll('[data-ck]').forEach((b) => b.classList.toggle('on', b.dataset.ck === this._hlKey));
+  }
+
+  // 点连接清单的一行：画板上高亮这对边并移到画面中间；3D 预览里也高亮（onHighlight 由 workshop 接上）
+  highlightConn(key) {
+    const c = this.connections();
+    const x = [...c.pairs, ...c.singles, ...c.mortises].find((q) => q.key === key);
+    this.clearConnHighlight();
+    if (!x) return;
+    this._hlKey = key;
+    const g = new this.ps.Group({ parent: this.hlLayer });
+    let box = null;
+    x.ends.forEach((e) => {
+      const a = new this.ps.Point(e.j.a[0], e.j.a[1]);
+      const b = new this.ps.Point(e.j.b[0], e.j.b[1]);
+      const ln = new this.ps.Path.Line({ from: a, to: b, parent: g, strokeColor: '#f97316', strokeWidth: 7, strokeScaling: false, opacity: 0.75, strokeCap: 'round' });
+      box = box ? box.unite(ln.bounds) : ln.bounds.clone();
+    });
+    if (box) {
+      const v = this.ps.view;
+      const z = Math.min(this.zoom, v.viewSize.width / (box.width * 1.6 + 60), v.viewSize.height / (box.height * 1.6 + 60));
+      this.setView(z, box.center.x, box.center.y);
+    }
+    this.$$('.sk-conn').forEach((b) => b.classList.toggle('on', b.dataset.ck === key));
+    if (this.onHighlight) this.onHighlight(x.ends.filter((e) => e.pid).map((e) => ({ pid: e.pid, a: e.j.a, b: e.j.b, depth: e.j.depth })));
+    const why = x.reasons && x.reasons.length ? `  ⚠ ${x.reasons.join('；')}` : '';
+    this.status(`${x.ends.map((e) => `${e.name} 的${e.side}`).join(' ↔ ')}${why}`);
+  }
+
+  clearConnHighlight() {
+    if (this.hlLayer) this.hlLayer.removeChildren();
+    if (this._hlKey) {
+      this._hlKey = null;
+      this.$$('.sk-conn.on').forEach((b) => b.classList.remove('on'));
+      if (this.onHighlight) this.onHighlight(null);
+    }
+  }
+
   recognizeParts() {
     const loops = [];
     this.content.children.forEach((it) => {
@@ -1552,8 +1694,7 @@ export class SketchEditor {
     box.innerHTML = '';
     if (this.drag) return;            // 拖动中不重新识别板件（每帧都算太慢），松手提交时再更新
     // 只改选中时图形没变：同一个已提交状态只识别一次
-    if (!this.current || this._plKey !== this.current) { this._plR = this.recognizeParts(); this._plKey = this.current; }
-    const { parts, loose } = this._plR;
+    const { parts, loose } = this.partsCached();
     const names = this.part.names || {};
     const v = this.ps.view;
     // 画布上不再贴「板件 N · 尺寸」标签（影响观感，用户要求）；选中后在右侧「图形信息」里看
@@ -1815,7 +1956,7 @@ export class SketchEditor {
     }
     this.closeOverlap();
     this.finishDrawing();
-    if (this.opts.jointPeer && this.opts.jointPeer.pair) this.opts.jointPeer = null;
+    if (this.opts.jointPeer && this.opts.jointPeer.pair) this.cancelPairing(true);
     if (id === 'text' && this.tool !== 'text') this.sel.clear();     // 文字工具：放新文字（不是改选中的）
     if (id !== this.tool) this.editJoint = null;
     this.tool = id;
@@ -1839,6 +1980,7 @@ export class SketchEditor {
 
   onDown(e) {
     const ev = e.event;
+    this.clearConnHighlight();
     this.closeOverlap();
     this.closeRotateBox();
     this.closeRotLabel();
@@ -2949,6 +3091,17 @@ export class SketchEditor {
       this.renderToolOpts();
       this.status(`第一条边做好了（${fmt(meta.L)} mm）。现在点另一块板上要和它拼在一起的边，会自动做成配套的 B 齿；Esc 取消配对`);
     }
+  }
+
+  // 配对做了一半就取消（Esc / 换工具）：第一条边去掉配对号，变成「没配对的卡榫边」，不留半个配对
+  cancelPairing(quiet) {
+    const pair = this.opts.jointPeer && this.opts.jointPeer.pair;
+    this.opts.jointPeer = null;
+    this.opts.jointType = 'a';
+    if (!pair) return;
+    let n = 0;
+    this.content.children.forEach((it) => (it.data && it.data.joints || []).forEach((j) => { if (j.pair === pair) { delete j.pair; n++; } }));
+    if (n === 1) this.commit(quiet ? null : '已取消配对', true);
   }
 
   // ---- 修改已有的卡榫：载入参数 → 右侧改 → 应用（先恢复成直边再重做）
@@ -4630,7 +4783,7 @@ export class SketchEditor {
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
     else if (ev.key === 'Escape' && this.radialCfg) { this.closeRadialConfig(); }
     else if (ev.key === 'Escape' && this.tool === 'measure' && (this.meas && (this.meas.a || this.meas.has))) { this.clearMeasure(); this.status('已清除测量'); }
-    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.opts.jointPeer = null; this.opts.jointType = 'a'; this.status('已取消配对'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
+    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.cancelPairing(); this.status('已取消配对：第一条边保留为没配对的卡榫边'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
       const s = ev.shiftKey ? 10 : (this.snapStep || 1);
