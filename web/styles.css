@@ -1161,6 +1161,14 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-confirm > div { background: #fff; border-radius: 12px; padding: 18px 20px 14px; width: 360px; box-shadow: 0 16px 48px rgba(0,0,0,.22); }
 .sk-confirm p { margin: 0 0 14px; font-size: 14px; line-height: 1.6; }
 .sk-confirm .row { display: flex; justify-content: flex-end; gap: 8px; }
+/* 导出前选尺寸（已补偿 / 原尺寸） */
+.sk-confirm > div.burn-ask { width: 420px; }
+.burn-ask .opt { display: block; width: 100%; text-align: left; margin: 0 0 10px; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 10px; background: #fff; cursor: pointer; font: inherit; }
+.burn-ask .opt:hover { border-color: #93c5fd; background: #f8fbff; }
+.burn-ask .opt.on { border-color: #2563eb; background: #eff6ff; }
+.burn-ask .opt b { display: block; font-size: 14px; margin-bottom: 3px; color: #0f172a; }
+.burn-ask .opt span { display: block; font-size: 12.5px; line-height: 1.55; color: #475569; }
+.burn-ask .opt em { font-style: normal; font-weight: 600; color: #b91c1c; }
 
 /* 右侧「图形信息」 */
 .sk-info { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }

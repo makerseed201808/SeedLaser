@@ -604,13 +604,46 @@ function openLaserDialog() {
   });
 }
 
+// 导出图纸前选尺寸：已补偿（文件里外轮廓外扩、内孔内缩 burn）还是原尺寸（补偿交给激光软件）。返回 'comp' / 'nominal' / null（取消）
+function askBurnMode(burn) {
+  let last = 'comp';
+  try { last = localStorage.getItem('seedlaser.exportBurn') || 'comp'; } catch (e) { /* 只在这次有效 */ }
+  return new Promise((resolve) => {
+    const box = document.createElement('div');
+    box.className = 'sk-confirm';
+    const b = fmtNum(burn);
+    box.innerHTML = `<div class="burn-ask"><p><b>导出图纸：尺寸怎么处理？</b><br>现在的激光补偿是 ${b} mm。</p>
+      <button data-r="comp" class="opt ${last === 'comp' ? 'on' : ''}"><b>已补偿</b><span>外轮廓每边外扩 ${b} mm、内孔每边内缩 ${b} mm（100 mm 的板在文件里是 ${fmtNum(100 + 2 * burn)} mm）。激光软件里<em>不要</em>再开补偿，切出来正好 100 mm。</span></button>
+      <button data-r="nominal" class="opt ${last === 'nominal' ? 'on' : ''}"><b>原尺寸</b><span>文件里就是画的尺寸（100.00 mm）。在 LaserMaker / LightBurn 里设补偿（偏移）${b} mm。</span></button>
+      <div class="row"><button data-r="cancel">取消</button></div></div>`;
+    document.body.appendChild(box);
+    box.addEventListener('click', (ev) => {
+      const t = ev.target.closest('[data-r]');
+      if (!t) return;
+      box.remove();
+      const r = t.dataset.r === 'cancel' ? null : t.dataset.r;
+      if (r) { try { localStorage.setItem('seedlaser.exportBurn', r); } catch (e) { /* 忽略 */ } }
+      resolve(r);
+    });
+  });
+}
+
+function fmtNum(v) { return String(Math.round(Number(v) * 1000) / 1000); }
+
 async function doSave(fmtArg) {
   if (!state.current) return;
   const fmt = typeof fmtArg === 'string' ? fmtArg : $('#format-select').value;
+  const params0 = collectParams();
+  const burn = Number(params0.burn) || 0;
+  let mode = 'comp';
+  if (burn > 0 && ['svg', 'svg_Ponoko', 'dxf', 'lbrn2', 'pdf', 'ps', 'plt', 'gcode'].includes(fmt)) {
+    mode = await askBurnMode(burn);
+    if (!mode) { setStatus('已取消'); return; }
+  }
   setStatus('准备保存…');
   $('#btn-save').disabled = true;
   try {
-    const params = collectParams();
+    const params = mode === 'nominal' ? { ...params0, burn: 0 } : params0;
     const project = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
     const result = await window.pywebview.api.save(state.current, params, fmt, project, state.laser, fileBase(true));
     if (result.cancelled) { setStatus('已取消'); return; }
@@ -618,7 +651,8 @@ async function doSave(fmtArg) {
     if (result.path) {
       const extra = result.notes && result.notes.length ? `（注意：${result.notes.join('；')}）` : '';
       const side = result.sidecar ? `，加工参数说明：${result.sidecar.split(/[\\/]/).pop()}` : '';
-      toast(`已保存：${result.path}${side}${extra}`, extra ? 'error' : 'success');
+      const how = burn > 0 ? (mode === 'nominal' ? `（原尺寸：激光软件里要设补偿 ${fmtNum(burn)} mm）` : `（已含激光补偿 ${fmtNum(burn)} mm：激光软件里不要再补偿）`) : '';
+      toast(`已保存：${result.path}${how}${side}${extra}`, extra ? 'error' : 'success');
       setStatus('已保存');
     }
   } catch (err) {

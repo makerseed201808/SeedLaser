@@ -53,7 +53,8 @@ async def main():
         assert await pg.is_visible('.sk-filemenu [data-fc=export][data-fa=svg]')
         await pg.wait_for_timeout(400)
         assert '测试设计' in await pg.inner_text('.sk-filemenu .sk-fm-recent'), '最近打开里应有刚保存的文件'
-        await pg.click('.sk-filemenu [data-fc=export][data-fa=svg]'); await pg.wait_for_timeout(2500)
+        await pg.click('.sk-filemenu [data-fc=export][data-fa=svg]'); await pg.wait_for_timeout(400)
+        await pg.click('.burn-ask [data-r=comp]'); await pg.wait_for_timeout(2500)          # 导出前选尺寸：已补偿
         assert os.path.exists(SVG) and '<path' in open(SVG, encoding='utf-8').read(), '应导出 SVG'
 
         # 改动后「新建」：先问；选「不保存」→ 空白新设计
