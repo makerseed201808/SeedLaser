@@ -1385,3 +1385,13 @@ input, textarea, select { font: inherit; user-select: text; }
 .sk-card .sk-row button.sk-make-go, .sk-make-go { width: 100%; padding: 7px 0; font-weight: 600; background: var(--accent); color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
 .sk-card .sk-row button.sk-make-go:hover, .sk-make-go:hover { background: var(--accent-hover); color: #fff; border: 0; }
 .sk-toolopts .sk-row label input[type=text] { width: 100%; }
+#sk-host .sk-numeric .sk-num-sm input[data-num] { width: 50px; }
+#sk-host .sk-numeric label { white-space: nowrap; }
+@media (max-width: 1400px) {
+  #sk-host .sk-numeric .sk-glabel { display: none; }
+  #sk-host .sk-numeric .sk-aligns [data-align=dh], #sk-host .sk-numeric .sk-aligns [data-align=dv], #sk-host .sk-numeric .sk-aligns .sk-sep { display: none; }   /* 分布在右侧「对齐」面板里也有 */
+  #sk-host .sk-numeric input[data-num] { width: 54px; }
+  #sk-host .sk-numeric .sk-num-sm input[data-num] { width: 44px; }
+  #sk-host .sk-numeric input[type=number]::-webkit-inner-spin-button,
+  #sk-host .sk-numeric input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+}

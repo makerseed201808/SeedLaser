@@ -187,6 +187,9 @@ export class SketchEditor {
           <button class="sk-ratio on" data-act="ratio" title="锁定宽高比">🔗</button>
           <label title="高（回车生效）">高<input data-num="h" type="number" step="0.1" min="0.1"></label>
           <label title="旋转角度，正数 = 逆时针（回车生效）">旋转<input data-num="rot" type="number" step="1" value="0"></label><span class="sk-unit">°</span>
+          <label class="sk-num-sm" title="按倍率缩放：200 = 放大一倍，50 = 缩小一半（对象原点不动，回车生效）">缩放<input data-num="pct" type="number" step="10" min="1" value="100"></label><span class="sk-unit">%</span>
+          <label class="sk-num-sm" title="向右移动多少 mm（负数向左，回车生效）">ΔX<input data-num="dx" type="number" step="1" value="0"></label>
+          <label class="sk-num-sm" title="向下移动多少 mm（负数向上，和标尺方向一样，回车生效）">ΔY<input data-num="dy" type="number" step="1" value="0"></label>
           <span class="sk-seg2 sk-ctx-ico"><button class="sk-ico" data-act="rotL" title="左转 90°（逆时针）">${barIcon('rotL')}</button><button class="sk-ico" data-act="rotR" title="右转 90°（顺时针）">${barIcon('rotR')}</button></span>
           <i class="sk-sep sk-num-sep"></i>
           <span class="sk-glabel">镜像</span>
@@ -254,10 +257,10 @@ export class SketchEditor {
           </section>
           <section class="sk-card" data-panel="transform" data-key="t-corner">
             <h4>圆角 / 倒角</h4>
-            <div class="sk-row"><label>半径<input data-opt="cornerR" type="number" min="0.1" step="0.5" value="3"> mm</label>
+            <div class="sk-row"><label>半径<input data-opt="cornerR" type="number" step="0.5" value="3" title="负数 = 以角点为圆心挖一个圆弧缺口"> mm</label>
               <button data-act="fillet" title="把选中图形的尖角变圆（节点工具下只改当前节点）">圆角</button>
               <button data-act="chamfer" title="把尖角切成斜角">倒角</button></div>
-            <p class="sk-small">作用于选中图形的所有尖角；用「节点」工具选中一个节点时只改这一个角。</p>
+            <p class="sk-small">作用于选中图形的所有尖角；用「节点」工具选中一个节点时只改这一个角。半径填负数 = 在角上挖圆弧缺口。</p>
           </section>
           <section class="sk-card" data-panel="transform" data-key="t-mirror">
             <h4>镜像</h4>
@@ -278,9 +281,19 @@ export class SketchEditor {
             <div class="sk-btns">
               <button data-act="close" data-close="path" title="把开放路径首尾相连">闭合路径</button>
               <button data-act="breakApart" title="把组合路径拆成独立图形">拆分</button>
+              <button data-act="joinPaths" title="把首尾相接的几条开放线接成一条（首尾接上时自动闭合）">连接线段</button>
               <button data-act="dedupe" title="删除完全重合的重复图形（重复的线会被激光切两遍，边缘容易烧焦）">删除重复图形</button>
             </div>
             <p class="sk-small">只有闭合的切割路径才会切出一块板；重复的线会被切两遍。</p>
+          </section>
+          <section class="sk-card" data-panel="transform" data-key="t-slot">
+            <h4>改槽宽</h4>
+            <div class="sk-row"><label>原宽<input data-opt="slotFrom" type="number" min="0.5" step="0.1" placeholder="板厚"> mm</label>
+              <label>改成<input data-opt="slotTo" type="number" min="0.5" step="0.1" placeholder="板厚"> mm</label></div>
+            <div class="sk-btns"><button data-act="slotFind" title="在选中的图形里找出这个宽度的槽，标成橙色">查找</button>
+              <button data-act="slotApply" title="把找到的槽改成新宽度（两侧各移一半，槽中线不动）">改槽宽</button></div>
+            <div class="sk-slot-info sk-small"></div>
+            <p class="sk-small">导入的图纸是按别的板厚画的：找出宽度 ≈ 原宽的缺口和长方形孔，改成新宽度，别的边不动。不填 = 当前板厚。</p>
           </section>
           <section class="sk-card" data-panel="transform" data-key="t-group">
             <h4>编组</h4>
@@ -917,7 +930,7 @@ export class SketchEditor {
   collapsedMap() {
     if (!this._collapsed) {
       try { this._collapsed = JSON.parse(localStorage.getItem('seedboxes.skCollapsed') || 'null'); } catch (e) { this._collapsed = null; }
-      if (!this._collapsed) this._collapsed = { 't-path': true, 't-group': true, array: true };
+      if (!this._collapsed) this._collapsed = { 't-path': true, 't-group': true, 't-slot': true, array: true };
     }
     return this._collapsed;
   }
@@ -2990,7 +3003,8 @@ export class SketchEditor {
   textParams(base) {
     const o = this.opts;
     return { text: o.text || '文字', font: o.font, size: o.size, spacing: o.textSpacing || 0, lineHeight: o.lineHeight || 1.25,
-      align: o.textAlign || 'center', arc: o.textLayout === 'arc' ? (Number(o.textArc) || 50) : 0, weld: !!o.textWeld, ...base };
+      align: o.textAlign || 'center', arc: o.textLayout === 'arc' ? (Number(o.textArc) || 50) : 0, weld: !!o.textWeld,
+      bold: !!o.textBold, italic: !!o.textItalic, vertical: !!o.textVertical, ...base };
   }
 
   async placeText(pt) {
@@ -4284,6 +4298,159 @@ export class SketchEditor {
     });
   }
 
+  // ---------------------------------------------------------------- 改槽宽（C8：导入的图纸换了板厚）
+  // 找两种槽：① 轮廓上的 U 形缺口（两条平行的边 + 槽底，槽底长 ≈ 原宽，中间是空的）；② 板里面的长方形孔（短边 ≈ 原宽）。
+  // 改宽时两侧各往外移 (新宽 − 原宽) / 2，槽中线不动；别的边不动。只认直线段。
+
+  slotParams() {
+    const t = this.part.thickness || 3;
+    const from = Number(this.opts.slotFrom) > 0 ? Number(this.opts.slotFrom) : t;
+    const to = Number(this.opts.slotTo) > 0 ? Number(this.opts.slotTo) : t;
+    const tol = Number(this.opts.slotTol) > 0 ? Number(this.opts.slotTol) : 0.15;
+    return { from, to, tol };
+  }
+
+  findSlots(items, from, tol) {
+    const out = [];
+    const straight = (sg) => sg.handleIn.isZero() && sg.handleOut.isZero();
+    const others = this.content.children.filter((c) => c.data && c.data.mode === 'cut' && this.itemPaths(c).some((p) => p.closed));
+    items.forEach((it) => {
+      if (!it.data || it.data.mode !== 'cut') return;
+      this.itemPaths(it).forEach((path, pi) => {
+        if (!path.closed) return;
+        const sg = path.segments;
+        const n = sg.length;
+        if (n < 4 || !sg.every(straight)) return;
+        const P = (i) => sg[((i % n) + n) % n].point;
+        // ② 长方形孔：4 个节点、对边平行相等、有一组边长 ≈ 原宽；要在别的闭合切割图形里面（是孔，不是一块细长的板）
+        if (n === 4) {
+          const e = [0, 1, 2, 3].map((i) => P(i + 1).subtract(P(i)));
+          const rect = Math.abs(e[0].dot(e[1])) < 1e-6 * e[0].length * e[1].length + 1e-6 && e[0].add(e[2]).length < 1e-3 && e[1].add(e[3]).length < 1e-3;
+          if (rect) {
+            const inside = (pi > 0 && it.className === 'CompoundPath') || others.some((o) => o !== it && o.bounds.contains(path.bounds) && this.itemPaths(o).some((q) => q.closed && q !== path && q.contains(path.bounds.center)));
+            const short = Math.abs(e[0].length - from) <= tol ? 0 : Math.abs(e[1].length - from) <= tol ? 1 : -1;
+            if (inside && short >= 0 && e[1 - short].length > from + tol) {
+              out.push({ kind: 'hole', item: it, path: pi, i: short, w: e[short].length, pts: [0, 1, 2, 3].map((i) => P(i).clone()) });
+              return;
+            }
+          }
+        }
+        // ① U 形缺口：边 e1 = P(i-1)→P(i)、槽底 e2 = P(i)→P(i+1)、e3 = P(i+1)→P(i+2)
+        for (let i = 0; i < n; i++) {
+          const e1 = P(i).subtract(P(i - 1)), e2 = P(i + 1).subtract(P(i)), e3 = P(i + 2).subtract(P(i + 1));
+          const L2 = e2.length;
+          if (Math.abs(L2 - from) > tol || e1.length < 0.3 || e3.length < 0.3) continue;
+          const u = e2.divide(L2);
+          if (Math.abs(e1.normalize().dot(u)) > 0.02 || Math.abs(e3.normalize().dot(u)) > 0.02) continue;     // 两边和槽底垂直
+          if (e1.normalize().dot(e3.normalize()) > -0.999) continue;                                         // 两边平行、方向相反
+          const q = P(i).add(e2.divide(2)).subtract(e1.normalize().multiply(Math.min(0.2, e1.length / 4)));  // 槽里的一点
+          if (path.contains(q)) continue;                                                                    // 中间是材料：是凸齿，不是槽
+          out.push({ kind: 'notch', item: it, path: pi, i, w: L2, pts: [P(i - 1).clone(), P(i).clone(), P(i + 1).clone(), P(i + 2).clone()] });
+        }
+      });
+    });
+    return out;
+  }
+
+  showSlots(list) {
+    if (this.slotLayer) this.slotLayer.remove();
+    this.slotLayer = new this.ps.Group({ parent: this.overlay });
+    list.forEach((s) => this.slotLayer.addChild(new this.ps.Path({ segments: s.pts, closed: s.kind === 'hole', strokeColor: '#f97316', strokeWidth: 3, strokeScaling: false, opacity: 0.85 })));
+  }
+
+  slotFind() {
+    if (!this.need(1, '先选中要改的图形（可以框选整张图）')) return null;
+    const { from, tol } = this.slotParams();
+    const list = this.findSlots([...this.sel], from, tol);
+    this.showSlots(list);
+    const info = this.$('.sk-slot-info');
+    const msg = list.length ? `找到 ${list.length} 个宽 ${fmt(from)} mm 的槽（${list.filter((s) => s.kind === 'notch').length} 个缺口、${list.filter((s) => s.kind === 'hole').length} 个孔），已标成橙色`
+      : `没找到宽 ${fmt(from)} mm（± ${fmt(tol)}）的槽`;
+    if (info) info.textContent = msg;
+    this.status(msg);
+    return list;
+  }
+
+  slotApply() {
+    if (!this.need(1, '先选中要改的图形（可以框选整张图）')) return;
+    const { from, to, tol } = this.slotParams();
+    if (Math.abs(to - from) < 1e-6) { this.toast('新槽宽和原槽宽一样', 'error'); return; }
+    const list = this.findSlots([...this.sel], from, tol);
+    if (!list.length) { this.slotFind(); return; }
+    const d = (to - from) / 2;
+    // 先算好每个节点要挪多少（相邻的槽共用节点时累加），再一起挪
+    const moves = new Map();
+    const add = (it, pi, idx, v) => { const k = `${it.data.id}|${pi}|${idx}`; const m = moves.get(k); moves.set(k, { it, pi, idx, v: m ? m.v.add(v) : v }); };
+    list.forEach((s) => {
+      const path = this.itemPaths(s.item)[s.path];
+      const n = path.segments.length;
+      if (s.kind === 'hole') {
+        const P = (i) => path.segments[i % 4].point;
+        const e = P(s.i + 1).subtract(P(s.i)).normalize();     // 短边方向：长边沿它往外移
+        const mid = path.bounds.center;
+        [0, 1, 2, 3].forEach((k) => { const side = P(k).subtract(mid).dot(e) >= 0 ? 1 : -1; add(s.item, s.path, k, e.multiply(side * d)); });
+      } else {
+        const u = s.pts[2].subtract(s.pts[1]).normalize();
+        [-1, 0].forEach((k) => add(s.item, s.path, ((s.i + k) % n + n) % n, u.multiply(-d)));
+        [1, 2].forEach((k) => add(s.item, s.path, (s.i + k) % n, u.multiply(d)));
+      }
+    });
+    moves.forEach(({ it, pi, idx, v }) => { const sg = this.itemPaths(it)[pi].segments[idx]; sg.point = sg.point.add(v); });
+    list.forEach((s) => { if (s.item.data.text) this.convertText(s.item); });
+    if (this.slotLayer) { this.slotLayer.remove(); this.slotLayer = null; }
+    const info = this.$('.sk-slot-info');
+    if (info) info.textContent = '';
+    this.commit(`已把 ${list.length} 个槽从 ${fmt(from)} mm 改成 ${fmt(to)} mm`);
+  }
+
+  // 连接线段（C9）：选中的开放线，端点重合（≤ 0.05 mm）的接成一条；整条首尾接上时闭合
+  joinPaths() {
+    const tol = 0.05;
+    let its = [...this.sel].filter((it) => it.className === 'Path' && !it.closed && it.segments.length >= 2 && it.data && !it.data.text);
+    if (its.length < 2) { this.toast('先选中两条以上首尾相接的开放线', 'error'); return; }
+    const n0 = its.length;
+    const ends = (p) => [p.firstSegment.point, p.lastSegment.point];
+    let merged = true;
+    while (merged) {
+      merged = false;
+      for (let a = 0; a < its.length && !merged; a++) {
+        for (let b = 0; b < its.length && !merged; b++) {
+          if (a === b) continue;
+          const A = its[a], B = its[b];
+          const [a0, a1] = ends(A), [b0, b1] = ends(B);
+          if (a1.getDistance(b0) <= tol || a1.getDistance(b1) <= tol || a0.getDistance(b0) <= tol || a0.getDistance(b1) <= tol) {
+            if (a0.getDistance(b0) <= tol || a1.getDistance(b1) <= tol) B.reverse();
+            const [c0] = ends(B);
+            if (A.lastSegment.point.getDistance(c0) <= tol) {        // A 尾 → B 头
+              const segs = B.segments.slice(1).map((sg) => sg.clone());
+              A.lastSegment.handleOut = B.firstSegment.handleOut.clone();
+              A.addSegments(segs);
+            } else {                                                  // B 尾 → A 头
+              const segs = B.segments.slice(0, -1).map((sg) => sg.clone());
+              A.firstSegment.handleIn = B.lastSegment.handleIn.clone();
+              A.insertSegments(0, segs);
+            }
+            B.remove();
+            this.sel.delete(B);
+            its = its.filter((x) => x !== B);
+            merged = true;
+          }
+        }
+      }
+    }
+    let closed = 0;
+    its.forEach((p) => {
+      if (p.segments.length > 2 && p.firstSegment.point.getDistance(p.lastSegment.point) <= tol) {
+        p.firstSegment.handleIn = p.lastSegment.handleIn.clone();
+        p.lastSegment.remove();
+        p.closed = true;
+        closed++;
+      }
+    });
+    if (its.length === n0) { this.toast('没有首尾相接的线（端点要重合，误差 ≤ 0.05 mm）', 'error'); return; }
+    this.commit(`已把 ${n0} 条线连成 ${its.length} 条${closed ? `（${closed} 条首尾接上，已闭合）` : ''}`);
+  }
+
   // ---------------------------------------------------------------- 测量
 
   // 四种方式：pp 点到点（拖动或点两下）/ pl 点到线（垂直距离）/ ll 线到线（平行间距、最近距离、夹角）/ cc 圆（半径直径、圆心距）
@@ -4566,6 +4733,7 @@ export class SketchEditor {
       keys: () => this.showKeys(), tour: () => this.startTour(),
       mirCopyH: () => this.mirrorCopy(true), mirCopyV: () => this.mirrorCopy(false),
       autoLayout: () => this.autoLayout(),
+      slotFind: () => this.slotFind(), slotApply: () => this.slotApply(), joinPaths: () => this.joinPaths(),
       lock: () => this.lockSel(true), hide: () => this.hideSel(), unlockAll: () => this.unlockAll(), showAll: () => this.showAll(),
       toggle3d: () => {
         const box = this.$('.sk-3d');
@@ -5291,6 +5459,17 @@ export class SketchEditor {
     const u2 = next.point.subtract(P).divide(lb);
     const theta = Math.acos(Math.max(-1, Math.min(1, u1.dot(u2))));
     if (theta > Math.PI * 179 / 180 || theta < 1e-3) return false;
+    if (r < 0 && !chamfer) {                    // 负半径：以角点为圆心挖一个圆弧缺口（凹进去）
+      const R = Math.min(-r, la * 0.49, lb * 0.49);
+      const A = P.add(u1.multiply(R)), B = P.add(u2.multiply(R));
+      const c = u1.dot(u2);
+      const t1 = u2.subtract(u1.multiply(c)).normalize(), t2 = u1.subtract(u2.multiply(c)).normalize();   // 圆弧在两端的切线（朝角里面）
+      const k = (4 / 3) * Math.tan(theta / 4) * R;
+      seg.point = A;
+      seg.handleOut = t1.multiply(k);
+      path.insert(i + 1, new this.ps.Segment(B, t2.multiply(k), null));
+      return true;
+    }
     let d = chamfer ? r : r / Math.tan(theta / 2);
     d = Math.min(d, la * 0.49, lb * 0.49);
     const T1 = P.add(u1.multiply(d));
@@ -5309,7 +5488,7 @@ export class SketchEditor {
 
   cornerSel(chamfer) {
     const r = Number(this.opts.cornerR) || 0;
-    if (r <= 0) { this.toast('半径要大于 0', 'error'); return; }
+    if (r === 0 || (chamfer && r < 0)) { this.toast(chamfer ? '倒角距离要大于 0' : '半径不能是 0（负数 = 挖圆弧缺口）', 'error'); return; }
     let n = 0;
     if (this.tool === 'node' && this.activeSeg && this.activeSeg.path) {
       const it = this.topItem(this.activeSeg.path);
@@ -5327,7 +5506,7 @@ export class SketchEditor {
       });
     }
     if (!n) { this.toast('没有可以处理的尖角（只处理两边都是直线的角）', 'error'); return; }
-    this.commit(`已${chamfer ? '倒角' : '圆角'} ${n} 个角（${fmt(r)} mm）`);
+    this.commit(r < 0 ? `已在 ${n} 个角挖圆弧缺口（半径 ${fmt(-r)} mm）` : `已${chamfer ? '倒角' : '圆角'} ${n} 个角（${fmt(r)} mm）`);
   }
 
   // ================================================================ 快捷键 / 新手引导
@@ -5407,11 +5586,12 @@ export class SketchEditor {
     // 上下文栏：没选中 = 材料 / 板厚 / 板件数 / 新图形的加工方式；选中 = 数量 + 位置尺寸 + 对齐 + 复制 / 删除
     this.$('.sk-ctx-idle').classList.toggle('hidden', !!b);
     this.$('.sk-ctx-sel').classList.toggle('hidden', !b);
-    if (!b) { ['x', 'y', 'w', 'h'].forEach((k) => set(k, '')); set('rot', 0); this.renderCtxData(); return; }
+    if (!b) { ['x', 'y', 'w', 'h'].forEach((k) => set(k, '')); set('rot', 0); set('pct', 100); set('dx', 0); set('dy', 0); this.renderCtxData(); return; }
     this.$('.sk-ctx-count').textContent = `选中 ${this.sel.size} 个`;
     this.renderRefBtn();
     const rp = this.refPoint(b);
     set('x', fmt(rp.x)); set('y', fmt(this.dispY(rp.y))); set('w', fmt(b.width)); set('h', fmt(b.height)); set('rot', 0);
+    set('pct', 100); set('dx', 0); set('dy', 0);                   // 倍率 / 移动量是「这一次」的，用完回到 100 % / 0
   }
 
   renderCtxData() {
@@ -5557,6 +5737,17 @@ export class SketchEditor {
       let sy = k === 'h' ? v / b.height : 1;
       if (this.lockRatio) { if (k === 'w') sy = sx; else sx = sy; }
       this.sel.forEach((it) => { this.convertTextIfRotated(it); it.scale(sx, sy, rp); });       // 对象原点不动
+    } else if (k === 'pct') {
+      if (v <= 0 || Math.abs(v - 100) < 1e-9) { this.updateNumeric(); return; }
+      this.sel.forEach((it) => { this.convertTextIfRotated(it); it.scale(v / 100, rp); });
+      this.commit(`已缩放到 ${fmt(v)}%`);
+      return;
+    } else if (k === 'dx' || k === 'dy') {
+      if (!v) return;
+      const d = k === 'dx' ? new this.ps.Point(v, 0) : new this.ps.Point(0, -v);          // 显示坐标 Y 往下 = 数据 y 减小
+      this.sel.forEach((it) => it.translate(d));
+      this.commit(`已移动 ${k === 'dx' ? 'ΔX' : 'ΔY'} ${fmt(v)} mm`);
+      return;
     } else if (k === 'rot') {
       if (!v) return;
       this.sel.forEach((it) => { this.convertTextIfRotated(it); it.rotate(v, rp); });           // 绕对象原点   // 正数 = 逆时针（数据坐标 y 向上，paper 的正角 = 逆时针）
@@ -5616,6 +5807,9 @@ export class SketchEditor {
           <span class="sk-small">正数：沿圆弧上方；负数：下方</span></div>` : '') +
         (textSel && layout === 'path' ? `<div class="sk-row"><button data-o-btn="pickpath">${src.path ? '换一条路径' : '选择路径'}</button>
           <span class="sk-small">${src.path ? '✓ 已沿路径排列' : '点按钮后在画布上点一条线'}</span></div>` : '') + `
+        <div class="sk-row"><label class="sk-check"><input data-o="bold" type="checkbox" ${src.bold ? 'checked' : ''}><b>粗体</b></label>
+          <label class="sk-check"><input data-o="italic" type="checkbox" ${src.italic ? 'checked' : ''}><i>斜体</i></label>
+          <label class="sk-check"><input data-o="vertical" type="checkbox" ${src.vertical ? 'checked' : ''} ${layout !== 'line' ? 'disabled' : ''}>竖排</label></div>
         <div class="sk-row"><label class="sk-check"><input data-o="weld" type="checkbox" ${src.weld ? 'checked' : ''}>焊接（笔画连成一体，镂空切割用）</label></div>
         <p class="sk-small">${textSel ? '修改后点别处（或回车）生效；只移动时文字保持可改，旋转 / 缩放 / 节点编辑后会转成路径。' : '在板上单击放置。'}</p>`;
     } else if (t === 'node') html = '<h4>节点编辑</h4><p class="sk-small">拖节点移动；拖线段把直线拉成曲线；拖控制柄调弧度（Alt 单独调一侧）。双击线段加节点，双击节点切换尖角 / 平滑，Alt+单击或 Delete 删节点。</p>';
@@ -5739,7 +5933,7 @@ export class SketchEditor {
           if (it) { this.sel = new Set([it]); this.commit('已修改文字'); }
           return;
         }
-        const tk = { spacing: 'textSpacing', align: 'textAlign', arc: 'textArc', weld: 'textWeld', layout: 'textLayout' }[k];
+        const tk = { spacing: 'textSpacing', align: 'textAlign', arc: 'textArc', weld: 'textWeld', layout: 'textLayout', bold: 'textBold', italic: 'textItalic', vertical: 'textVertical' }[k];
         if (tk) { this.opts[tk] = v; this.renderToolOpts(); return; }
         this.opts[k] = v;
         if (k === 'star') this.renderToolOpts();

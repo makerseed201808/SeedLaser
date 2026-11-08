@@ -926,7 +926,7 @@ class Api:
             return sketch2d.text_layout(str(o.get("text", "")), o.get("font") or "", float(o.get("size", 10)),
                                         float(o.get("spacing", 0) or 0), float(o.get("lineHeight", 1.25) or 1.25),
                                         o.get("align") or "center", float(o.get("arc", 0) or 0), o.get("path"),
-                                        bool(o.get("weld")))
+                                        bool(o.get("weld")), bool(o.get("bold")), bool(o.get("italic")), bool(o.get("vertical")))
         except Exception as exc:
             return {"error": f"文字排版失败：{exc}"}
 

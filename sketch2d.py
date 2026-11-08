@@ -539,9 +539,13 @@ def _path_at(pts, cum, s):
 
 
 def text_layout(text: str, font_id: str, size: float, spacing: float = 0.0, line_height: float = 1.25,
-                align: str = "center", arc: float = 0.0, path: list | None = None, weld: bool = False) -> dict:
+                align: str = "center", arc: float = 0.0, path: list | None = None, weld: bool = False,
+                bold: bool = False, italic: bool = False, vertical: bool = False) -> dict:
     """返回 {"polys": [环...], "missing": [...], "size": [w, h]}。
-    普通 / 圆弧：以文字块中心为原点；沿路径：直接是路径所在的坐标。"""
+    普通 / 圆弧：以文字块中心为原点；沿路径：直接是路径所在的坐标。
+    文字样式（C9，统一合成，不依赖字体自带的粗体 / 斜体字形）：
+      bold：轮廓向外扩 4% 字高（扩完笔画会连成一体，相当于焊接）；italic：向右倾斜 12°；
+      vertical：竖排，每一行变成一列，从右往左排，字头朝上（只用于直排，圆弧 / 沿路径时忽略）。"""
     import model3d
     font = model3d._load_font(font_id or "")
     hhea = font["hhea"]
@@ -570,7 +574,18 @@ def text_layout(text: str, font_id: str, size: float, spacing: float = 0.0, line
         c, s_ = math.cos(ang), math.sin(ang)
         return [(tx + (x - ox) * c - (y - oy) * s_, ty + (x - ox) * s_ + (y - oy) * c) for x, y in pts]
 
-    if path and len(path) >= 2:
+    if vertical and not (path and len(path) >= 2) and abs(arc) < 1e-6:
+        pitch = size * line_height + spacing                  # 竖排时一个字占的高度
+        col_w = size * line_height                            # 列距
+        ncol = len(glyph_lines)
+        nmax = max((len(r) for r, _w in glyph_lines), default=0)
+        for ci, (row, _w) in enumerate(glyph_lines):
+            cx = (ncol - 1) / 2 * col_w - ci * col_w          # 第一列在最右边
+            for j, (polys, _gx, adv) in enumerate(row):
+                cy = (nmax - 1) / 2 * pitch - j * pitch
+                for p in polys:
+                    out.append([(x - adv / 2 + cx, y - mid_y + cy) for x, y in p])
+    elif path and len(path) >= 2:
         pts = [(float(p[0]), float(p[1])) for p in path]
         cum = [0.0]
         for i in range(1, len(pts)):
@@ -606,6 +621,11 @@ def text_layout(text: str, font_id: str, size: float, spacing: float = 0.0, line
                     tx, ty, ang = rad * math.sin(phi), R - rad * math.cos(phi), phi
                 for p in polys:
                     out.append(rot(p, ang, adv / 2, 0.0, tx, ty))
+    if italic and out:
+        k = math.tan(math.radians(12))
+        out = [[(x + y * k, y) for x, y in p] for p in out]
+    if bold and out:
+        weld = True
     if weld and out:
         geom = None
         for p in out:
@@ -614,6 +634,8 @@ def text_layout(text: str, font_id: str, size: float, spacing: float = 0.0, line
             g = _valid(Polygon(p))
             geom = g if geom is None else geom.symmetric_difference(g)
         geom = geom.buffer(0) if geom is not None else Polygon()
+        if bold:
+            geom = geom.buffer(size * 0.04, join_style=2, mitre_limit=2.0)
         rings = []
         for pg in _polygons(geom):
             rings.append(_ring(pg.exterior.coords))
