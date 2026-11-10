@@ -1,4 +1,5 @@
 import asyncio, os
+from _kit import seed_rect
 from playwright.async_api import async_playwright
 OUT=os.environ.get('E2E_OUT', '/tmp/seedboxes-e2e/')
 async def main():
@@ -10,6 +11,7 @@ async def main():
         await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry')
+        await seed_rect(pg)          # 新建设计是空白的：这个测试要用的矩形板自己画
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
         await pg.wait_for_timeout(800)
         ed = "window.__seedDebug.sketchEd"

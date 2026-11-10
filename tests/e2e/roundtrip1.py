@@ -1,6 +1,7 @@
 """A4 不变量：二维 ↔ 3D 往返。画板 → 3D 装配（含自动拼装）→ 回画板，重复两次；
 所有图形（板、孔、曲线、雕刻、描线、板外的线、旋转过的板）的节点和控制柄位置不变（误差 ≤ 0.001 mm）。带断言。"""
 import asyncio, os
+from _kit import seed_rect
 from playwright.async_api import async_playwright
 
 OUT = os.environ.get('E2E_OUT', '/tmp/seedboxes-e2e/')
@@ -45,6 +46,7 @@ async def main():
         await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry'); await pg.wait_for_selector('#sk-host:not(.hidden)'); await pg.wait_for_timeout(1500)
+        await seed_rect(pg)          # 新建设计是空白的：这个测试要用的矩形板自己画
         await pg.evaluate(f"""(()=>{{const e={ED}; const ps=e.ps;
           const add=(path,mode)=>{{const it=e.addItem({{mode,paths:[]}}); it.remove(); path.data=it.data; e.content.addChild(path); e.style(path); return path;}};
           // 矩形板 + 圆孔 + 雕刻文字框 + 描线

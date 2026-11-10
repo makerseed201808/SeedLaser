@@ -498,6 +498,59 @@ def _write_laser_sheet(path: str, name: str, params: dict[str, Any], laser: dict
     return out
 
 
+# ---------------------------------------------------------------- 界面偏好（新手引导看过没、折叠的面板、导出方式……）
+# 网页里的 localStorage 每次启动都会清空（pywebview 默认隐私模式，而且本地服务器端口每次不同），
+# 所以前端把 seedboxes.* / seedlaser.* 偏好同时存一份到 ~/.seedlaser/prefs.json，启动时再放回去。
+
+_PREF_KEY_RE = re.compile(r"^(seedboxes|seedlaser)\.[\w.\-]{1,80}$")
+
+
+def _prefs_file() -> str | None:
+    """偏好文件。测试 / 调试（设了 SEEDLASER_PROJECT_DIR）时不读写用户的偏好，除非另外指定 SEEDLASER_PREFS_FILE——
+    否则一个测试改的设置会带到下一个测试里。"""
+    if os.environ.get("SEEDLASER_PREFS_FILE"):
+        return os.environ["SEEDLASER_PREFS_FILE"]
+    if os.environ.get("SEEDLASER_PROJECT_DIR"):
+        return None
+    return os.path.join(os.path.expanduser("~"), ".seedlaser", "prefs.json")
+
+
+def load_prefs() -> dict[str, str]:
+    path = _prefs_file()
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if isinstance(k, str) and _PREF_KEY_RE.match(k) and isinstance(v, str)} if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_pref(key: str, value: str | None) -> bool:
+    if not isinstance(key, str) or not _PREF_KEY_RE.match(key):
+        return False
+    if value is not None and (not isinstance(value, str) or len(value) > 20000):
+        return False
+    path = _prefs_file()
+    if not path:
+        return False
+    prefs = load_prefs()
+    if value is None:
+        prefs.pop(key, None)
+    else:
+        prefs[key] = value
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(prefs, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False                         # 存不下偏好不影响使用
+
+
 # ---------------------------------------------------------------- 最近项目（主页用）
 # 存在用户目录下（~/.seedlaser/recent.json），最多 12 条
 
@@ -1088,6 +1141,14 @@ class Api:
         if notes:
             out["warning"] = "；".join(notes)
         return out
+
+    def get_prefs(self) -> dict[str, str]:
+        """界面偏好（启动时放回 localStorage）."""
+        return load_prefs()
+
+    def set_pref(self, key: str, value: str | None = None) -> dict[str, Any]:
+        """存一条界面偏好；value = None 删除."""
+        return {"ok": save_pref(key, value)}
 
     def recent_projects(self) -> list[dict[str, Any]]:
         """主页「最近项目」：最近打开 / 保存过的项目，最新的在前。"""

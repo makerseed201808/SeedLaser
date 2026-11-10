@@ -5745,9 +5745,13 @@ export class SketchEditor {
     let i = 0;
     let tour = this.$('.sk-tour');
     if (!tour) { tour = document.createElement('div'); tour.className = 'sk-tour'; this.host.appendChild(tour); }
+    let never = true;                          // 「不再提示」默认勾上；取消勾选 = 下次打开画板还会自动显示
     const end = () => {
       tour.classList.add('hidden');
-      try { localStorage.setItem('seedboxes.skTour', '1'); } catch (e) { /* 忽略 */ }
+      try {
+        if (never) localStorage.setItem('seedboxes.skTour', '1'); else localStorage.removeItem('seedboxes.skTour');
+      } catch (e) { /* 忽略 */ }
+      this.status(never ? '新手引导不会再自动出现；需要时点「帮助 → 新手引导」' : '下次打开画板时还会显示新手引导');
     };
     const show = () => {
       const st = steps[i];
@@ -5763,9 +5767,12 @@ export class SketchEditor {
       if (ty + 150 > hr.height) ty = Math.max(10, box.y - 160);
       tour.innerHTML = `<div class="sk-tour-hole" style="left:${box.x}px;top:${box.y}px;width:${box.w}px;height:${box.h}px"></div>
         <div class="sk-tour-tip" style="left:${tx}px;top:${ty}px;width:${tipW}px"><b>${st.title}</b><p>${st.text}</p>
-          <div class="sk-tour-btns"><span>${i + 1} / ${steps.length}</span><button data-t="skip">跳过</button>
+          <div class="sk-tour-btns"><span>${i + 1} / ${steps.length}</span>
+          <label class="sk-tour-never" title="不勾选：下次打开画板时还会自动显示。随时可以从「帮助 → 新手引导」再看"><input type="checkbox" data-t="never" ${never ? 'checked' : ''}>不再提示</label>
+          <button data-t="skip">跳过</button>
           <button data-t="next" class="sk-primary">${i === steps.length - 1 ? '开始画图' : '下一步'}</button></div></div>`;
       tour.classList.remove('hidden');
+      tour.querySelector('[data-t=never]').onchange = (ev) => { never = ev.target.checked; };
       tour.querySelector('[data-t=skip]').onclick = end;
       tour.querySelector('[data-t=next]').onclick = () => { i++; if (i >= steps.length) end(); else show(); };
     };

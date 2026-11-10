@@ -1,5 +1,6 @@
 """Ctrl 拖动画正圆；新图形和已有图形重叠时不提示、不弹窗、不标色，直接用当前图层（切割）。带断言。"""
 import asyncio, os
+from _kit import seed_rect
 from playwright.async_api import async_playwright
 
 OUT = os.environ.get('E2E_OUT', '/tmp/seedboxes-e2e/')
@@ -17,6 +18,7 @@ async def main():
         await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry')
+        await seed_rect(pg)          # 新建设计是空白的：这个测试要用的矩形板自己画
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
         await pg.wait_for_timeout(600)
         c = await pg.evaluate(f"(()=>{{const e={ED};const it=e.content.children[0];const p=e.ps.view.projectToView(it.bounds.bottomRight);const r=e.canvas.getBoundingClientRect();return [p.x+r.left,p.y+r.top]}})()")

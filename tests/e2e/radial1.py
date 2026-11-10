@@ -1,5 +1,6 @@
 """右键圆形快捷菜单：空白处右键 = 画图工具；右键点图形 = 选中并显示编辑命令；中间重复上一个命令；右键拖动仍平移。带断言。"""
 import asyncio, os
+from _kit import seed_rect
 from playwright.async_api import async_playwright
 
 OUT = os.environ.get('E2E_OUT', '/tmp/seedboxes-e2e/')
@@ -18,6 +19,7 @@ async def main():
         await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry')
+        await seed_rect(pg)          # 新建设计是空白的：这个测试要用的矩形板自己画
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
         await pg.wait_for_timeout(500)
         cv = await pg.locator('.sk-canvas').bounding_box()

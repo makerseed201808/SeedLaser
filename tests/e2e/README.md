@@ -32,3 +32,5 @@ tests/e2e/run.sh keep1      # 单个
 另有前端纯函数单元测试：`node tests/js/fit_calc.test.mjs`（卡榫测试样换算，含「以后切出的插槽 = 测试中最合适那条槽」不变量）。
 
 后端测试：`.venv/bin/python tests/py/test_recent.py`（最近项目、打开 SeedBoxes 时期的旧项目）。
+
+真实窗口检查（不是浏览器调试环境）：`.venv/bin/python tests/real/run_real.py`。它把软件真正的启动代码（`app.main()`，pywebview 隐私模式、随机端口）连续启动 3 次，检查新手引导「不再提示」能不能挺过重启。浏览器调试环境里网页存储不会被清空，这类问题在 `tests/e2e` 里发现不了。需要 Qt 后端（`uv pip install PyQt6 PyQt6-WebEngine qtpy`，只在 Linux 无显示器环境下用；没装时跳过）。`tests/e2e/restart1.py` 是它在浏览器环境里的对应版本（每次启动换全新的浏览器和后端进程）。

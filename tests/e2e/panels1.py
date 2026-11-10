@@ -2,6 +2,7 @@
   没选中：板件信息 + 提示，无功能区块；画图工具：只有工具设置；选中 1 个：运算 / 变换 / 阵列；选中 2 个：再加对齐；
   左侧功能按钮 = 跳到并展开对应区块；区块标题可折叠，且记住状态。"""
 import asyncio, os
+from _kit import seed_rect
 from playwright.async_api import async_playwright
 
 OUT = os.environ.get('E2E_OUT', '/tmp/seedboxes-e2e/')
@@ -21,6 +22,7 @@ async def main():
         await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry')
+        await seed_rect(pg)          # 新建设计是空白的：这个测试要用的矩形板自己画
         await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
         await pg.wait_for_timeout(500)
         assert await pg.evaluate(SHOWN) == [], await pg.evaluate(SHOWN)
@@ -55,6 +57,7 @@ async def main():
         await pg.reload()
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry'); await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
+        await seed_rect(pg)          # 新建设计是空白的：这个测试要用的矩形板自己画
         assert await pg.evaluate(f"({col})('bool')"), '折叠状态应记住'
         await b.close()
     assert not errs, errs

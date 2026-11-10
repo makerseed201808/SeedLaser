@@ -15,6 +15,23 @@ ITEMS = f"""(()=>{{const e={ED};
       text:c.data.text?c.data.text.text:null, joints:(c.data.joints||[]).length, bridges:(c.data.bridges||[]).length, group:c.data.group||null}};}});}})()"""
 
 
+# 以前新建设计会自动带一块 100 × 60 的矩形板（在画板 (10, 230)），老测试直接拿它来用。
+# 2026-11-10 起新建设计是空白的：需要那块板的测试自己明确画一块（画板上已有图形时不重复画）。
+SEED_RECT = f"""(()=>{{const e={ED}; if (!e || !e.content) return null; if (e.content.children.some(c=>c.data&&c.data.mode)) return false;
+  e.addItem({{mode:'cut', paths:[{{closed:true, segs:[[10,230,0,0,0,0],[110,230,0,0,0,0],[110,290,0,0,0,0],[10,290,0,0,0,0]]}}]}});
+  e.sel.clear(); e.commit('测试用的矩形板'); return true;}})()"""
+
+
+async def seed_rect(pg):
+    """等二维画板打开后，放一块 100 × 60 的矩形板（等同于以前自动带的那块）。"""
+    await pg.wait_for_selector('#sk-host:not(.hidden)', timeout=30000)
+    for _ in range(40):
+        if await pg.evaluate(SEED_RECT) is not None:
+            break
+        await pg.wait_for_timeout(100)
+    await pg.wait_for_timeout(1300)          # 等板件识别和右下角 3D 预览跟上（原来打开时就有）
+
+
 class Kit:
     def __init__(self, pg):
         self.pg = pg

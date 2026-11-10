@@ -1,5 +1,6 @@
 """画布上不显示「板件 N · 尺寸」标签；选中图形后右侧「图形信息」显示详细参数。带断言。"""
 import asyncio, os
+from _kit import seed_rect
 from playwright.async_api import async_playwright
 
 ED = 'window.__seedDebug.sketchEd'
@@ -13,6 +14,7 @@ async def main():
         await pg.goto(os.environ.get('SEEDBOXES_URL', 'http://127.0.0.1:8765') + '/index.html?dev=1')
         await pg.wait_for_function("document.querySelectorAll('.gen-item').length>0", timeout=60000)
         await pg.click('#free-entry'); await pg.wait_for_selector('#sk-host:not(.hidden)'); await pg.wait_for_timeout(1500)
+        await seed_rect(pg)          # 新建设计是空白的：这个测试要用的矩形板自己画
         assert await pg.evaluate("document.querySelectorAll('#sk-host .sk-plabel').length") == 0, '画布上不应有板件标签'
         assert not await pg.is_visible('#sk-host [data-panel=info]'), '没选中时不显示图形信息'
         # 选中默认的 100×60 板；再加一个板上的圆孔 r=5

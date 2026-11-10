@@ -600,7 +600,7 @@ async function loadModel() {
   if (posed && W.paramsDirty) {
     setNote('参数已改变，3D 编辑器里摆放过的板件位置可能需要重新调整（可点板件清单下方的「全部复位」）。', 'info');
     W.paramsDirty = false;
-  } else if (!m.parts.length) setNote('这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
+  } else if (!m.parts.length) setNote(isFree() ? '画板上还没有板件：回到「① 二维设计」画一个闭合的切割图形（比如矩形），它就是一块板。' : '这个生成器没有可识别的闭合板件，无法生成 3D 模型。', 'info');
   else if (m.free) setNote('自由设计：板件按二维画板上的位置平放。拖动板件靠近会自动吸附，或点「🧩 按卡榫自动拼装」；拼好后自动检查干涉。', 'info');
   else if (m.auto) {
     setNote(`自动装配（试验）：已拼上 ${m.placed} 块板${m.floating ? `，另有 ${m.floating} 块（隔板、盖子等）放在旁边` : ''}。` +
@@ -846,7 +846,7 @@ function applySheet(res) {
   });
   f.parts = parts;
   if (res.size) f.sheet = res.size;
-  f.loose = res.loose;
+  if (res.loose && res.loose.length) f.loose = res.loose; else delete f.loose;   // 没有散图形时不留空数组：否则没改动的设计也会被当成「有改动」
   f.bridge_w = res.bridge_w;
   f.guides = res.guides;
   projectChanged();
@@ -3028,10 +3028,7 @@ window.SeedWorkshop = {
     if (isFree() && W.pendingImport) applyPendingImport();
     else if (isFree() && W.startEx) { startExample(); return; }
     if (isFree()) {
-      if (!freeParts().length) {
-        freeParts().push({ id: 'p1', name: '板件 1', w: 100, h: 60 });
-        W.project.sketches.p1 = rectSketch(100, 60);
-      }
+      // 新建设计是空白画板（原来会自动放一块 100 × 60 的矩形板，用户要求去掉）
       if (!W.wantSheet) W.stage = 'assemble';
       updateStageBar();
       if (W.mode !== '3d') { setMode('3d'); return; }

@@ -22,6 +22,32 @@ function whenApiReady() {
   });
 }
 
+// ---- 界面偏好：localStorage 每次启动都会被清空（pywebview 隐私模式 + 端口每次不同），
+//      所以 seedboxes.* / seedlaser.* 同时存到用户目录（~/.seedlaser/prefs.json），启动时放回来
+const PREF_RE = /^(seedboxes|seedlaser)\./;
+async function restorePrefs() {
+  const api = window.pywebview && window.pywebview.api;
+  if (!api || !api.get_prefs) return;
+  try {
+    const p = await api.get_prefs();
+    const set = restorePrefs.set0 || Storage.prototype.setItem;      // 放回时不再回写文件
+    Object.entries(p || {}).forEach(([k, v]) => { try { set.call(localStorage, k, v); } catch (e) { /* 忽略 */ } });
+  } catch (e) { /* 读不到偏好就用默认 */ }
+  if (restorePrefs.hooked) return;
+  restorePrefs.hooked = true;
+  const proto = Storage.prototype;
+  const set0 = proto.setItem, del0 = proto.removeItem;
+  restorePrefs.set0 = set0;
+  proto.setItem = function (k, v) {
+    set0.call(this, k, v);
+    if (this === window.localStorage && PREF_RE.test(String(k))) { try { api.set_pref(String(k), String(v)); } catch (e) { /* 忽略 */ } }
+  };
+  proto.removeItem = function (k) {
+    del0.call(this, k);
+    if (this === window.localStorage && PREF_RE.test(String(k))) { try { api.set_pref(String(k), null); } catch (e) { /* 忽略 */ } }
+  };
+}
+
 // ---- toast ----
 let toastTimer = null;
 function toast(msg, kind = '') {
@@ -643,6 +669,12 @@ async function doSave(fmtArg) {
   let mode = 'comp';
   let withDims = false;
   const project0 = window.SeedWorkshop ? window.SeedWorkshop.getProject() : null;
+  // 空白设计（一块板都没有）：不问补偿方式、不写出一个空文件，直接说明原因
+  if (state.current === 'FreeDesign' && !(project0 && project0.free && (project0.free.parts || []).length)) {
+    toast('还没有可以导出的板件：先在二维画板上画一个闭合的切割图形（比如矩形），它就是一块板', 'error');
+    setStatus('没有可导出的内容');
+    return;
+  }
   const hasDims = !!(project0 && project0.sketches && Object.values(project0.sketches).some((sk) => (sk.items || []).some((it) => it.mode === 'dim')));
   if (['svg', 'svg_Ponoko', 'dxf', 'lbrn2', 'pdf', 'ps', 'plt', 'gcode'].includes(fmt)) {
     const ans = await askBurnMode(burn, hasDims);
@@ -1103,6 +1135,7 @@ function bindEvents() {
 window.toast = toast;
 window.SeedApp = {
   collectParams,
+  restorePrefs,                 // 测试用：换成假的 api 后重新放回偏好
   doPreview,
   hasPreview: () => !!state.hasPreview,
   select: (name) => selectGenerator(name),
@@ -1119,6 +1152,7 @@ window.addEventListener('beforeunload', (ev) => { if (tabs.list.some(tabDirty)) 
 (async () => {
   bindEvents();
   await whenApiReady();
+  await restorePrefs();
   showView('home');
   await Promise.all([loadFormats(), loadGroups()]);
   // 双击 .seedlaser 文件启动：直接打开它
