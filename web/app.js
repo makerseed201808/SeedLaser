@@ -85,10 +85,11 @@ async function loadFormats() {
       opt.textContent = f.label;
       sel.appendChild(opt);
     });
+    // DXF 是内置转换，总是可用；GCode / PLT 要 pstoedit，PDF 要 ps2pdf（Ghostscript）
     if (!info.pstoedit && !info.ps2pdf) {
-      sel.title = '提示：未检测到 pstoedit 与 ps2pdf，仅可输出 SVG / PS / LBRN2。\n如需 DXF/GCode/PDF，请安装相应工具后重启客户端。';
+      sel.title = '提示：未检测到 pstoedit 与 ps2pdf，可输出 SVG / DXF / PS / LBRN2。\n如需 GCode / PLT / PDF，请安装相应工具后重启软件。';
     } else if (!info.pstoedit) {
-      sel.title = '未检测到 pstoedit，DXF/GCode/PLT 不可用。';
+      sel.title = '未检测到 pstoedit，GCode / PLT 不可用。';
     } else if (!info.ps2pdf) {
       sel.title = '未检测到 ps2pdf，PDF 输出不可用。';
     }
@@ -995,7 +996,7 @@ function renderTabs() {
   if (!bar || tabs.renaming) return;                 // 正在标签上改名：不重画（会把输入框冲掉）
   const esc = escapeHtml;
   const home = state.view === 'home' || !tabs.active;
-  bar.innerHTML = `<button class="dt-home${home ? ' on' : ''}" data-dt="home" title="主页">⌂</button>
+  const html = `<button class="dt-home${home ? ' on' : ''}" data-dt="home" title="主页">⌂</button>
     <div class="dt-list">${tabs.list.map((t) => {
       const on = t.id === tabs.active && !home;
       const dirty = tabDirty(t);
@@ -1004,6 +1005,11 @@ function renderTabs() {
         <button class="dt-x" data-close="${t.id}" title="关闭">×</button></div>`;
     }).join('')}</div>
     <button class="dt-new" data-dt="new" title="新建设计（新标签）">＋</button>`;
+  // 内容没变就不重画。这个函数每 3 秒会被调用一次（刷新「未保存」圆点）：每次都重画的话，
+  // 鼠标按下和松开之间正好赶上重画时，被按的按钮已经换成新的，这一下点击就丢了（点标签不切换、点 × 不关闭）
+  if (html === tabs.html) return;
+  tabs.html = html;
+  bar.innerHTML = html;
 }
 
 // 在标签上直接改项目名称：回车 / 点别处 = 保存（没保存过的存到「文稿/SeedLaser」，保存过的原地改名）；Esc 取消
@@ -1021,6 +1027,7 @@ function startTabRename(id) {
   inp.placeholder = '输入项目名称，回车保存';
   inp.maxLength = 80;
   el.replaceWith(inp);
+  tabs.html = null;                                   // 标签栏里换成了输入框：改名结束后要重画
   inp.focus(); inp.select();
   let done = false;
   const finish = async (save) => {

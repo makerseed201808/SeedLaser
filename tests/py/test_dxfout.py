@@ -64,4 +64,14 @@ assert t.dxftype() == 'TEXT' and t.dxf.text == '校准尺 100 mm' and t.dxf.laye
 # 5) 不认识的颜色：单独图层、最接近的 ACI
 d, es = read(S('<path d="M0 0 L10 10" stroke="#ff8800"/>'))
 assert es[0].dxf.layer.startswith('COLOR_FF8800')
-print('PASS test_dxfout：单位 mm / y 翻转 / 图层颜色 / 相对坐标 / 英寸 viewBox / transform / 曲线偏差 ≤ 0.02 mm / 中文文字居中 / 未知颜色')
+# 6) 旋转的文字（竖着的尺寸标注）：DXF 里也要转过来，按字顶对齐的偏移跟着文字方向走（2026-11-12 检查发现：以前竖的标注导出后是横的）
+d, es = read(S('<text dominant-baseline="hanging" font-size="3.5px" text-anchor="middle" style="fill: rgb(255,0,255)" '
+               'transform="matrix( 0.000 -1.000 1.000 0.000 78.000 30.000 )">40</text>'
+               '<text dominant-baseline="hanging" font-size="3.5px" text-anchor="middle" style="fill: rgb(255,0,255)" '
+               'transform="matrix( 1.000 0.000 0.000 1.000 40.000 8.000 )">60</text>'))
+tv, th = es
+assert tv.dxf.text == '40' and abs(tv.dxf.rotation - 90) < 1e-6, tv.dxf.all_existing_dxf_attribs()         # 从下往上读
+assert abs(tv.dxf.align_point[0] - (78 + 2.8)) < 1e-3 and abs(tv.dxf.align_point[1] - (50 - 30)) < 1e-3, tv.dxf.align_point   # 字顶在 x = 78，基线往右 0.8 × 3.5
+assert th.dxf.text == '60' and abs(th.dxf.get('rotation', 0)) < 1e-6
+assert abs(th.dxf.align_point[0] - 40) < 1e-3 and abs(th.dxf.align_point[1] - (50 - 8 - 2.8)) < 1e-3, th.dxf.align_point       # 横的不变
+print('PASS test_dxfout：单位 mm / y 翻转 / 图层颜色 / 相对坐标 / 英寸 viewBox / transform / 曲线偏差 ≤ 0.02 mm / 中文文字居中 / 未知颜色 / 旋转的文字')

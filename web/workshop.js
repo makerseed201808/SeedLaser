@@ -641,16 +641,11 @@ function setMode(mode) {
 // ------------------------------------------------------------------ 单块板 2D 编辑器
 
 const ED = { part: null, sel: null, drag: null, svg: null, g: null };
-const SVGNS = 'http://www.w3.org/2000/svg';
 
 function partOutline(p) {
   // 「从外面看」：镜像板左右翻转
   const f = (pts) => (p.mirror ? pts.map(([x, y]) => [p.w - x, y]) : pts);
   return { outer: f(p.outer), holes: p.holes.map(f) };
-}
-
-function pathD(polys) {
-  return polys.map((pl) => 'M' + pl.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join('L') + 'Z').join('');
 }
 
 // ------------------------------------------------------------------ 二维草图编辑（web/sketch2d.js）
@@ -1176,8 +1171,6 @@ const AXIS_COLORS = { x: 0xe5484d, y: 0x30a46c, z: 0x2f80ed };
 const GUIDE_COLOR = 0x00b8d9;
 const ROT_SNAP = 45;          // 与 Tinkercad / SketchForge 一致：45°，Shift 22.5°
 const ROT_SNAP_FINE = 22.5;
-
-const _v = new THREE.Vector3();
 
 class Poser {
   constructor(v) {

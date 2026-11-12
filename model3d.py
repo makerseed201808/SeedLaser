@@ -70,7 +70,6 @@ class Recorder:
             del self._pending[depth - 1:]
 
     def _move(self, x, y, where, before=False, label=""):
-        box = self.box
         result = self._orig_move(x, y, where, before=before, label=label)
         try:
             self._record(x, y, where, before, label, result)
@@ -912,7 +911,6 @@ def _infer_dims(rect_parts):
 
 def self_place(p, placed, used, contacts, solids, sub, X, Y, H, t) -> bool:
     """把一块板放到最合适的面上；成功返回 True."""
-    import numpy as np
     s = solids[id(p)]
     best = None
     for face, (a, b) in _FACE_DIMS.items():
@@ -1015,21 +1013,20 @@ def auto_assemble(parts: list[dict], t: float) -> dict | None:
     for p, face, M, flip in placed_list:
         solids[id(p)].place(M)
     placed = [(p, f, solids[id(p)], m) for p, f, M, m in placed_list]
-    if True:
-        floating = []
-        placed_ids = {id(p) for p, *_ in placed}
-        for p, face, s, flip in placed:
-            m = s.M
-            p.update(id=face, name=FACE_NAMES[face], face=face,
-                     mirror=_FACES[face][4] != flip,
-                     matrix=[float(x) for x in m.T.ravel()])
-        for p in parts:
-            if id(p) not in placed_ids:
-                floating.append(p)
-        _layout_flat(floating, start_x=X + 30 + t, z=-t - 0.5, prefix="extra", grid=True)
-        return {"assembled": True, "auto": True, "dims": [X, Y, H], "thickness": t,
-                "bounds": [-t, -t, -t, X + t, Y + t, H + t],
-                "placed": len(placed), "floating": len(floating)}
+    floating = []
+    placed_ids = {id(p) for p, *_ in placed}
+    for p, face, s, flip in placed:
+        m = s.M
+        p.update(id=face, name=FACE_NAMES[face], face=face,
+                 mirror=_FACES[face][4] != flip,
+                 matrix=[float(x) for x in m.T.ravel()])
+    for p in parts:
+        if id(p) not in placed_ids:
+            floating.append(p)
+    _layout_flat(floating, start_x=X + 30 + t, z=-t - 0.5, prefix="extra", grid=True)
+    return {"assembled": True, "auto": True, "dims": [X, Y, H], "thickness": t,
+            "bounds": [-t, -t, -t, X + t, Y + t, H + t],
+            "placed": len(placed), "floating": len(floating)}
 
 
 def check_collisions(parts: list[dict], t: float) -> int:

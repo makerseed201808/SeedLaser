@@ -4,7 +4,8 @@
 然后浏览器打开 http://127.0.0.1:8765/index.html?dev=1
 
 web/dev-bridge.js 在 ?dev=1 时用 fetch 模拟 window.pywebview.api，
-请求转发到 backend.Api 的同名方法。保存 / 打开文件的对话框在此模式下不可用。
+请求转发到 backend.Api 的同名方法。这个模式没有窗口，保存 / 打开文件的对话框弹不出来：
+自动测试用 dev_set_pick 预先给出路径（见 backend.Api.dev_set_pick）。
 """
 from __future__ import annotations
 

@@ -9,9 +9,9 @@ import mimetypes
 import os
 import re
 import subprocess
+import itertools
 import sys
 import threading
-import traceback
 from collections import OrderedDict
 from typing import Any
 
@@ -334,6 +334,10 @@ def _init_generators() -> None:
             try:
                 if not getattr(cls, "webinterface", True):
                     continue
+                # 同一个生成器会按不同的模块路径出现好几次（别的生成器模块 import 了它的类），
+                # 只登记一次，否则模型库里会重复出现（上游 boxesserver 也是先按类名去重再分组）
+                if _GENERATORS.get(cls.__name__) is cls:
+                    continue
                 # 必须在 __init__ 前设类属性：boxes 生成器的 add_argument 会读
                 # self.UI == "web" 决定暴露 label_text 还是 label_file。
                 # 这与上游 boxesserver 的做法一致（boxes/scripts/boxesserver.py:133）。
@@ -353,9 +357,8 @@ def _init_generators() -> None:
 
 
 # get_model 结果缓存（手动摆放校验用）
-import itertools as _itertools
 _MODEL_CACHE: "OrderedDict[str, tuple]" = OrderedDict()
-_MODEL_SEQ = _itertools.count(1)
+_MODEL_SEQ = itertools.count(1)
 
 
 def _project_has_content(project: dict[str, Any] | None) -> bool:
@@ -558,11 +561,15 @@ _RECENT_MAX = 12
 
 
 def _recent_file() -> str:
+    """最近项目的记录文件。测试 / 调试（设了 SEEDLASER_PROJECT_DIR）时放在那个文件夹里，
+    不碰用户目录里真正的最近项目（否则跑一遍测试，主页上的最近项目就被测试文件顶掉了）。"""
+    test_dir = os.environ.get("SEEDLASER_PROJECT_DIR")
+    if test_dir:
+        return os.path.join(test_dir, ".recent.json")
     return os.path.join(os.path.expanduser("~"), ".seedlaser", "recent.json")
 
 
 def _load_recent() -> list[dict[str, Any]]:
-    import json
     try:
         with open(_recent_file(), encoding="utf-8") as f:
             data = json.load(f)
@@ -572,7 +579,6 @@ def _load_recent() -> list[dict[str, Any]]:
 
 
 def _save_recent(items: list[dict[str, Any]]) -> None:
-    import json
     try:
         os.makedirs(os.path.dirname(_recent_file()), exist_ok=True)
         with open(_recent_file(), "w", encoding="utf-8") as f:
@@ -656,6 +662,23 @@ def launch_file_from_argv(argv: list[str]) -> str | None:
         if isinstance(a, str) and _EXT_RE.search(a) and os.path.isfile(a):
             return os.path.abspath(a)
     return None
+
+
+def _write_project_file(path: str, project: dict[str, Any]) -> None:
+    """写项目文件：先把内容整理好、写到旁边的临时文件，再整体换上去。
+    中途出错（内容写不出去、磁盘满、断电）时原来的文件保持完好，不会只剩半个文件。"""
+    text = json.dumps(project, ensure_ascii=False, indent=2)       # 写不成 JSON 的在这里就报错，还没碰文件
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _remember_recent(path: str, project: dict[str, Any]) -> None:
@@ -1045,7 +1068,6 @@ class Api:
 
     def save_project(self, project: dict[str, Any], path: str | None = None, name: str | None = None) -> dict[str, Any]:
         """保存项目。给了 path（「保存」，已经有文件）就直接写；否则弹另存为对话框，name 是建议的文件名."""
-        import json
         picked = path
         if not picked:
             base = (name or project.get("name") or ("我的设计" if project.get("generator") == "FreeDesign" else project.get("generator", "project")))
@@ -1062,8 +1084,7 @@ class Api:
             # 另存为一律用新扩展名（对话框里留着旧的 .json 也换掉）
             picked = os.path.join(os.path.dirname(picked), project_stem(picked) + PROJECT_EXT)
         try:
-            with open(picked, "w", encoding="utf-8") as f:
-                json.dump(project, f, ensure_ascii=False, indent=2)
+            _write_project_file(picked, project)
         except Exception as exc:
             return {"error": f"保存失败：{exc}"}
         _remember_recent(picked, project)
@@ -1073,7 +1094,6 @@ class Api:
         """在标题上直接输入名字保存：
         还没有文件 → 存到「文稿/SeedLaser」（或 SEEDLASER_PROJECT_DIR）；已经有文件 → 在同一文件夹里改名并保存。
         已有同名文件时不覆盖，返回 {exists: True}。"""
-        import json
         name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", str(name or "")).strip().strip(".")
         name = project_stem(name).strip()
         if not name:
@@ -1090,10 +1110,7 @@ class Api:
             return {"exists": True, "path": target, "error": f"「{name}」已经有了（{folder}），换个名字，或用「文件 → 另存为」"}
         try:
             os.makedirs(folder, exist_ok=True)
-            tmp = target + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(project, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, target)
+            _write_project_file(target, project)
         except Exception as exc:
             return {"error": f"保存失败：{exc}"}
         renamed = bool(current) and not same and os.path.exists(current)
@@ -1118,7 +1135,6 @@ class Api:
 
     def open_project_path(self, path: str) -> dict[str, Any]:
         """按路径打开项目（主页「最近项目」用）。SeedBoxes 时期保存的项目照样能打开。"""
-        import json
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)

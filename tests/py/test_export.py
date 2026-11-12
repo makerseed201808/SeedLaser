@@ -3,7 +3,7 @@
 单位 mm、尺寸；颜色分层（切割外轮廓黑 / 内孔蓝 / 雕刻绿 / 描线品红 / 标注红）；切割路径闭合；没有重复线；
 每块板先切内孔、后切外轮廓；外轮廓尺寸 = 板件尺寸 + 2×切缝补偿；和 golden 摘要一致。
 有 pstoedit 时再导出 DXF，用 ezdxf 读回来检查图层和尺寸。"""
-import copy, json, os, re, shutil, sys, tempfile
+import json, os, re, sys, tempfile
 ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
 sys.path.insert(0, ROOT)
 import backend  # noqa: E402

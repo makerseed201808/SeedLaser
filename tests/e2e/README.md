@@ -1,7 +1,9 @@
-# 端到端冒烟测试（Playwright）
+# 端到端测试（Playwright）
 
-在浏览器里用 `?dev=1` 跑整个前端（`scripts/dev_server.py` + `web/dev-bridge.js`），按学生的操作顺序走一遍，打印关键数据并截图。
-目前是「打印 + 截图」式的冒烟脚本，还不是断言式测试——**把它们改成带断言的测试是待办**（见 docs/ROADMAP.md）。
+在浏览器里用 `?dev=1` 跑整个前端（`scripts/dev_server.py` + `web/dev-bridge.js`），按学生的操作顺序走一遍。
+共 60 个脚本（`run.sh` 里的清单就是全部）。其中 53 个带断言，通过时打印一行 `PASS 名字：检查了什么`；`run.sh` 最后汇总，有失败时退出码是 1。
+还有 7 个早期脚本只打印结果、不判断对错（**改成带断言是待办**）：sheet1、keep1、drag1、tx1、bh、sf5 没有断言，bool1 只有 1 条断言、不打印 PASS——
+它们出错时只有抛异常才会被 `run.sh` 记为失败，结果对不对要对照下表自己看。
 
 ```bash
 uv pip install playwright && .venv/bin/playwright install chromium   # 首次
@@ -9,12 +11,14 @@ tests/e2e/run.sh            # 全部
 tests/e2e/run.sh keep1      # 单个
 ```
 
+下表只列了早期的 17 个脚本；其余的看每个脚本开头的说明（就是它检查的内容）。
+
 | 脚本 | 覆盖 | 期望输出 |
 |---|---|---|
 | sheet1 | 自由设计画板：画两块板、跨板卡榫配对、生成 3D、自动拼装、按画板位置导出、改材料尺寸 | `识别到 3 块板`；第二次点边提示「已配对 ✔」；`poses` 非空；`sheet {"w":500,...}` |
 | keep1 | 排版位置和 3D 装配位置互相独立（挪板、旋转、加宽左边） | `pose same True`；右侧顶点不变；`sa` 出现 90 |
 | drag1 | 拖动时板面跟随 | 两个数相等（轮廓左边 = 板面左边） |
-| ov1 | Ctrl 画正圆；交叉时弹出选择；选「切割」 | `['score', 38, 38, True]`，之后两个 cut |
+| ov1 | Ctrl 拖动画正圆；新图形和已有图形重叠时不提示、不弹窗、不标色，直接用当前图层（切割） | `PASS ov1`（带断言） |
 | tx1 | 修改文字后直接点画布生效；文字自身不标红 | `red lens 0`，`['种子创客']` |
 | bool1 | 单选差集 = 刀 | 只剩一块板，面积 < 6000 |
 | bh | 形状运算按钮悬停示意图 | 无报错，4 张截图 |
@@ -27,10 +31,12 @@ tests/e2e/run.sh keep1      # 单个
 | thick1 | 二维画板改板厚：同步左侧参数；旧板厚做的卡榫提醒并一键重做（一步撤销）；卡榫工具里也提醒 | `PASS thick1`（带断言） |
 | stage1 | 自由设计三个板块：① 二维设计 → ② 3D 装配（无板件清单）→ ③ 加工作业（加工清单 + 排版，取消一块后图纸变小）→ 回到设计 | `PASS stage1`（带断言） |
 | home1 | SeedLaser 主页三入口；快速建模 ABox「放进设计」：5 块板 + 装配位置带过来、无穿透；设计中途再放 = 放进当前设计 | `PASS home1`（带断言） |
-| sf5 | 3D 编辑器里删板 → 不改「使用」，再打开自动补回（需要 web_sketchforge 和 WebGL） | `disabled []`，`scene objects after reopen 4 map 4` |
+| sf5 | 3D 编辑器里删板 → 不改「使用」，再打开自动补回（需要 web_sketchforge 和 WebGL） | `disabled []`，`scene objects after reopen 3 map 3`（删掉的板再打开时补回，数量和删之前一样） |
 
-另有前端纯函数单元测试：`node tests/js/fit_calc.test.mjs`（卡榫测试样换算，含「以后切出的插槽 = 测试中最合适那条槽」不变量）。
+前端纯函数单元测试（4 个）：`for t in tests/js/*.mjs; do node "$t"; done`（卡榫测试样换算、几何、齿轮、描摹前调节）。
 
-后端测试：`.venv/bin/python tests/py/test_recent.py`（最近项目、打开 SeedBoxes 时期的旧项目）。
+后端测试（14 个）：`for t in tests/py/test_*.py; do .venv/bin/python "$t"; done`（导出、DXF、二维码、项目文件迁移和保存、最近项目、偏好、图库、模型清单、术语、版本号、样式表、自动推送脚本）。
+
+测试用的调试服务器设了 `SEEDLASER_PROJECT_DIR`（默认 `/tmp/sl-proj`）：项目、图库、最近项目记录都写在那里，界面偏好不读写——不会动用户自己的「文稿/SeedLaser」和 `~/.seedlaser/`。
 
 真实窗口检查（不是浏览器调试环境）：`.venv/bin/python tests/real/run_real.py`。它把软件真正的启动代码（`app.main()`，pywebview 隐私模式、随机端口）连续启动 3 次，检查新手引导「不再提示」能不能挺过重启。浏览器调试环境里网页存储不会被清空，这类问题在 `tests/e2e` 里发现不了。需要 Qt 后端（`uv pip install PyQt6 PyQt6-WebEngine qtpy`，只在 Linux 无显示器环境下用；没装时跳过）。`tests/e2e/restart1.py` 是它在浏览器环境里的对应版本（每次启动换全新的浏览器和后端进程）。

@@ -35,7 +35,6 @@ const RADIAL_DEF = {
   sel: ['a:dup', 'a:subtract', 'a:unite', 'a:mirCopyH', 'x:rotate', 'a:lock', 'p:array', 'a:delete'],
 };
 const RADIAL_KEY = 'seedboxes.radialMenu';
-const WOOD = '#ead3ac';
 const SELECT = '#0ea5e9';
 const ROTATE_CURSOR = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='white' stroke-width='4.5'/><path d='M19 4v4h-4' stroke='white' stroke-width='4.5'/><path d='M19 12a7 7 0 1 1-2.05-4.95' stroke='%230ea5e9' stroke-width='2'/><path d='M19 4v4h-4' stroke='%230ea5e9' stroke-width='2'/></g></svg>") 12 12, alias`;   // 旋转手柄的光标（带白边的圆形箭头）
 const SMART = '#16a34a';
@@ -2136,7 +2135,6 @@ export class SketchEditor {
       this.revealPanel(def.panel);
       return;
     }
-    this.closeOverlap();
     this.finishDrawing();
     if (this.opts.jointPeer && this.opts.jointPeer.pair) this.cancelPairing(true);
     if (this.dimState) this.cancelDim();
@@ -2166,7 +2164,6 @@ export class SketchEditor {
   onDown(e) {
     const ev = e.event;
     this.clearConnHighlight();
-    this.closeOverlap();
     this.closeRotateBox();
     this.closeRotLabel();
     this.downView = new this.ps.Point(ev.offsetX, ev.offsetY);
@@ -2920,10 +2917,6 @@ export class SketchEditor {
     this.sel.clear();
     this.sel.add(shape);
     this.commit('已添加图形');                 // 和已有图形重叠也不提示（用户要求）；需要合并 / 挖掉时用「运算」
-  }
-
-  closeOverlap() {
-    if (this.overlapBox) { this.overlapBox.remove(); this.overlapBox = null; }
   }
 
   // 形状运算按钮：鼠标移上去，下方显示示意图和用法
@@ -4647,7 +4640,6 @@ export class SketchEditor {
   mDot(g, p) { new this.ps.Path.Circle({ center: p, radius: 3 / this.zoom, parent: g, fillColor: MEASURE }); }
 
   mHi(g, curve) {   // 高亮选中的边
-    const c = curve.clone ? null : null;
     const path = new this.ps.Path({ segments: [curve.segment1.clone(), curve.segment2.clone()], parent: g,
       strokeColor: MEASURE, strokeWidth: 4, strokeScaling: false, opacity: 0.45 });
     path.firstSegment.handleIn = null; path.lastSegment.handleOut = null;
@@ -5277,8 +5269,7 @@ export class SketchEditor {
     if (stacked) { this.toast('间距为 0：复制出来的图形会和原图形叠在一起（激光会重复切同一条线），请把间距改大一些', 'error'); return; }
     if (mats.length * this.sel.size > 2000) { this.toast('复制太多了（超过 2000 份）', 'error'); return; }
     const src = [...this.sel];
-    let n = 0;
-    mats.forEach((m) => this.regroup(src.map((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); n++; return k; })));
+    mats.forEach((m) => this.regroup(src.map((it) => { const k = this.cloneItem(it); this.convertTextIfRotated(k); k.transform(m); return k; })));
     // 只保留原来选中的对象（复制品不选中），并且不再显示同样的预览
     this.sel = new Set(src);
     this.arrDoneKey = this.arrayKey();
@@ -6323,7 +6314,7 @@ export class SketchEditor {
     else if (ev.key === 'Delete' || ev.key === 'Backspace') { if (this.drawing) this.cancelDrawing(); else this.deleteSel(); }
     else if (ev.key === 'Escape' && this.radialCfg) { this.closeRadialConfig(); }
     else if (ev.key === 'Escape' && this.tool === 'measure' && (this.meas && (this.meas.a || this.meas.has))) { this.clearMeasure(); this.status('已清除测量'); }
-    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape' && this.overlapBox) { this.closeOverlap(); this.status('已保持为描线'); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.cancelPairing(); this.status('已取消配对：第一条边保留为没配对的卡榫边'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else if (this.dimState) { this.cancelDim(); this.status('已取消标注'); } else if (this.libArmed) { this.libArmed = null; this.status('已结束放置图库图形'); this.renderToolOpts(); } else if (this.warp) { this.warpCancel(); } else { this.sel.clear(); this.refresh(); } }
+    else if (ev.key === 'Escape' && this.radialBox) { this.closeRadial(); } else if (ev.key === 'Escape') { if (this.opts.jointPeer && this.opts.jointPeer.pair) { this.cancelPairing(); this.status('已取消配对：第一条边保留为没配对的卡榫边'); this.renderToolOpts(); } else if (this.drawing) this.cancelDrawing(); else if (this.dimState) { this.cancelDim(); this.status('已取消标注'); } else if (this.libArmed) { this.libArmed = null; this.status('已结束放置图库图形'); this.renderToolOpts(); } else if (this.warp) { this.warpCancel(); } else { this.sel.clear(); this.refresh(); } }
     else if (ev.key === 'Enter') this.finishDrawing();
     else if (ev.key.startsWith('Arrow') && this.sel.size) {
       const s = ev.shiftKey ? 10 : (this.snapStep || 1);

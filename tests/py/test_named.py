@@ -36,5 +36,15 @@ json.dump(proj, open(old, 'w', encoding='utf-8'))
 assert api.open_project_path(old).get('project'), api.open_project_path(old)
 assert api.save_project(proj, old)['path'] == old
 assert api.recent_projects()[0]['name'] == '旧作品'
+# 原地保存写到一半出错（内容写不出去 / 磁盘满）：原来的文件必须完好，不能只剩半个文件；也不留下临时文件
+keep = os.path.join(tmp, 'SeedLaser', '完好.seedlaser')
+assert api.save_project(proj, keep)['path'] == keep
+before = open(keep, encoding='utf-8').read()
+r = api.save_project(dict(proj, sketches={'p1': {'items': [object()]}}), keep)      # object() 不能写成 JSON：以前会先把文件清空、写一半再报错
+assert 'error' in r, r
+assert open(keep, encoding='utf-8').read() == before, '保存失败后原文件被破坏了'
+r = api.save_project_named(dict(proj, sketches={'p1': {'items': [object()]}}), '完好', keep)
+assert 'error' in r and open(keep, encoding='utf-8').read() == before, r
+assert not [f for f in os.listdir(os.path.dirname(keep)) if f.endswith('.tmp')], os.listdir(os.path.dirname(keep))
 assert backend.project_stem('a.b.seedlaser') == 'a.b' and backend.project_stem('x.SEEDBOX.JSON') == 'x'
-print('PASS test_named：首次保存到项目文件夹（.seedlaser）、非法名字、同名不覆盖、原地保存、改名删旧文件、最近项目更新；另存为换成 .seedlaser；旧版 .seedbox.json 能打开、原地保存')
+print('PASS test_named：首次保存到项目文件夹（.seedlaser）、非法名字、同名不覆盖、原地保存、改名删旧文件、最近项目更新；保存出错时原文件完好、不留临时文件；另存为换成 .seedlaser；旧版 .seedbox.json 能打开、原地保存')

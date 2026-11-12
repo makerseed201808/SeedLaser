@@ -1,5 +1,5 @@
 """旋转手柄：单击 = 弹框输入角度；左右拖 = 微调（向右顺时针，2 像素 1°）。带断言。"""
-import asyncio, math, os
+import asyncio, os
 from _kit import seed_rect
 from playwright.async_api import async_playwright
 

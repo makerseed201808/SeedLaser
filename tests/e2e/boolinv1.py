@@ -2,7 +2,7 @@
 1) 面积守恒（前端 paper.js）：|A ∪ B| = |A| + |B| − |A ∩ B|，|A − B| = |A| − |A ∩ B|，|A ⊕ B| = |A ∪ B| − |A ∩ B|；
 2) 前后端一致：同一组（展平后的）多边形，paper.js 和 shapely 的并 / 交 / 差面积相差 ≤ 0.1%。
 带断言。固定随机种子，失败可复现。"""
-import asyncio, json, math, os, random, sys
+import asyncio, math, os, random, sys
 from playwright.async_api import async_playwright
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))

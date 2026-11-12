@@ -1,7 +1,7 @@
 """导出图纸前选尺寸：「已补偿」文件里外轮廓 = 画的尺寸 + 2 × 激光补偿；「原尺寸」= 画的尺寸；取消不导出。
 用 DXF 读回来量（需要 ezdxf），也检查导出里没有材料边框 / 校准尺。带断言。"""
 import asyncio, json, os, tempfile
-from _kit import run, ED
+from _kit import run
 
 TMP = tempfile.mkdtemp(prefix='seedlaser-burn-')
 

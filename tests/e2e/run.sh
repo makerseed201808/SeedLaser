@@ -1,5 +1,5 @@
 #!/bin/bash
-# 端到端冒烟测试：启动调试服务器（如果没在跑），按顺序跑 tests/e2e/*.py
+# 端到端测试：启动调试服务器（如果没在跑），按顺序跑 tests/e2e/*.py；最后汇总，有失败时退出码是 1
 # 依赖：.venv 里装 playwright（uv pip install playwright && .venv/bin/playwright install chromium）
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -8,13 +8,22 @@ URL="${SEEDBOXES_URL:-http://127.0.0.1:8765}"
 export E2E_OUT="${E2E_OUT:-/tmp/seedboxes-e2e/}"
 # 标题直接保存（rename1）写到这个临时文件夹，不碰「文稿/SeedLaser」
 export SEEDLASER_PROJECT_DIR="${SEEDLASER_PROJECT_DIR:-/tmp/sl-proj}"
+mkdir -p "$E2E_OUT"
 if ! curl -s -o /dev/null "$URL/index.html"; then
   (cd "$ROOT" && "$PY" scripts/dev_server.py 8765 > "$E2E_OUT.devserver.log" 2>&1 &)
   for i in $(seq 1 40); do curl -s -o /dev/null "$URL/index.html" && break; sleep 0.5; done
 fi
-TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(sheet1 keep1 drag1 ov1 tx1 bool1 bh fit1 rot1 layers1 panels1 radial1 line1 thick1 stage1 home1 smart1 precise1 rcfg1 measure1 file1 info1 bar1 overview1 mirror1 rename1 ref1 tabs1 migrate1 geo1 roundtrip1 boolinv1 perf1 tools_draw1 tools_edit1 tools_shape1 tools_joint1 tools_io1 exportburn1 conn1 conn2 conn3 conn4 conn5 conn6 layout1 lock1 dim1 lib1 make1 code1 erase1 slot1 c9small1 c10low1 prefs1 blank1 restart1 sf5)
+TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(sheet1 keep1 drag1 ov1 tx1 bool1 bh fit1 rot1 layers1 panels1 radial1 line1 thick1 stage1 home1 smart1 precise1 rcfg1 measure1 file1 info1 bar1 overview1 mirror1 rename1 ref1 tabs1 migrate1 geo1 roundtrip1 boolinv1 perf1 tools_draw1 tools_edit1 tools_shape1 tools_joint1 tools_io1 exportburn1 conn1 conn2 conn3 conn4 conn5 conn6 layout1 lock1 dim1 lib1 make1 code1 erase1 slot1 c9small1 c10low1 prefs1 blank1 restart1 tabclick1 sf5)
+FAILED=""
+NFAIL=0
 for t in "${TESTS[@]}"; do
   echo "=== $t"
   "$PY" "$ROOT/tests/e2e/$t.py" 2>&1 | grep -v "GL Driver"
+  if [ "${PIPESTATUS[0]}" -ne 0 ]; then FAILED="$FAILED $t"; NFAIL=$((NFAIL + 1)); fi
 done
 echo "截图在 $E2E_OUT"
+if [ "$NFAIL" -gt 0 ]; then
+  echo "❌ ${#TESTS[@]} 个里有 $NFAIL 个失败：$FAILED"
+  exit 1
+fi
+echo "✅ ${#TESTS[@]} 个全部通过"

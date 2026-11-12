@@ -1,4 +1,4 @@
-import asyncio, os, json
+import asyncio, os
 from playwright.async_api import async_playwright
 OUT=os.environ.get('E2E_OUT', '/tmp/seedboxes-e2e/')
 async def main():

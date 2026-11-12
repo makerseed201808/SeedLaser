@@ -180,7 +180,7 @@ def geometry_3d(sketch: dict) -> dict | None:
 def cut_polylines(sketch: dict, burn: float = 0.0) -> list[tuple[list, bool, bool]]:
     """闭合切割轮廓（按 burn 补偿后）→ [(点列, 是否闭合, 是否外轮廓)]。
     有水口（item["bridges"]）的轮廓在水口处断开，留下 bridge_w 宽的材料不切。"""
-    from shapely.geometry import LineString, Point
+    from shapely.geometry import Point
     from shapely.ops import substring
 
     solid = cut_solid(sketch)

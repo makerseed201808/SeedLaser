@@ -7,9 +7,9 @@
 
 ## 新 session 快速上手
 
-**当前状态（2026-11-07）**：在分支 `feat/3d-model` 开发（比 main 多 33 个提交，**未推送**，push 前先问用户）。
-二维编辑器 + 自由设计二维画板 + 3D 装配校验已成型。**产品定位、计划、开发要求和验收标准见 [docs/ROADMAP.md](docs/ROADMAP.md)——开工前必读。**
-之前的工作在 Cowork 云端会话里完成（用浏览器 + Playwright 验证）；端到端冒烟脚本已放进 `tests/e2e/`（`tests/e2e/run.sh`）。
+**当前状态（2026-11-12）**：版本 v0.5.1。在分支 `feat/3d-model` 开发，推到 GitHub `makerseed201808/SeedLaser` 的 `main`（远程名 `seedlaser`；`origin` 是早期的 liwlin/SeedBoxes，不再使用）。云端会话不能推送：由用户在 Mac 上双击 `scripts/push_github.command`，或靠后台自动推送（`scripts/setup_autopush.command` 安装；目前不稳定，见 docs/GOAL.md「发现的问题」）。
+二维画板（设计）+ 3D 装配校验 + 加工作业已成型，A / B / C 三条线都已完成。**当前任务清单是 [docs/GOAL.md](docs/GOAL.md)（已完成的清单存档在 docs/goals/）；产品定位、开发要求和验收标准见 [docs/ROADMAP.md](docs/ROADMAP.md)——开工前必读。**
+测试：`tests/e2e/run.sh`（浏览器端到端，约 20 分钟，最后汇总通过 / 失败）、`tests/py/test_*.py`、`tests/js/*.mjs`、`tests/real/run_real.py`（真实窗口）。界面偏好存在 `~/.seedlaser/prefs.json`（网页存储每次启动都会被清空，见 backend.py）。
 
 **改名（2026-11-07）**：产品改名 **SeedLaser**（界面、窗口标题、打包产物 SeedLaser.app / SeedLaser.exe、Logo 文字、文档）。**内部保持兼容**：仓库 / 文件夹名、pyproject 包名、localStorage 键 `seedboxes.*`、postMessage `seedboxes:*`、logo 文件名都没改；打开项目同时认 `app: SeedBoxes / SeedLaser`，新保存写 `SeedLaser`。
 **结构**：主页（#home：新建设计 / 快速建模 / 打开项目 + 最近项目 + 示例）→ 「设计」= FreeDesign 的三个板块（① 二维设计 ② 3D 装配 ③ 加工作业）；原 SeedBoxes 生成器 = 「快速建模」模型库（#welcome / #browse / #editor，左侧栏只在这里显示），模型页「放进设计 →」(workshop.importToDesign) 把板件 + 装配矩阵放进设计（板件局部坐标 = 模型轮廓坐标，poses = 模型 matrix）；在设计里中途去快速建模再放 = 放进当前设计（W.freeStash）。最近项目存 `~/.seedlaser/recent.json`（backend.recent_projects / open_project_path）。
@@ -29,13 +29,13 @@
 - Windows 单 .exe 分发（主要）；macOS .app（开发 + 可选分发）
 - 后期可能：自定义生成器 / 预设管理 / 激光切割机直连
 
-**用户偏好**：中文回复；注释中文可以；commit 信息近期用中文（feat(sketch)/fix(free) 前缀 + 中文说明）；大改动用双重 AI 审核；界面术语统一（切割 / 雕刻 / **描线**（不叫划线）/ 卡榫 / 插槽 / 连接点）；任务要「做深」不要「扩大」。
+**用户偏好**：中文回复；注释中文可以；commit 信息近期用中文（feat(sketch)/fix(free) 前缀 + 中文说明）；大改动用双重 AI 审核；界面术语统一（切割 / 雕刻 / **描线**（不叫划线）/ 卡榫 / 插槽 / **水口**（不叫连接点））；任务要「做深」不要「扩大」。
 
 ---
 
 ## 待办任务
 
-当前开发计划（A 线：二维基本功打磨；B 线：连接与定位）见 **docs/ROADMAP.md**。
+当前任务清单见 **docs/GOAL.md**（A 线：二维基本功打磨、B 线：连接与定位、C 线：补全常用功能 + 一键造物，都已完成）；产品定位和开发要求见 **docs/ROADMAP.md**。
 
 发布相关（远期）：
 - Cython 加密发布（脚本已就绪：`build_pyd.bat` → `build_uv.bat`；回退：`backend.py.src` 改回 `backend.py`，删 `.pyd`）
@@ -93,28 +93,42 @@ cl     :: 应输出 Microsoft (R) C/C++ Optimizing Compiler Version 19.44.xxx
 ## 文件结构
 
 ```
-SeedBoxes/
+SeedLaser/（Mac 上的文件夹名仍是 SeedBoxes）
 ├── app.py                  PyWebView 入口
-├── backend.py              JS↔Python 桥接 API（核心业务）
-├── model3d.py              3D 模型 / 局部修改（见上节）
+├── backend.py              JS↔Python 桥接 API（生成器、渲染导出、项目文件、最近项目、界面偏好、i18n）
+├── version.py              版本号（和 pyproject.toml 一致，tests/py/test_version.py 检查）
+├── model3d.py              快速建模的 3D 模型 / 自动装配 / 干涉检查 / 字体（见上节）
+├── sketch2d.py             二维草图 → 导出图纸 / 3D 几何（展平、实体判定、补偿、水口、共边、文字排版、描摹）
+├── freedesign.py           自由设计（FreeDesign 生成器）：按画板位置或排版导出、3D 用的板件列表
+├── dxfout.py               内置 DXF 导出（SVG → DXF R12）
+├── codes2d.py              二维码 / 条形码轮廓
 ├── web/                    前端
-│   ├── index.html / app.js / styles.css
-│   ├── workshop.js         3D 视图 + 板件清单 + 单块板编辑器
+│   ├── index.html / app.js / styles.css    主页、快速建模、文件、标签
+│   ├── workshop.js         设计三板块、3D 视图与装配、板件清单、二维画板 ↔ 项目数据
+│   ├── sketch2d.js         二维画板（paper.js）：工具、属性面板、板件识别、连接、图库、造物……
+│   ├── sketch-import.js    DXF 解析、图片二值化（描摹）
+│   ├── fit-calc.js         卡榫测试样的换算
 │   ├── dev-bridge.js       浏览器调试桥（?dev=1 时生效）
-│   ├── vendor/three/       three.js r169 + OrbitControls（MIT）
+│   ├── library/builtin.json   图库内置件（scripts/make_library.py 生成）
+│   ├── vendor/             three.js r169 + OrbitControls、paper.js（MIT）
 │   ├── seedboxes-logo.svg  主 logo
 │   └── makerseed-logo.svg  种子创客工坊标识
+├── web_sketchforge/        内嵌 3D 编辑器的构建产物（SketchForge-3D 改版，AGPL-3.0）；sketchforge/ 是补丁和构建脚本
+├── i18n/zh_CN.po           较新的上游中文翻译
+├── tests/                  e2e（Playwright）/ py / js / real（真实窗口）/ fixtures
+├── docs/                   GOAL.md（当前任务清单）、goals/（已完成的清单）、ROADMAP.md
 ├── pyproject.toml          uv 项目（boxes 通过 git URL @release-1.2 引用）
 ├── uv.lock                 依赖锁文件
 ├── SeedLaser.spec          PyInstaller 配置（importlib 检测 BOXES_ROOT）
 ├── logo.ico                .exe 图标 + 开发模式窗口图标
 ├── SeedBoxes_logo_vector.svg   主 logo 源
 ├── run_uv.bat / build_uv.bat                       开发 / 打包（Windows）
-├── run_mac.sh / build_mac.sh                       开发 / 打包（macOS）
-├── scripts/fetch_boxes_assets.py                   下载上游 static/ + locale/ → boxes_assets/（gitignore）
-├── .gitattributes                                   .bat 强制 CRLF / .sh 强制 LF
+├── run_mac.sh / run_mac.command / build_mac.sh     开发 / 打包（macOS）
+├── scripts/                                        dev_server.py（浏览器调试）、fetch_boxes_assets.py（下载上游 static/ + locale/ → boxes_assets/，gitignore）、
+│                                                   make_boxes_mirror.sh、make_library.py、push_github.command、setup_autopush.command + autopush.sh
+├── .gitattributes                                   .bat 强制 CRLF / .sh、.command 强制 LF
 ├── build_pyd.bat / setup_ext.py / install_msvc.bat 加密路径
-├── README.md / DEVELOPMENT.md / CLAUDE.md / LICENSE   文档
+├── README.md / DEVELOPMENT.md / CHANGELOG.md / CLAUDE.md / LICENSE   文档
 ```
 
 ---
@@ -137,10 +151,10 @@ SeedBoxes/
 - **自由设计磁吸**（sfTrySnapFree / mateOptions）：草图 item.joints = [{type: a|b|slot|mortise, iv（A 齿区间，沿边 mm，居中对称）, k（A 齿数）, depth, L, mode: count|width, count, tab, gap, play?, a, b, c(=a+朝外法线)}]；配对比较 iv（正向或反向）；旧数据只有 k（段数）时按奇数段推算；卡榫 / 插槽工具单击已有的可修改（先 straightenEdge 恢复直边再重做），随图形变换（sketch2d.js hookJoints 包装 item.transform）；按板件局部坐标构造目标帧（只取行列式同号的真旋转），乘以另一块板当前摆放；范围 25 mm / 35°
 - **自由设计自动拼装**（freeAutoAssemble）：卡榫最多的板做基准，逐对挑候选姿态（check_pose 不穿透 → 接触多 → 离已拼部分近，第一块优先往上）；**排版**（freedesign.nest）：天际线左下角法，允许 90° 旋转，sheet_w/sheet_h/part_gap 是 FreeDesign 的参数，结果说明放在预览返回的 info
 - **磁吸**（workshop.js sfTrySnap）：相邻关系 = 默认摆放下 check_pose 的 touch / collide；目标 = A 当前 · A 默认⁻¹ · B 默认；中心 10 mm / 20° 内且正在靠近才吸附；吸附后在编辑器里删掉旧网格重新导入
-- **二维编辑进阶**：导入在 web/sketch-import.js（DXF 解析、图片在浏览器里二值化成矩形）+ 后端 sketch2d.trace_rects（shapely 合并，不依赖 Pillow）；文字排版 sketch2d.text_layout（逐字形、圆弧 / 沿路径、焊接）；连接点存 item.bridges，导出时 cut_polylines 在连接点处断开（缺口 = 宽度 + 2×burn）；共边切割 freedesign common_line（间距 = 2×burn，dedupe_lines 去重叠线）；item.transform 被包装（hookJoints）：卡榫、连接点、可编辑文字的参数跟着变换（非平移时文字转成路径）；参考线 / 连接点宽度存在草图根上（guides / bridge_w）
+- **二维编辑进阶**：导入在 web/sketch-import.js（DXF 解析、图片在浏览器里二值化成矩形）+ 后端 sketch2d.trace_rects（shapely 合并，不依赖 Pillow）；文字排版 sketch2d.text_layout（逐字形、圆弧 / 沿路径、焊接）；水口存 item.bridges，导出时 cut_polylines 在水口处断开（缺口 = 宽度 + 2×burn）；共边切割 freedesign common_line（间距 = 2×burn，dedupe_lines 去重叠线）；item.transform 被包装（hookJoints）：卡榫、水口、可编辑文字的参数跟着变换（非平移时文字转成路径）；参考线 / 水口宽度存在草图根上（guides / bridge_w）
 - **自由设计二维画板**（sketch2d.js sheetMode + workshop.js composeSheet / applySheet / openSheet）：首页「自由设计」直接进画板，part.sheet={w,h}（存 project.free.sheet）。recognizeParts：最外层闭合切割轮廓（loopDepths 深度为偶数）= 一块板，其余图形按包围盒中心归最内层的板，归不进去的存 free.loose（不导出）。板件轮廓 item 带 `pid` 和 `origin=[x,y,角度]`：整块平移 / 旋转时 origin 跟着变（排版），改节点 / 缩放不动（改形状）；存回时按 origin 把坐标变回板件局部坐标 → free.parts[{id,name,w,h,sx,sy,sa}]。**排版位置和 3D 装配位置互相独立**：freedesign.model_parts / render 用 sx,sy,sa；装配 / 吸附后所有参与的板都写 W.project.poses（自由设计不因「等于平铺矩阵」而删 pose）
 - **跨板卡榫配对**：画板里卡榫工具先点 A 边（做 A 齿）→ 自动切到 B 型并带 jointPeer → 再点另一块板的边，两个 joint 写同一个 `pair` id；freeAutoAssemble 中带不同 pair 的不配
-- **二维交互约定**：新图形和已有图形交叉 → 暂作描线并弹窗（切割 / 雕刻 / 描线 / 并入板 / 从板上减去）；交叉的两个切割轮廓重叠区标淡红（实际会切出单独小块）；单选形状运算 = 和重叠图形运算（差集：选中的当「刀」切掉别人、刀删除；交集：选中的只留重叠；并集：合并，沿用带 pid 的那个；异或仍需 Shift 选 2 个）；Ctrl/⌘ 拖动画正圆 / 正方形；renderToolOpts 重画前先 blur 正在输入的框（否则改文字不生效）
+- **二维交互约定**：新图形和已有图形交叉时不弹窗、不标色（2026-11 按用户要求去掉；互相交叉的切割轮廓按并集算实体，完全在另一个轮廓里面的才是孔）；单选形状运算 = 和重叠图形运算（差集：选中的当「刀」切掉别人、刀删除；交集：选中的只留重叠；并集：合并，沿用带 pid 的那个；异或仍需 Shift 选 2 个）；Ctrl/⌘ 拖动画正圆 / 正方形；renderToolOpts 重画前先 blur 正在输入的框（否则改文字不生效）
 - **3D 编辑器同步**：打开时 sfSceneComplete 校验每块启用的板都在场景里，缺了就重新导入；编辑器里删掉的板只从装配场景拿走（不改「使用」），下次打开放回
 - **加工参数**：app.js state.laser（localStorage + 项目文件），save(…, laser) 时 backend._write_laser_sheet 写 `<图纸名>_加工参数.txt`
 - **3D 编辑器**（SketchForge-3D 改版，AGPL-3.0，详见 `sketchforge/README.md`）：`backend.sketchforge_url()` 首次调用时用 http.server 把 `web_sketchforge/` 挂到 127.0.0.1:47321（占用则随机端口）；workshop.js 用 iframe（`#sf-host`，全窗口）+ postMessage（`seedboxes:command/result/ready/changed/home`，命令同 SketchForge MCP）驱动。导入：板件三角网格（含开孔）整体平移到原点、底面贴地（`SF.off`）；回读：每块板 3 个参考顶点反求刚体变换 → `W.project.poses`。改界面文字：`sketchforge/` 里改补丁中的 `public/seedboxes-zh.js` 词典后 `bash sketchforge/build.sh` 重建；index.html 的 CSP 需保留 `frame-src http://127.0.0.1:*`
@@ -235,9 +249,9 @@ build_pyd.bat && build_uv.bat
 5. **PyWebView JS API 在独立线程** — 不要假定 main thread
 6. **git 安装的 boxes 不带 static/（作品照片）** — 由 `scripts/fetch_boxes_assets.py` 按 uv.lock 锁定的 commit 下载；升级 boxes 后要重新跑（commit 变化会自动重新下载）
 7. **release-1.2 自带的 zh_CN 翻译过时** — 已用 `i18n/zh_CN.po`（上游 master，pinned commit 见 i18n/README.md）覆盖，spec 会打包 i18n/
-10. **release-1.2 的生成器 / 照片数比旧 boxes-master 少** — 实测分组内 163 个生成器，145 个有照片、18 个自渲染
+8. **release-1.2 的生成器 / 照片数比旧 boxes-master 少** — 实测分组内 163 个生成器，145 个有照片、18 个自渲染
 9. **连不上 GitHub 的电脑** — 在能访问 GitHub 的机器上跑 `scripts/make_boxes_mirror.sh` 生成 `third_party/boxes.git`（gitignore，约 30 MB），连同文件夹拷过去；`run_mac.sh` / `build_mac.sh` 检测到 GitHub 不通时用 `GIT_CONFIG_*` 环境变量把 boxes 的 git URL 临时改写到本地镜像（不改全局 git 配置）。`SEEDBOXES_USE_MIRROR=1` 可强制使用。Windows .bat 尚未接入
-8. **macOS .app 未签名** — Gatekeeper 拦截，需右键打开；产物架构随打包机
+10. **macOS .app 未签名** — Gatekeeper 拦截，需右键打开；产物架构随打包机
 
 ---
 

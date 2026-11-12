@@ -28,4 +28,17 @@ os.remove(new)
 r = api.open_project_path(new)
 assert 'error' in r and '已从最近项目里去掉' in r['error']
 assert [x['name'] for x in api.recent_projects()] == ['笔筒']
-print('PASS test_recent：旧项目可打开、最近项目去重排序、不存在的文件自动移除')
+# 测试 / 调试模式（设了 SEEDLASER_PROJECT_DIR，比如 tests/e2e 的调试服务器）不能改用户真正的「最近项目」（~/.seedlaser/recent.json）：
+# 以前跑一遍端到端测试，用户主页上的最近项目会被 12 个 /tmp 下的测试文件顶掉（2026-11-12 检查发现）
+import subprocess
+home, pd = tempfile.mkdtemp(), tempfile.mkdtemp()
+code = ("import backend, json, os; api = backend.Api(); "
+        "r = api.save_project({'app': 'SeedLaser', 'version': 2, 'generator': 'FreeDesign', 'free': {'parts': []}}, "
+        "os.path.join(os.environ['SEEDLASER_PROJECT_DIR'], 't.seedlaser')); print(json.dumps([r, api.recent_projects()]))")
+out = subprocess.run([sys.executable, '-c', code], cwd=os.path.join(os.path.dirname(__file__), '..', '..'), capture_output=True, text=True,
+                     env={**os.environ, 'HOME': home, 'USERPROFILE': home, 'SEEDLASER_PROJECT_DIR': pd})
+assert out.returncode == 0, out.stderr[-500:]
+saved, rec = json.loads(out.stdout.strip().splitlines()[-1])
+assert 'path' in saved and rec and rec[0]['name'] == 't', (saved, rec)             # 测试模式下最近项目照常能用
+assert not os.path.exists(os.path.join(home, '.seedlaser', 'recent.json')), '测试模式写了用户目录里的最近项目'
+print('PASS test_recent：旧项目可打开、最近项目去重排序、不存在的文件自动移除；测试模式不碰用户目录里的最近项目')

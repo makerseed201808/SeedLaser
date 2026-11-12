@@ -5,7 +5,9 @@
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 REPO="$1"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
-notify() { osascript -e "display notification \"$1\" with title \"SeedLaser\"" >/dev/null 2>&1; }
+notify() { osascript -e "display notification \"$1\" with title \"SeedLaser\"" >/dev/null 2>&1; return 0; }
+# 联网的 git 命令：传输卡住（低于 1 KB/s 超过 30 秒）就放弃，下次再试，不让一次运行一直挂着
+gitnet() { git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 "$@"; }
 
 # 后台程序读「桌面」要权限：cd 能成功但读不了内容，所以用 ls 实测一下
 if ! cd "$REPO" 2>/dev/null || ! ls "$REPO/.git" >/dev/null 2>&1; then
@@ -14,24 +16,34 @@ if ! cd "$REPO" 2>/dev/null || ! ls "$REPO/.git" >/dev/null 2>&1; then
 fi
 
 # 同一时间只跑一个；等几秒让提交 / 打标签写完
-LOCK="/tmp/seedlaser-autopush.lock"
-mkdir "$LOCK" 2>/dev/null || exit 0
+LOCK="${SEEDLASER_AUTOPUSH_LOCK:-/tmp/seedlaser-autopush.lock}"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  # 上一次运行被强制结束（合盖睡眠时网络卡住、被系统杀掉）的话，锁不会被删，之后每次运行都会在这里悄悄退出、再也不推。
+  # 正常一次运行不到 1 分钟：锁超过 10 分钟就是残留的，清掉重来
+  if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+    log "⚠ 发现残留的锁（上一次运行没有正常结束），已清除，继续推送"
+    rmdir "$LOCK" 2>/dev/null
+    mkdir "$LOCK" 2>/dev/null || exit 0
+  else
+    exit 0                                  # 另一次运行正在进行
+  fi
+fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
-sleep 5
+sleep "${SEEDLASER_AUTOPUSH_WAIT:-5}"
 
 BR="$(git branch --show-current)"
 [ -n "$BR" ] || exit 0
 git remote get-url seedlaser >/dev/null 2>&1 || { log "没有 seedlaser 远程，跳过"; exit 0; }
 [ -e .git/index.lock ] && exit 0          # 正在提交，下次再推
 
-git fetch -q seedlaser 2>/dev/null
+gitnet fetch -q seedlaser 2>/dev/null
 L="$(git rev-parse HEAD)"
 R="$(git rev-parse -q --verify refs/remotes/seedlaser/main 2>/dev/null)"
 pushed=""
 
 if [ "$L" != "$R" ]; then
   if [ -z "$R" ] || git merge-base --is-ancestor "$R" "$L"; then
-    if out="$(git push -q seedlaser "$BR:main" 2>&1)"; then
+    if out="$(gitnet push -q seedlaser "$BR:main" 2>&1)"; then
       pushed="提交 $(git log -1 --format=%h)"
     else
       log "❌ 推送分支失败：$out"; notify "推送到 GitHub 失败，详见日志"; exit 1
@@ -43,9 +55,9 @@ if [ "$L" != "$R" ]; then
   fi
 fi
 
-missing="$(comm -23 <(git tag | sort) <(git ls-remote --tags seedlaser 2>/dev/null | sed -n 's#.*refs/tags/\([^^]*\)$#\1#p' | sort -u))"
+missing="$(comm -23 <(git tag | sort) <(gitnet ls-remote --tags seedlaser 2>/dev/null | sed -n 's#.*refs/tags/\([^^]*\)$#\1#p' | sort -u))"
 if [ -n "$missing" ]; then
-  if out="$(git push -q seedlaser --tags 2>&1)"; then
+  if out="$(gitnet push -q seedlaser --tags 2>&1)"; then
     pushed="${pushed:+$pushed，}标签 $(echo $missing)"
   else
     log "❌ 推送标签失败：$out"; notify "推送标签失败，详见日志"; exit 1
@@ -56,3 +68,4 @@ if [ -n "$pushed" ]; then
   log "✅ 已推送：$pushed"
   notify "已推送到 GitHub：$pushed"
 fi
+exit 0

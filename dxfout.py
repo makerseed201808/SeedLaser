@@ -205,7 +205,7 @@ def _local(tag):
 
 
 def parse_svg(svg_text: str):
-    """→ (宽 mm, 高 mm, [(图层颜色, 点列 mm, 是否闭合)], [(文字, x, y, 字高, 颜色)])，坐标 y 向下。"""
+    """→ (宽 mm, 高 mm, [(图层颜色, 点列 mm, 是否闭合)], [(文字, x, y, 字高, 颜色, 对齐, 旋转角°)])，坐标 y 向下，旋转角按 DXF（逆时针为正）。"""
     root = ET.fromstring(svg_text.encode("utf-8") if isinstance(svg_text, str) else svg_text)
 
     def mm(v, default):
@@ -252,8 +252,11 @@ def parse_svg(svg_text: str):
                 scale = math.hypot(m[2], m[3]) or 1
                 fill = _color(_style(el, "fill")) or stroke
                 if (_style(el, "dominant-baseline") or "") in ("hanging", "text-before-edge"):
-                    py += 0.8 * (fsize or 3) * scale         # SVG 按字顶对齐，DXF 按基线：往下挪约一个字高
-                texts.append((txt, px, py, (fsize or 3) * scale, fill, anchor))
+                    # SVG 按字顶对齐，DXF 按基线：沿文字自己的「下」方向挪约一个字高（文字旋转时方向跟着转）
+                    px += 0.8 * (fsize or 3) * m[2]
+                    py += 0.8 * (fsize or 3) * m[3]
+                rot = -math.degrees(math.atan2(m[1], m[0]))      # SVG 的 y 向下，DXF 的 y 向上：角度反号
+                texts.append((txt, px, py, (fsize or 3) * scale, fill, anchor, rot))
             return
         for ch in el:
             walk(ch, m, stroke, fsize, anchor)
@@ -309,7 +312,7 @@ def svg_to_dxf(svg_text: str) -> str:
     for color, _pts, _c in lines:
         name, aci = _layer(color)
         used[name] = aci
-    for _t, _x, _y, _h, color, _a in texts:
+    for _t, _x, _y, _h, color, _a, _r in texts:
         name, aci = _layer(color if color in LAYERS else (255, 0, 0))
         used[name] = aci
     out = []
@@ -355,10 +358,12 @@ def svg_to_dxf(svg_text: str) -> str:
         for x, y in P:
             pair(0, "VERTEX"); pair(8, name); pair(10, _f(x)); pair(20, _f(y)); pair(30, 0)
         pair(0, "SEQEND"); pair(8, name)
-    for txt, x, y, h, color, anchor in texts:
+    for txt, x, y, h, color, anchor, rot in texts:
         name, _aci = _layer(color if color in LAYERS else (255, 0, 0))
         safe = txt.replace("\n", " ")
         pair(0, "TEXT"); pair(8, name); pair(10, _f(x)); pair(20, _f(H - y)); pair(30, 0); pair(40, _f(h)); pair(1, safe)
+        if abs(rot) > 1e-6:                            # 旋转的文字（竖着的尺寸标注）
+            pair(50, _f(rot % 360))
         if anchor in ("middle", "end"):                # 水平对齐：1 = 居中，2 = 右对齐（对齐点 11/21）
             pair(72, 1 if anchor == "middle" else 2); pair(11, _f(x)); pair(21, _f(H - y)); pair(31, 0)
     pair(0, "ENDSEC")

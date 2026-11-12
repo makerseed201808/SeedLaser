@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <img src="https://img.shields.io/badge/python-3.10-blue.svg" alt="Python" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey.svg" alt="Platform" />
-  <a href="https://github.com/makerseed201808/SeedLaser/releases/tag/v0.4.1"><img src="https://img.shields.io/badge/release-v0.4.1-brightgreen.svg" alt="Release" /></a>
+  <a href="https://github.com/makerseed201808/SeedLaser/tree/v0.5.1"><img src="https://img.shields.io/badge/release-v0.5.1-brightgreen.svg" alt="Release" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/更新日志-CHANGELOG-orange.svg" alt="Changelog" /></a>
 </p>
 
@@ -27,7 +27,7 @@ SeedLaser 是 [种子创客工坊（MakerSeed）](https://github.com/makerseed) 
 2. **3D 用来检查，而不是用来建模**：二维画好的板件一键拼成 3D，在切割之前就看到「拼起来是什么样、哪里撞了、哪里没接上」，再回到二维里改。
 3. **创新点在二维和三维之间**：板件怎么连接（卡榫、插槽）、位置对不对，是学生最容易出错的地方，也是 SeedLaser 重点解决的问题。
 
-「快速建模」模型库来自开源项目 [Boxes.py](https://github.com/florianfesti/boxes)：170 多个盒子、托盘、收纳模型，调好尺寸就能「放进设计」继续改。
+「快速建模」模型库来自开源项目 [Boxes.py](https://github.com/florianfesti/boxes)：160 多个盒子、托盘、收纳模型，调好尺寸就能「放进设计」继续改。
 
 ---
 
@@ -69,7 +69,7 @@ SeedLaser 是 [种子创客工坊（MakerSeed）](https://github.com/makerseed) 
 </p>
 
 - **主页**：新建设计 / 快速建模 / 打开项目三个入口，最近项目和示例（卡榫测试样、批量名牌、基础收纳盒）。
-- **快速建模**：Boxes.py 的 170 多个生成器，中文界面和作品参考图；「放进设计 →」把板件连同装配位置放进二维画板。
+- **快速建模**：Boxes.py 的 160 多个生成器，中文界面和作品参考图；「放进设计 →」把板件连同装配位置放进二维画板。
 - **多开项目**：顶部标签栏像 Fusion 一样同时开多个项目，点标签切换，⌂ 回主页，＋ 新建。
 - **文件**：二维画板左上角「文件」菜单：新建、打开、最近打开、保存（⌘S）、另存为（⇧⌘S）、导入 SVG / DXF / 图片描摹（⌘I）、导出图纸。项目文件扩展名为 `.seedlaser`（内容是 JSON；旧版的 `.seedbox.json` 照样能打开）。
 
@@ -108,9 +108,9 @@ run_uv.bat
 
 macOS 只能在 Mac 上打包，产物架构和打包机一致（Apple 芯片打出的是 arm64）。未签名的 .app 第一次打开会被拦截：右键 → 打开，或在「系统设置 → 隐私与安全性」里点「仍要打开」。
 
-### 启用 DXF / PDF / GCode 输出
+### 启用 PDF / GCode / PLT 输出
 
-默认可以输出 SVG / PS / LBRN2。要输出 DXF / GCode / PLT / PDF，需要装两个命令行工具，装好后重启软件，格式下拉框会自动出现新选项：
+默认可以输出 SVG / DXF / PS / LBRN2（DXF 是内置转换，不需要装别的软件）。要输出 GCode / PLT / PDF，需要装两个命令行工具，装好后重启软件，格式下拉框会自动出现新选项：
 
 ```bash
 brew install pstoedit ghostscript                    # macOS
@@ -135,8 +135,8 @@ flowchart LR
   end
   subgraph PY["Python 后端"]
     api["backend.py<br/>JS ↔ Python API"]
-    s2["sketch2d.py<br/>偏移 / 布尔 / 文字 / 导入 / 导出"]
-    fd["freedesign.py<br/>板件识别 · 排版 · 自动拼装"]
+    s2["sketch2d.py<br/>实体判定 / 偏移 / 文字 / 描摹 / 导出"]
+    fd["freedesign.py<br/>自由设计 · 排版 · 导出"]
     m3["model3d.py<br/>板件 → 3D 网格 · 碰撞检查"]
     bx["Boxes.py<br/>快速建模生成器"]
   end
@@ -163,30 +163,38 @@ flowchart LR
 SeedLaser/
 ├── app.py                     PyWebView 入口（窗口、启动）
 ├── backend.py                 JS ↔ Python API：生成器、渲染导出、项目文件、最近项目、i18n
-├── sketch2d.py                二维几何：偏移、布尔、实体判定、文字排版、SVG/DXF 导入、描摹
-├── freedesign.py              自由设计：板件识别、排版、按卡榫自动拼装
-├── model3d.py                 板件 → 3D 网格、干涉 / 咬合检查、字体
+├── version.py                 版本号（和 pyproject.toml 一致）
+├── sketch2d.py                二维几何：曲线展平、实体判定、偏移、文字排版、描摹，导出时的补偿 / 水口 / 共边
+├── freedesign.py              自由设计（FreeDesign 生成器）：按画板位置或排版（天际线）导出、3D 用的板件列表
+├── model3d.py                 快速建模的板件 → 3D、自动装配、干涉 / 咬合检查、字体
+├── dxfout.py                  内置 DXF 导出（SVG → DXF R12，按图层）
+├── codes2d.py                 二维码 / 条形码（Code 128）轮廓
 ├── web/                       前端
 │   ├── index.html / styles.css
 │   ├── app.js                 主页、快速建模、文件（打开 / 保存 / 导出 / 最近项目）
 │   ├── workshop.js            设计三板块、3D 视图与装配、二维画板 ↔ 项目数据
-│   ├── sketch2d.js            二维画板（工具、属性面板、辅助线、测量、文件菜单…）
+│   ├── sketch2d.js            二维画板（工具、属性面板、板件识别、辅助线、测量、文件菜单…）
 │   ├── sketch-import.js       DXF 解析、图片二值化（描摹）
+│   ├── library/               图库内置件（builtin.json，由 scripts/make_library.py 生成）
 │   ├── fit-calc.js            卡榫测试样的换算
 │   ├── dev-bridge.js          浏览器调试时模拟 pywebview
 │   └── vendor/                paper.js、three.js
 ├── web_sketchforge/           内嵌 3D 编辑器（SketchForge-3D 构建产物，AGPL-3.0）
 ├── sketchforge/               SketchForge 改版补丁和构建脚本
 ├── tests/
-│   ├── e2e/                   浏览器端到端测试（Playwright，run.sh 全部运行）
+│   ├── e2e/                   浏览器端到端测试（Playwright，run.sh 全部运行，最后汇总）
 │   ├── js/  py/               单元测试
+│   ├── real/                  真实窗口检查（走软件真正的启动代码）
+│   └── fixtures/              旧版本项目文件样本、导出 golden
 ├── scripts/
 │   ├── dev_server.py          浏览器调试服务器
 │   ├── fetch_boxes_assets.py  下载上游作品照片和翻译
 │   ├── make_boxes_mirror.sh   离线镜像
+│   ├── make_library.py        生成图库内置件
 │   ├── push_github.command    手动推送到 GitHub（分支 + 版本标签）
-│   └── setup_autopush.command 安装 Mac 后台自动推送
-├── docs/                      ROADMAP、截图
+│   ├── setup_autopush.command 安装 Mac 后台自动推送
+│   └── autopush.sh            自动推送脚本（由上一个脚本安装，不用手动运行）
+├── docs/                      GOAL（当前任务清单）、goals/（已完成的清单）、ROADMAP、截图
 ├── pyproject.toml / uv.lock   依赖（boxes 通过 git 引用 release-1.2）
 ├── SeedLaser.spec             PyInstaller 打包配置
 ├── run_mac.sh / run_mac.command / build_mac.sh    macOS 运行 / 打包
@@ -202,12 +210,12 @@ SeedLaser/
 
 ```bash
 uv run python scripts/dev_server.py &      # 先启动调试服务器
-tests/e2e/run.sh                           # 全部端到端测试（也可以 run.sh file1 bar1 只跑几个）
-node tests/js/fit_calc.test.mjs            # 卡榫测试样换算
-uv run python tests/py/test_recent.py      # 最近项目 / 打开旧项目
+tests/e2e/run.sh                           # 全部端到端测试（也可以 run.sh file1 bar1 只跑几个）；最后汇总，有失败时退出码是 1
+for t in tests/js/*.mjs; do node "$t"; done                     # 前端纯函数（几何、齿轮、卡榫测试样换算、描摹前调节）
+for t in tests/py/test_*.py; do uv run python "$t"; done        # 后端（导出、DXF、项目文件、图库、偏好……）
 ```
 
-端到端测试都带断言，覆盖画板的主要操作（画图、选择移动、旋转、形状运算、测量、文件菜单、菜单栏……）和设计流程（快速建模放进设计、3D 装配无穿透、卡榫测试样换算）。每次改动后全部跑一遍。
+端到端测试绝大部分带断言（还有 6 个早期脚本只打印结果、不判断对错：sheet1、keep1、drag1、tx1、bh、sf5，见 `tests/e2e/README.md`），覆盖画板的主要操作（画图、选择移动、旋转、形状运算、测量、文件菜单、菜单栏……）和设计流程（快速建模放进设计、3D 装配无穿透、卡榫测试样换算）。每次改动后全部跑一遍。
 
 ---
 
